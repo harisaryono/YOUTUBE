@@ -1262,10 +1262,8 @@ class OptimizedDatabase:
 
                 query += """
                     ORDER BY
-                        CASE WHEN v.channel_rank IS NULL THEN 1 ELSE 0 END,
-                        v.channel_rank ASC,
-                        v.upload_date DESC,
-                        v.created_at DESC,
+                        COALESCE(NULLIF(v.upload_date, ''), '00000000') DESC,
+                        COALESCE(NULLIF(v.created_at, ''), '0000-00-00 00:00:00') DESC,
                         v.id DESC
                     LIMIT ? OFFSET ?
                 """
