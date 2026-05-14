@@ -10,6 +10,10 @@ loop:
   # Sleep after errors (seconds)
   error_sleep_seconds: 1800
 
+orchestrator:
+  # If YouTube backlog crosses this count, transcript/audio_download are boosted.
+  youtube_backlog_boost_threshold: 500
+
 system:
   # Minimum free disk space (GB) before stopping jobs
   min_free_disk_gb: 5

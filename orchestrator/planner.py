@@ -12,15 +12,25 @@ from . import db_queries
 
 
 # Priority order for job types (lower = higher priority).
-# Safe/local stages are scheduled first so the daemon keeps moving even when
-# YouTube-dependent stages are cooling down or blocked.
-JOB_PRIORITY = {
+# Base mode favors safe/local stages first. When YouTube backlog grows, the
+# planner promotes transcript/audio_download so the pipeline keeps feeding.
+JOB_PRIORITY_LOCAL_FIRST = {
     "import_pending": 0,
     "resume": 1,
     "format": 2,
     "asr": 3,
     "transcript": 4,
     "audio_download": 5,
+    "discovery": 6,
+}
+
+JOB_PRIORITY_YOUTUBE_FIRST = {
+    "import_pending": 0,
+    "transcript": 1,
+    "audio_download": 2,
+    "asr": 3,
+    "resume": 4,
+    "format": 5,
     "discovery": 6,
 }
 
@@ -39,8 +49,10 @@ def _batch_description(stage: str, limit: int, noun: str) -> str:
     return f"{stage.capitalize()} up to {limit} pending {noun}"
 
 
-def _priority(stage: str) -> int:
-    return int(JOB_PRIORITY.get(stage, 99))
+def _adaptive_priority(stage: str, youtube_pressure: int, boost_threshold: int) -> int:
+    if youtube_pressure >= boost_threshold:
+        return int(JOB_PRIORITY_YOUTUBE_FIRST.get(stage, 99))
+    return int(JOB_PRIORITY_LOCAL_FIRST.get(stage, 99))
 
 
 def plan_jobs(
@@ -54,6 +66,7 @@ def plan_jobs(
     Each job represents one batch of work for one stage.
     """
     jobs: list[dict[str, Any]] = []
+    boost_threshold = int(config.get("orchestrator", {}).get("youtube_backlog_boost_threshold", 500) or 500)
 
     # 1. Import pending updates (always first)
     pending_count = db_queries.count_pending_imports(state)
@@ -67,15 +80,22 @@ def plan_jobs(
             "count": pending_count,
         })
 
+    # Precompute backlog counts so the planner can adjust priorities adaptively.
+    resume_count = db_queries.count_videos_need_resume(config, state)
+    format_count = db_queries.count_videos_need_format(config, state)
+    asr_count = db_queries.count_videos_need_asr(config, state)
+    transcript_count = db_queries.count_videos_need_transcript(config, state)
+    audio_count = db_queries.count_videos_need_audio_download(config, state)
+    youtube_pressure = transcript_count + audio_count
+
     # 2. Resume — max 1 batch per cycle
     if config.get("resume", {}).get("enabled", True):
-        resume_count = db_queries.count_videos_need_resume(config, state)
         if resume_count > 0:
             batch_limit = _limit_value(config.get("resume", {}).get("batch_limit", 0), 0)
             jobs.append({
                 "stage": "resume",
                 "scope": "provider",
-                "priority": _priority("resume"),
+                "priority": _adaptive_priority("resume", youtube_pressure, boost_threshold),
                 "limit": batch_limit,
                 "description": f"{_batch_description('resume', batch_limit, 'videos')} ({resume_count} total pending)",
                 "count": resume_count,
@@ -83,13 +103,12 @@ def plan_jobs(
 
     # 3. Format — max 1 batch per cycle
     if config.get("format", {}).get("enabled", True):
-        format_count = db_queries.count_videos_need_format(config, state)
         if format_count > 0:
             batch_limit = _limit_value(config.get("format", {}).get("batch_limit", 500), 500)
             jobs.append({
                 "stage": "format",
                 "scope": "global",
-                "priority": _priority("format"),
+                "priority": _adaptive_priority("format", youtube_pressure, boost_threshold),
                 "limit": batch_limit,
                 "description": f"{_batch_description('format', batch_limit, 'videos')} ({format_count} total pending)",
                 "count": format_count,
@@ -97,26 +116,24 @@ def plan_jobs(
 
     # 4. ASR — local-audio processing only
     if config.get("asr", {}).get("enabled", False):
-        asr_count = db_queries.count_videos_need_asr(config, state)
         if asr_count > 0:
             batch_limit = _limit_value(config.get("asr", {}).get("batch_limit", 20), 20)
             jobs.append({
                 "stage": "asr",
                 "scope": "local:asr",
-                "priority": _priority("asr"),
+                "priority": _adaptive_priority("asr", youtube_pressure, boost_threshold),
                 "limit": batch_limit,
                 "description": f"{_batch_description('asr', batch_limit, 'local audio files')} ({asr_count} total pending)",
                 "count": asr_count,
             })
 
     # 5. Transcript — max 1 batch per cycle
-    transcript_count = db_queries.count_videos_need_transcript(config, state)
     if transcript_count > 0:
         batch_limit = _limit_value(config.get("youtube", {}).get("batch_limit", 100), 100)
         jobs.append({
             "stage": "transcript",
             "scope": "youtube",
-            "priority": _priority("transcript"),
+            "priority": _adaptive_priority("transcript", youtube_pressure, boost_threshold),
             "limit": batch_limit,
             "description": f"{_batch_description('transcript', batch_limit, 'videos')} ({transcript_count} total pending)",
             "count": transcript_count,
@@ -124,13 +141,12 @@ def plan_jobs(
 
     # 6. Audio download — fetch local audio for no_subtitle videos
     if config.get("audio_download", {}).get("enabled", True):
-        audio_count = db_queries.count_videos_need_audio_download(config, state)
         if audio_count > 0:
             batch_limit = _limit_value(config.get("audio_download", {}).get("batch_limit", 50), 50)
             jobs.append({
                 "stage": "audio_download",
                 "scope": "youtube",
-                "priority": _priority("audio_download"),
+                "priority": _adaptive_priority("audio_download", youtube_pressure, boost_threshold),
                 "limit": batch_limit,
                 "description": f"{_batch_description('audio download', batch_limit, 'videos')} ({audio_count} total pending)",
                 "count": audio_count,
@@ -146,7 +162,7 @@ def plan_jobs(
             "scope": f"channel:{ch['channel_id']}",
             "channel_id": ch["channel_id"],
             "limit": 1,
-            "priority": _priority("discovery"),
+            "priority": _adaptive_priority("discovery", youtube_pressure, boost_threshold),
             "description": f"Discover {ch.get('channel_name', ch['channel_id'])} ({discovery_count} total pending)",
             "count": discovery_count,
         })

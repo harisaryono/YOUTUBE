@@ -91,6 +91,9 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "idle_sleep_seconds": 60,
             "error_sleep_seconds": 300,
         },
+        "orchestrator": {
+            "youtube_backlog_boost_threshold": 500,
+        },
         "system": {
             "min_free_disk_gb": 5,
             "min_memory_mb_resume": 1500,
