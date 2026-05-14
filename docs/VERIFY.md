@@ -21,6 +21,8 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - `scripts/discover.sh --rate-limit-safe` harus menahan channel pacing dan melewati lookup `upload_date` tambahan yang mahal.
 - `scripts/asr.sh` harus bisa menjalankan batch ASR chunked untuk `--video-id`, `--channel-id`, atau `--csv` tanpa mencampur logika subtitle lama.
 - `recover_asr_transcripts.py` harus menulis chunk state ke tabel `video_asr_chunks` per provider/model/chunk index agar batch bisa resume.
+- `scripts/audio.sh` / `scripts/audio_download.sh` harus menulis status local audio ke tabel `video_audio_assets`.
+- `scripts/asr.sh --local-audio-only` harus membaca audio lokal dari `video_audio_assets.audio_file_path` dan tidak lagi memanggil yt-dlp untuk download.
 - Final ASR sukses harus menulis `videos.transcript_text`, `videos.transcript_file_path`, `transcript_downloaded = 1`, dan file `.txt` final di `uploads/asr/<video_id>/`.
 - Final ASR juga harus menyimpan `transcript_raw.txt` sebagai jejak timestamp mentah, lalu memakai GPT OSS 120B hanya untuk transcript yang masih kecil; transcript panjang boleh otomatis dilewati dan langsung pakai raw timestamped output.
 - Default ASR sekarang harus menyimpan transcript raw timestamped tanpa GPT OSS post-process, kecuali `--postprocess` dipilih eksplisit.
@@ -54,7 +56,7 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
   - [ ] Row actionable mencakup seluruh `new` dan `retry_incomplete` dari seluruh feed channel yang berhasil diambil, bukan hanya jendela `N` terbaru.
 
 - **Coordinator Validation**:
-  - [ ] Batch produksi menampilkan URL coordinator yang benar: `http://8.215.77.132:8788`.
+  - [ ] Batch produksi menampilkan URL coordinator yang benar dari `YT_PROVIDER_COORDINATOR_URL`.
   - [ ] Jangan menganggap `localhost:8788` valid tanpa health check eksplisit.
   - [ ] Default `lease_ttl_seconds` coordinator adalah `300`.
   - [ ] Lease tanpa heartbeat/status update selama `300` detik menjadi expired.

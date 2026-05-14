@@ -422,12 +422,13 @@ class ASRPipeline:
         self.repo_root = Path(__file__).resolve().parent
         self.run_dir = Path(args.run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_dir = self._resolve_audio_dir()
         self.cache_root = self._resolve_cache_root()
         self.tasks_path = self.run_dir / "tasks.csv"
         self.report_path = self.run_dir / "recover_asr_report.csv"
         self.video_root = BASE_DIR / "asr"
         self.video_root.mkdir(parents=True, exist_ok=True)
-        self.source_dir = self.cache_root / "source"
+        self.source_dir = self.audio_dir
         self.chunk_dir = self.run_dir / "chunks"
         self.source_dir.mkdir(parents=True, exist_ok=True)
         self.chunk_dir.mkdir(parents=True, exist_ok=True)
@@ -440,7 +441,9 @@ class ASRPipeline:
         self.language = str(args.language or "multi").strip() or "multi"
         self.enable_postprocess = bool(getattr(args, "postprocess", False))
         self.download_only = bool(getattr(args, "download_only", False))
+        self.local_audio_only = bool(getattr(args, "local_audio_only", False))
         self.require_cached_audio = bool(getattr(args, "require_cached_audio", False))
+        self.delete_audio_after_success = bool(getattr(args, "delete_audio_after_success", False))
         self.video_workers = max(1, int(getattr(args, "video_workers", 1) or 1))
         self.postprocess_provider = str(os.getenv("ASR_POSTPROCESS_PROVIDER") or "nvidia").strip().lower() or "nvidia"
         self.postprocess_model = str(os.getenv("ASR_POSTPROCESS_MODEL") or "openai/gpt-oss-120b").strip()
@@ -461,6 +464,18 @@ class ASRPipeline:
         self._report_status_path = self.run_dir / "coordinator_status.json"
         self._provider_disabled_until: dict[str, float] = {}
         self._ensure_coordinator_ready()
+
+    def _resolve_audio_dir(self) -> Path:
+        raw = str(
+            getattr(self.args, "audio_dir", "")
+            or os.getenv("ASR_AUDIO_DIR")
+            or os.getenv("YT_ASR_AUDIO_DIR")
+            or (BASE_DIR / "audio")
+        ).strip()
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = (self.repo_root / path).resolve()
+        return path
 
     def _resolve_cache_root(self) -> Path:
         if self.run_dir.parent.name == "workers" and self.run_dir.parent.parent.exists():
@@ -498,6 +513,8 @@ class ASRPipeline:
         return configs
 
     def _ensure_coordinator_ready(self) -> None:
+        if self.download_only:
+            return
         if not str(os.getenv("YT_PROVIDER_COORDINATOR_URL") or "").strip():
             raise RuntimeError("YT_PROVIDER_COORDINATOR_URL harus diatur agar ASR memakai lease coordinator.")
 
@@ -1151,31 +1168,110 @@ class ASRPipeline:
 
         with self.db._get_cursor() as cursor:
             if self.args.video_id:
-                cursor.execute(
-                    """
-                    SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                           COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                           COALESCE(v.transcript_language, '') AS transcript_language,
-                           c.channel_id, c.channel_name
-                    FROM videos v
-                    JOIN channels c ON c.id = v.channel_id
-                    WHERE v.video_id = ?
-                    """,
-                    (self.args.video_id,),
-                )
+                if self.download_only:
+                    cursor.execute(
+                        """
+                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                               COALESCE(v.transcript_language, '') AS transcript_language,
+                               c.channel_id, c.channel_name,
+                               COALESCE(a.audio_file_path, '') AS audio_file_path,
+                               COALESCE(a.status, 'pending') AS audio_status
+                        FROM videos v
+                        JOIN channels c ON c.id = v.channel_id
+                        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+                        WHERE v.video_id = ?
+                        """,
+                        (self.args.video_id,),
+                    )
+                elif self.local_audio_only:
+                    cursor.execute(
+                        """
+                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                               COALESCE(v.transcript_language, '') AS transcript_language,
+                               c.channel_id, c.channel_name,
+                               COALESCE(a.audio_file_path, '') AS audio_file_path,
+                               COALESCE(a.audio_format, '') AS audio_format,
+                               COALESCE(a.status, '') AS audio_status
+                        FROM videos v
+                        JOIN channels c ON c.id = v.channel_id
+                        JOIN video_audio_assets a ON a.video_id = v.video_id
+                        WHERE v.video_id = ?
+                          AND COALESCE(a.status, '') = 'downloaded'
+                        """,
+                        (self.args.video_id,),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                               COALESCE(v.transcript_language, '') AS transcript_language,
+                               c.channel_id, c.channel_name
+                        FROM videos v
+                        JOIN channels c ON c.id = v.channel_id
+                        WHERE v.video_id = ?
+                        """,
+                        (self.args.video_id,),
+                    )
             else:
-                query = """
-                    SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                           COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                           COALESCE(v.transcript_language, '') AS transcript_language,
-                           c.channel_id, c.channel_name
-                    FROM videos v
-                    JOIN channels c ON c.id = v.channel_id
-                    WHERE COALESCE(v.is_short, 0) = 0
-                      AND COALESCE(v.is_member_only, 0) = 0
-                      AND COALESCE(v.transcript_downloaded, 0) = 0
-                      AND (COALESCE(v.transcript_language, '') = '' OR v.transcript_language = 'no_subtitle')
-                """
+                if self.download_only:
+                    query = """
+                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                               COALESCE(v.transcript_language, '') AS transcript_language,
+                               c.channel_id, c.channel_name,
+                               COALESCE(a.audio_file_path, '') AS audio_file_path,
+                               COALESCE(a.status, 'pending') AS audio_status
+                        FROM videos v
+                        JOIN channels c ON c.id = v.channel_id
+                        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+                        WHERE COALESCE(v.is_short, 0) = 0
+                          AND COALESCE(v.is_member_only, 0) = 0
+                          AND COALESCE(v.transcript_downloaded, 0) = 0
+                          AND v.transcript_language = 'no_subtitle'
+                          AND (
+                              a.video_id IS NULL
+                              OR COALESCE(a.status, '') IN ('pending', 'failed')
+                          )
+                          AND (
+                              a.retry_after IS NULL
+                              OR a.retry_after <= datetime('now')
+                          )
+                    """
+                elif self.local_audio_only:
+                    query = """
+                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                               COALESCE(v.transcript_language, '') AS transcript_language,
+                               c.channel_id, c.channel_name,
+                               COALESCE(a.audio_file_path, '') AS audio_file_path,
+                               COALESCE(a.audio_format, '') AS audio_format,
+                               COALESCE(a.status, '') AS audio_status
+                        FROM videos v
+                        JOIN channels c ON c.id = v.channel_id
+                        JOIN video_audio_assets a ON a.video_id = v.video_id
+                        WHERE COALESCE(v.is_short, 0) = 0
+                          AND COALESCE(v.is_member_only, 0) = 0
+                          AND COALESCE(v.transcript_downloaded, 0) = 0
+                          AND v.transcript_language = 'no_subtitle'
+                          AND COALESCE(a.status, '') = 'downloaded'
+                          AND COALESCE(a.audio_file_path, '') != ''
+                    """
+                else:
+                    query = """
+                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                               COALESCE(v.transcript_language, '') AS transcript_language,
+                               c.channel_id, c.channel_name
+                        FROM videos v
+                        JOIN channels c ON c.id = v.channel_id
+                        WHERE COALESCE(v.is_short, 0) = 0
+                          AND COALESCE(v.is_member_only, 0) = 0
+                          AND COALESCE(v.transcript_downloaded, 0) = 0
+                          AND (COALESCE(v.transcript_language, '') = '' OR v.transcript_language = 'no_subtitle')
+                    """
                 params: list[object] = []
                 if self.args.channel_id:
                     query += " AND (c.channel_id = ? OR c.channel_id = ?)"
@@ -1246,8 +1342,9 @@ class ASRPipeline:
             or os.getenv("YT_ASR_AUDIO_FORMAT_SELECTOR")
             or DEFAULT_ASR_AUDIO_FORMAT_SELECTOR
         ).strip()
+        yt_dlp_cmd = yt_dlp_command()
         cmd = [
-            *yt_dlp_command(),
+            *yt_dlp_cmd,
             "--no-playlist",
             "--format",
             format_selector,
@@ -1260,6 +1357,13 @@ class ASRPipeline:
             *yt_dlp_auth_args(rotate=True),
             video_url,
         ]
+        if _env_bool("YT_ASR_RATE_LIMIT_SAFE", False):
+            cmd[len(yt_dlp_cmd):len(yt_dlp_cmd)] = [
+                "--sleep-interval",
+                "8",
+                "--max-sleep-interval",
+                "15",
+            ]
         logger.info("Download audio %s via yt-dlp (format=%s)", video_id, format_selector)
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
@@ -1306,9 +1410,31 @@ class ASRPipeline:
                 return cached
         return None
 
+    def _resolve_local_audio_source(self, video_id: str) -> Path | None:
+        asset = self.db.get_video_audio_asset(video_id)
+        if asset:
+            asset_path = str(asset.get("audio_file_path") or "").strip()
+            if asset_path:
+                candidate = Path(asset_path)
+                if candidate.exists() and candidate.stat().st_size > 0:
+                    return candidate
+        cached = self._cached_audio_path(video_id)
+        if cached is not None:
+            try:
+                self.db.mark_video_audio_downloaded(
+                    video_id=video_id,
+                    audio_file_path=str(cached),
+                    audio_format=cached.suffix.lstrip("."),
+                    file_size_bytes=cached.stat().st_size if cached.exists() else 0,
+                )
+            except Exception:
+                pass
+        return cached
+
     def _probe_access_state(self, video_id: str, video_url: str) -> tuple[bool, str, dict]:
+        yt_dlp_cmd = yt_dlp_command()
         cmd = [
-            *yt_dlp_command(),
+            *yt_dlp_cmd,
             "--no-playlist",
             "--skip-download",
             "--dump-single-json",
@@ -1680,6 +1806,55 @@ class ASRPipeline:
         channel_name = str(row.get("channel_name") or "").strip()
         logger.info("ASR start: %s | %s", video_id, title)
 
+        video_work_dir = self.run_dir / "videos" / _slug(video_id)
+        video_work_dir.mkdir(parents=True, exist_ok=True)
+        transcript_dir = self.video_root / _slug(video_id)
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        final_transcript_path = transcript_dir / "transcript.txt"
+        existing_done = self._load_existing_chunk_map(video_id)
+        cached_audio = self._resolve_local_audio_source(video_id)
+        if self.download_only:
+            try:
+                source_path = cached_audio or self._download_audio(video_id, video_url)
+                file_size_bytes = source_path.stat().st_size if source_path.exists() else 0
+                self.db.mark_video_audio_downloaded(
+                    video_id=video_id,
+                    audio_file_path=str(source_path),
+                    audio_format=source_path.suffix.lstrip("."),
+                    duration=int(row.get("duration") or 0),
+                    file_size_bytes=file_size_bytes,
+                )
+            except Exception as exc:
+                reason = str(exc) or "audio_download_failed"
+                logger.warning("Audio download failed for video=%s: %s", video_id, reason)
+                self.db.mark_video_audio_download_retry_later(video_id, reason=reason, retry_after_hours=24)
+                return {
+                    "video_id": video_id,
+                    "status": "retry_later",
+                    "provider": "yt-dlp",
+                    "chunk_count": 0,
+                    "processed_chunks": 0,
+                    "error_text": reason,
+                    "transcript_path": "",
+                    "channel_id": channel_id,
+                    "channel_name": channel_name,
+                    "title": title,
+                    "source_path": "",
+                }
+            return {
+                "video_id": video_id,
+                "status": "audio_cached" if source_path.exists() else "audio_downloaded",
+                "provider": "yt-dlp",
+                "chunk_count": 0,
+                "processed_chunks": 0,
+                "error_text": "",
+                "transcript_path": "",
+                "channel_id": channel_id,
+                "channel_name": channel_name,
+                "title": title,
+                "source_path": str(source_path),
+            }
+
         self._prune_disabled_provider_leases()
         if not self._has_active_provider_capacity():
             reason = "No active ASR provider capacity available (cooldown/disabled)"
@@ -1697,56 +1872,15 @@ class ASRPipeline:
                 "title": title,
             }
 
-        video_work_dir = self.run_dir / "videos" / _slug(video_id)
-        video_work_dir.mkdir(parents=True, exist_ok=True)
-        transcript_dir = self.video_root / _slug(video_id)
-        transcript_dir.mkdir(parents=True, exist_ok=True)
-        final_transcript_path = transcript_dir / "transcript.txt"
-        existing_done = self._load_existing_chunk_map(video_id)
-        cached_audio = self._cached_audio_path(video_id)
-        if self.require_cached_audio and cached_audio is None:
-            reason = "audio_cache_missing"
-            self.db.mark_video_transcript_retry_later(video_id, reason=reason, retry_after_hours=24)
-            return {
-                "video_id": video_id,
-                "status": "retry_later",
-                "provider": "yt-dlp",
-                "chunk_count": 0,
-                "processed_chunks": 0,
-                "error_text": reason,
-                "transcript_path": "",
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-                "title": title,
-            }
-        access_probe_payload: dict = {}
-        if cached_audio is None:
-            access_blocked, access_reason, access_payload = self._probe_access_state(video_id, video_url)
-            access_probe_payload = access_payload
-            if access_blocked:
-                reason = f"skip_access_blocked: {access_reason or 'private_or_members_only'}"
-                self.db.mark_video_transcript_retry_later(video_id, reason=reason, retry_after_hours=8760)
-                try:
-                    self.db.upsert_video_asr_chunk(
-                        video_id=video_id,
-                        provider="yt-dlp",
-                        model_name="access-probe",
-                        chunk_index=0,
-                        chunk_start_ms=0,
-                        chunk_end_ms=0,
-                        audio_path="",
-                        status="skipped",
-                        transcript_text="",
-                        language="skip_access_blocked",
-                        raw_response_json=json.dumps(access_payload, ensure_ascii=False),
-                        error_text=reason,
-                    )
-                except Exception:
-                    pass
+        cached_audio = self._resolve_local_audio_source(video_id)
+        if self.local_audio_only or self.require_cached_audio:
+            if cached_audio is None:
+                reason = "audio_file_missing"
+                self.db.mark_video_audio_download_retry_later(video_id, reason=reason, retry_after_hours=24)
                 return {
                     "video_id": video_id,
-                    "status": "skip_access_blocked",
-                    "provider": "yt-dlp",
+                    "status": "retry_later",
+                    "provider": "local-audio",
                     "chunk_count": 0,
                     "processed_chunks": 0,
                     "error_text": reason,
@@ -1755,23 +1889,47 @@ class ASRPipeline:
                     "channel_name": channel_name,
                     "title": title,
                 }
+            source_path = cached_audio
         else:
-            logger.info("ASR reuse cached audio %s", cached_audio.name)
-        if self.download_only:
+            if cached_audio is None:
+                access_blocked, access_reason, access_payload = self._probe_access_state(video_id, video_url)
+                if access_blocked:
+                    reason = f"skip_access_blocked: {access_reason or 'private_or_members_only'}"
+                    self.db.mark_video_transcript_retry_later(video_id, reason=reason, retry_after_hours=8760)
+                    try:
+                        self.db.upsert_video_asr_chunk(
+                            video_id=video_id,
+                            provider="yt-dlp",
+                            model_name="access-probe",
+                            chunk_index=0,
+                            chunk_start_ms=0,
+                            chunk_end_ms=0,
+                            audio_path="",
+                            status="skipped",
+                            transcript_text="",
+                            language="skip_access_blocked",
+                            raw_response_json=json.dumps(access_payload, ensure_ascii=False),
+                            error_text=reason,
+                        )
+                    except Exception:
+                        pass
+                    return {
+                        "video_id": video_id,
+                        "status": "skip_access_blocked",
+                        "provider": "yt-dlp",
+                        "chunk_count": 0,
+                        "processed_chunks": 0,
+                        "error_text": reason,
+                        "transcript_path": "",
+                        "channel_id": channel_id,
+                        "channel_name": channel_name,
+                        "title": title,
+                    }
+            else:
+                logger.info("ASR reuse cached audio %s", cached_audio.name)
+
             source_path = cached_audio or self._download_audio(video_id, video_url)
-            return {
-                "video_id": video_id,
-                "status": "audio_cached" if source_path.exists() else "audio_downloaded",
-                "provider": "yt-dlp",
-                "chunk_count": 0,
-                "processed_chunks": 0,
-                "error_text": "",
-                "transcript_path": "",
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-                "title": title,
-                "source_path": str(source_path),
-            }
+
         if not existing_done and not self.provider_leases:
             try:
                 self._acquire_provider_leases()
@@ -1792,7 +1950,6 @@ class ASRPipeline:
                     "title": title,
                 }
 
-        source_path = cached_audio or self._download_audio(video_id, video_url)
         duration_ms = self._probe_duration_ms(source_path, int(row.get("duration") or 0))
         chunk_ms = self.chunk_seconds * 1000
         overlap_ms = self.overlap_seconds * 1000
@@ -2001,6 +2158,22 @@ class ASRPipeline:
             transcript_text=final_transcript_text,
         )
 
+        if self.delete_audio_after_success and source_path.exists():
+            try:
+                source_path.unlink()
+            except Exception as exc:
+                logger.warning("Gagal menghapus audio lokal %s: %s", source_path, str(exc)[:300])
+        try:
+            self.db.mark_video_audio_consumed(
+                video_id=video_id,
+                audio_file_path=str(source_path),
+                audio_format=source_path.suffix.lstrip("."),
+                duration=duration_ms // 1000,
+                file_size_bytes=source_path.stat().st_size if source_path.exists() else 0,
+            )
+        except Exception:
+            pass
+
         return {
             "video_id": video_id,
             "status": "done",
@@ -2108,6 +2281,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--channel-id", default="", help="Proses video pending dari satu channel")
     parser.add_argument("--limit", type=int, default=0, help="Batasi jumlah target")
     parser.add_argument("--run-dir", required=True, help="Directory run untuk report dan chunk cache")
+    parser.add_argument("--audio-dir", default="", help="Directory local untuk audio cache")
     parser.add_argument("--providers", default="groq,nvidia", help="Urutan provider fallback, contoh: groq,nvidia")
     parser.add_argument("--model", default="whisper-large-v3", help="Model default untuk Groq")
     parser.add_argument("--language", default="multi", help="Bahasa target: multi, auto, id, en, ar, ...")
@@ -2120,9 +2294,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hanya download audio ke cache shared tanpa menjalankan ASR",
     )
     parser.add_argument(
+        "--local-audio-only",
+        action="store_true",
+        help="Jalankan ASR hanya dari file audio lokal yang sudah ada",
+    )
+    parser.add_argument(
         "--require-cached-audio",
         action="store_true",
         help="Jangan download audio saat ASR; hanya pakai cache audio yang sudah ada",
+    )
+    parser.add_argument(
+        "--delete-audio-after-success",
+        action="store_true",
+        help="Hapus audio lokal setelah ASR sukses",
     )
     parser.add_argument(
         "--postprocess",

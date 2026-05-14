@@ -32,10 +32,11 @@ Recover missing transcripts for 4,217 videos to enable resume generation.
      - `./run_pipeline.sh --format-only`
 
 ## ASR Transcript Strategy
-1. Use `recover_asr_transcripts.py` / `scripts/asr.sh` for videos that have no usable transcript/subtitle path.
-2. Download audio once, split into fixed-size chunks, and transcribe per chunk with Whisper on Groq or NVIDIA.
-3. Persist every chunk result to `video_asr_chunks` so a failed batch can resume from the first missing chunk.
-4. Merge chunk text only after all chunks succeed, then write the final transcript text back into `videos.transcript_text` and the final `.txt` file under `uploads/asr/`.
+1. Use `scripts/audio.sh` / `scripts/audio_download.sh` to fetch local audio files for `no_subtitle` videos.
+2. Use `recover_asr_transcripts.py` / `scripts/asr.sh` only for local-audio ASR, never for YouTube download.
+3. Download audio once, store `video_audio_assets.audio_file_path`, split into fixed-size chunks, and transcribe per chunk with Whisper on Groq or NVIDIA.
+4. Persist every chunk result to `video_asr_chunks` so a failed batch can resume from the first missing chunk.
+5. Merge chunk text only after all chunks succeed, then write the final transcript text back into `videos.transcript_text` and the final `.txt` file under `uploads/asr/`.
 
 ## Operator Constraint
 - PERTANYAAN STATUS DI TENGAH PROSES BUKAN INSTRUKSI UNTUK MENGHENTIKAN JOB.
@@ -49,8 +50,8 @@ Recover missing transcripts for 4,217 videos to enable resume generation.
   - ada bukti kuat batch salah arah atau merusak target.
 
 ## Coordinator Source Of Truth
-- URL coordinator produksi yang benar untuk repo ini: `http://8.215.77.132:8788`
-- Jangan gunakan `http://localhost:8788` untuk batch produksi kecuali sudah diverifikasi port lokal itu benar-benar hidup dan sengaja dipakai.
+- URL coordinator yang benar untuk repo ini dibaca dari `YT_PROVIDER_COORDINATOR_URL` dan harus diset eksplisit di environment.
+- Default fallback lokal tetap `http://127.0.0.1:8788` jika environment memang mengarah ke coordinator lokal.
 - Saat start batch produksi, log harus menampilkan URL coordinator yang benar sebelum pekerjaan transcript/resume berjalan.
 - Sebelum membuat program baru yang menyentuh coordinator/provider/runtime lease, wajib baca source of truth operasional di server:
   - `ssh yt-server 'sed -n "1,260p" /root/services/COORDINATOR_GUIDE.md'`

@@ -132,10 +132,8 @@ def _build_suggestions(
             suggestions.append("Disk space low — clean up runs/uploads/logs/cache")
 
     # Check idle hours for format
-    if config.get("format", {}).get("prefer_idle_hours", False):
-        from .safety import _is_idle_hours
-        if not _is_idle_hours(config):
-            suggestions.append("Schedule format jobs during night hours (22:00-05:00)")
+    # In aggressive mode, idle hours are advisory only, so do not block the queue
+    # or add a strong recommendation here.
 
     # Check if format/resume are deferred due to lease
     if cycle_result and cycle_result.get("jobs_deferred", 0) > 0:

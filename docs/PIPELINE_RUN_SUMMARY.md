@@ -150,7 +150,7 @@ ls -lh logs/format_batch_*.log
 - **Virtual Environment:** `/media/harry/DATA120B/venv_youtube`
 - **Python Version:** 3.12.3
 - **Database:** `db/youtube_transcripts.db`
-- **Coordinator:** `http://8.215.77.132:8788`
+- **Coordinator:** baca dari `YT_PROVIDER_COORDINATOR_URL` (fallback lokal `http://127.0.0.1:8788`)
 
 ### Providers
 - **NVIDIA:** 3 keys active (unlimited quota for transcript)

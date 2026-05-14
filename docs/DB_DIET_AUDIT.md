@@ -6,11 +6,15 @@ Audit ini merangkum area database yang boros, redundant, atau masih menyimpan da
 
 - `youtube_transcripts.db` sudah di-checkpoint dan `WAL` sudah di-truncate.
 - Hasilnya, `youtube_transcripts.db-wal` turun ke `0` bytes.
+- Shadow columns `videos.transcript_text` dan `videos.summary_text` sudah dikosongkan pada row yang punya blob pasangan, lalu `VACUUM` dijalankan ulang.
+- Search cache/FTS sudah dipindah ke `youtube_transcripts_search.db`, lalu objek search lama di main DB di-drop.
+- Corpus search sekarang tidak lagi menyimpan `summary_search`; hanya `title`, `description`, dan `transcript_search`.
 
 ## Ukuran Saat Audit
 
-- `youtube_transcripts.db`: sekitar `608 MB`
-- `youtube_transcripts_blobs.db`: sekitar `380 MB`
+- `youtube_transcripts.db`: sekitar `51.6 MB`
+- `youtube_transcripts_search.db`: sekitar `368.9 MB`
+- `youtube_transcripts_blobs.db`: sekitar `469 MB`
 - `youtube_transcripts.db-wal` sebelum truncate: sekitar `65 MB`
 
 ## Temuan Utama
@@ -47,11 +51,19 @@ Audit ini merangkum area database yang boros, redundant, atau masih menyimpan da
 
 Tabel ini sudah tidak berisi data aktif dan sudah di-drop dari schema aktif.
 
-### 6. FTS index masih besar tapi wajar
+### 6. Search cache/FTS sudah dipisah
 
-- `videos_fts_data` sekitar `199 MB`.
-- Ini mahal, tetapi memang inti pencarian full-text.
-- Jangan dibuang kecuali search memang mau dikorbankan.
+- `videos_search_cache` dan `videos_search_fts` tidak lagi tinggal di main DB.
+- Keduanya sekarang ada di `youtube_transcripts_search.db`.
+- Ini menurunkan ukuran file utama secara drastis tanpa mengorbankan search.
+- Korpus search sekarang tidak lagi menyimpan `summary_search`; hanya `title`, `description`, dan `transcript_search`.
+
+### 7. Kandidat audit lanjutan
+
+- `idx_videos_duration` dan `idx_videos_word_count` tetap dipertahankan karena query planner memang memakainya.
+- `idx_videos_upload_date` sudah di-drop karena tidak terpakai di query planner yang saya benchmark.
+- `idx_videos_title` sudah di-drop karena search title sudah dipindah ke DB search terpisah.
+- `description` di search corpus tidak layak dibuang: simulasi title+transcript-only cuma menghemat sekitar `0.8 MB` pada `youtube_transcripts_search.db`, tetapi pada sample 100 query yang diambil dari description, total hit turun sekitar `1.42%` (`85,528` → `84,313`).
 
 ## Rekomendasi Diet
 
@@ -60,6 +72,8 @@ Tabel ini sudah tidak berisi data aktif dan sudah di-drop dari schema aktif.
 - Pertahankan WAL checkpoint rutin saat batch sudah berhenti.
 - `videos.metadata` dibackfill ke blob `metadata` dan kolom lama dikosongkan untuk row yang sudah dimigrasi.
 - Jalur tulis aktif untuk formatted transcript sekarang hanya memakai `transcript_formatted_path`.
+- `videos.transcript_text` dan `videos.summary_text` sudah dikosongkan untuk row yang punya blob pasangan.
+- Search cache/FTS dipindah ke `youtube_transcripts_search.db`.
 - Tabel legacy `transcripts` dan `summaries` yang kosong sudah di-drop.
 - Kolom fisik `link_file_formatted` sudah di-drop dari tabel `videos`.
 - File transcript fisik yang sudah sepenuhnya ada di DB/blob sudah dibuang; folder `uploads/*/text/` sekarang kosong.
@@ -68,9 +82,8 @@ Tabel ini sudah tidak berisi data aktif dan sudah di-drop dari schema aktif.
 
 ### Bisa dilakukan berikutnya
 
-- `videos.transcript_text` dan `videos.summary_text` masih terikat ke trigger `videos_fts`, jadi kolom ini belum bisa di-drop tanpa redesign FTS.
 - Jalur baca runtime sudah blob-first, dan write baru sekarang juga mirror ke blob.
-- Kalau search mau dipindah penuh ke blob, perlu migrasi FTS dulu sebelum kolom teks lama bisa di-drop. Rencana migrasi ada di [FTS_MIGRATION_PLAN.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/FTS_MIGRATION_PLAN.md).
+- Kalau search mau dipindah penuh ke blob atau dipisah ke DB search terpisah, perlu migrasi/search redesign dulu sebelum cache bisa diperkecil tanpa menurunkan kualitas search.
 
 ## Catatan
 

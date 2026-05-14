@@ -23,6 +23,8 @@ system:
 youtube:
   # How often to re-discover channels (hours)
   discovery_interval_hours: 24
+  # Default batch size for transcript jobs
+  batch_limit: 100
   # Workers when in safe mode
   safe_transcript_workers: 2
   # Workers when in normal mode
@@ -37,16 +39,27 @@ youtube:
   inter_video_delay_min: 8
   inter_video_delay_max: 15
 
+audio_download:
+  enabled: true
+  batch_limit: 50
+  workers: 1
+  max_duration_minutes: 60
+  yt_dlp_rate_limit_safe: true
+  keep_audio_after_asr: false
+  audio_dir: "uploads/audio"
+
 resume:
   enabled: true
-  max_workers: 8
+  max_workers: 4
+  batch_limit: 0
   require_lease: true
   # Provider priority: nvidia_first | groq_first | auto
   provider_plan: nvidia_first
 
 format:
   enabled: true
-  max_workers: 6
+  max_workers: 4
+  batch_limit: 500
   # Only run during idle hours (when YouTube stages are paused)
   prefer_idle_hours: true
   idle_hours:
@@ -56,8 +69,11 @@ format:
 asr:
   # ASR untuk video no_subtitle — aktif
   enabled: true
-  max_video_workers: 1
+  max_video_workers: 2
+  batch_limit: 20
   max_duration_minutes: 60
+  require_local_audio: true
+  delete_audio_after_success: true
   require_cached_audio: false
 
 

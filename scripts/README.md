@@ -49,6 +49,8 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
   - Resolver virtualenv eksternal.
 - [repair_db_state.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/repair_db_state.py)
   - Repair state SQLite / metadata.
+- [clear_shadow_text_columns.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/clear_shadow_text_columns.py)
+  - Hapus duplikasi `transcript_text` / `summary_text` dari `videos` setelah blob migration, lalu opsi `VACUUM`.
 - [refresh_stats.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/refresh_stats.py)
   - Refresh statistik database dan cache.
 - [search.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/search.sh)
@@ -61,7 +63,7 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
 - [migrate_metadata_to_blob.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/migrate_metadata_to_blob.py)
   - Backfill metadata video ke blob storage dan opsional kosongkan kolom teks lama.
 - [migrate_search_cache.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/migrate_search_cache.py)
-  - Bangun cache FTS blob-first dan drop FTS legacy yang masih bergantung pada kolom teks lama.
+  - Pindahkan cache FTS blob-first ke `db/youtube_transcripts_search.db` lalu drop objek search legacy dari main DB.
 - [backfill_text_blobs.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/backfill_text_blobs.py)
   - Mirror `transcript_text` dan `summary_text` ke blob storage tanpa menghapus kolom FTS.
 - [backfill_transcript_files_to_blob.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/backfill_transcript_files_to_blob.py)

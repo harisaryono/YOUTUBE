@@ -49,7 +49,7 @@ Ini hanya diperlukan jika Anda akan menjalankan script `sync_databases.py` atau 
 **JANGAN** recreate virtual environment baru! Gunakan yang sudah ada di `/media/harry/DATA120B/venv_youtube/`
 
 ### Coordinator
-Biarkan `YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788` di `.env` - ini menggunakan production coordinator yang sudah jalan.
+Biarkan `YT_PROVIDER_COORDINATOR_URL` di `.env` mengarah ke coordinator yang benar untuk environment Anda.
 
 ### Database
 Database aktif sekarang disimpan di `db/` dan root filename dipertahankan sebagai symlink kompatibilitas.
@@ -107,7 +107,7 @@ Setelah mengubah `.env`, jalankan test ini:
 /media/harry/DATA120B/venv_youtube/bin/python3 manage_database.py stats
 
 # Test coordinator
-curl -s http://8.215.77.132:8788/health
+curl -s "$YT_PROVIDER_COORDINATOR_URL/health"
 
 # Test script
 ./scripts/discover.sh --help

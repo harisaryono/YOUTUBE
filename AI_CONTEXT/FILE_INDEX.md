@@ -22,7 +22,10 @@
 - `database_blobs.py` (4244 bytes)
 
 ## database_optimized.py
-- `database_optimized.py` (106480 bytes)
+- `database_optimized.py` (106503 bytes)
+
+## database_search.py
+- `database_search.py` (9351 bytes)
 
 ## db
 - `db/README.md` (493 bytes)
@@ -31,13 +34,13 @@
 - `diet_db.py` (4116 bytes)
 
 ## docs
-- `docs/DB_DIET_AUDIT.md` (3532 bytes)
-- `docs/FTS_MIGRATION_PLAN.md` (2450 bytes)
+- `docs/DB_DIET_AUDIT.md` (4757 bytes)
+- `docs/FTS_MIGRATION_PLAN.md` (2724 bytes)
 - `docs/LOCAL_SETUP_GUIDE.md` (9176 bytes)
-- `docs/PROGRESS.md` (30160 bytes)
+- `docs/PROGRESS.md` (31476 bytes)
 - `docs/README.md` (3379 bytes)
 - `docs/STATE_MACHINE.md` (2351 bytes)
-- `docs/VERIFY.md` (13598 bytes)
+- `docs/VERIFY.md` (13867 bytes)
 - `docs/WORKFLOWS.md` (8598 bytes)
 
 ## fill_missing_resumes_youtube_db.py
@@ -65,7 +68,7 @@
 - `flask_app/templates/videos.html` (6798 bytes)
 
 ## format_transcripts_pool.py
-- `format_transcripts_pool.py` (74636 bytes)
+- `format_transcripts_pool.py` (74566 bytes)
 
 ## generate_ai_context.py
 
@@ -73,7 +76,7 @@
 - `job_tracker.py` (5204 bytes)
 
 ## launch_resume_queue.py
-- `launch_resume_queue.py` (22351 bytes)
+- `launch_resume_queue.py` (22348 bytes)
 
 ## local_services.py
 - `local_services.py` (52678 bytes)
@@ -83,19 +86,19 @@
 
 ## orchestrator
 - `orchestrator/__init__.py` (0 bytes)
-- `orchestrator/config.py` (4567 bytes)
+- `orchestrator/config.py` (6153 bytes)
 - `orchestrator/cooldown.py` (3747 bytes)
-- `orchestrator/daemon.py` (13520 bytes)
-- `orchestrator/db_queries.py` (12486 bytes)
-- `orchestrator/dispatcher.py` (10499 bytes)
+- `orchestrator/daemon.py` (13082 bytes)
+- `orchestrator/db_queries.py` (16692 bytes)
+- `orchestrator/dispatcher.py` (13431 bytes)
 - `orchestrator/error_analyzer.py` (9749 bytes)
-- `orchestrator/planner.py` (4620 bytes)
+- `orchestrator/planner.py` (5881 bytes)
 - `orchestrator/reports.py` (10805 bytes)
-- `orchestrator/safety.py` (12492 bytes)
+- `orchestrator/safety.py` (12728 bytes)
 - `orchestrator/state.py` (11134 bytes)
 
 ## orchestrator.yaml
-- `orchestrator.yaml` (1681 bytes)
+- `orchestrator.yaml` (2041 bytes)
 
 ## partial_docs
 - `partial_docs/API_METADATA_RESULTS.md` (2504 bytes)
@@ -178,12 +181,12 @@
 - `partial_py/fix_tabs_final.py` (2751 bytes)
 - `partial_py/fix_transcript_paths.py` (1398 bytes)
 - `partial_py/format_pool_watchdog.py` (9005 bytes)
-- `partial_py/format_transcripts.py` (19431 bytes)
+- `partial_py/format_transcripts.py` (19428 bytes)
 - `partial_py/generate_resumes.py` (25896 bytes)
 - `partial_py/import_kokbisa_videos.py` (2617 bytes)
 - `partial_py/import_pending_updates.py` (15286 bytes)
 - `partial_py/import_youtube_exports_to_db.py` (20917 bytes)
-- `partial_py/launch_universal_resume.py` (2752 bytes)
+- `partial_py/launch_universal_resume.py` (2749 bytes)
 - `partial_py/merge_harta_alam_channels.py` (5347 bytes)
 - `partial_py/migrate_channels.py` (12924 bytes)
 - `partial_py/migrate_fts.py` (2138 bytes)
@@ -244,13 +247,13 @@
 - `provider_encryption.py` (5831 bytes)
 
 ## recover_asr_transcripts.py
-- `recover_asr_transcripts.py` (90658 bytes)
+- `recover_asr_transcripts.py` (99773 bytes)
 
 ## recover_transcripts.py
 - `recover_transcripts.py` (59861 bytes)
 
 ## recover_transcripts_from_csv.py
-- `recover_transcripts_from_csv.py` (24514 bytes)
+- `recover_transcripts_from_csv.py` (24603 bytes)
 
 ## requirements.txt
 - `requirements.txt` (491 bytes)
@@ -262,10 +265,10 @@
 - `savesubs_playwright.py` (20437 bytes)
 
 ## scripts
-- `scripts/README.md` (5387 bytes)
+- `scripts/README.md` (5626 bytes)
 - `scripts/archive_channels.sh` (891 bytes)
-- `scripts/asr.sh` (7693 bytes)
-- `scripts/audio.sh` (6882 bytes)
+- `scripts/asr.sh` (8384 bytes)
+- `scripts/audio.sh` (7244 bytes)
 - `scripts/audit_no_subtitle_webshare.py` (9839 bytes)
 - `scripts/backfill_text_blobs.py` (2429 bytes)
 - `scripts/backfill_transcript_files_to_blob.py` (6967 bytes)
@@ -273,12 +276,12 @@
 - `scripts/cleanup_redundant_transcript_files.py` (4365 bytes)
 - `scripts/deploy_exclude.txt` (194 bytes)
 - `scripts/discover.sh` (6102 bytes)
-- `scripts/format.sh` (7328 bytes)
+- `scripts/format.sh` (7325 bytes)
 - `scripts/generate_tasks.py` (5567 bytes)
 - `scripts/manual_transcript_then_resume_format.sh` (2135 bytes)
 - `scripts/migrate_metadata.py` (1655 bytes)
 - `scripts/migrate_metadata_to_blob.py` (3001 bytes)
-- `scripts/migrate_search_cache.py` (4855 bytes)
+- `scripts/migrate_search_cache.py` (4129 bytes)
 - `scripts/migrate_tar_to_blobs.py` (3718 bytes)
 - `scripts/migrate_to_blobs.py` (2700 bytes)
 - `scripts/monitor_pipeline.sh` (4720 bytes)
@@ -288,7 +291,7 @@
 - `scripts/run_flask.sh` (2076 bytes)
 - `scripts/run_pipeline.sh` (16552 bytes)
 - `scripts/search.sh` (493 bytes)
-- `scripts/supervisor.sh` (9771 bytes)
+- `scripts/supervisor.sh` (9768 bytes)
 - `scripts/sync_buffer_to_main.py` (2066 bytes)
 - `scripts/sync_missing_rows_to_server.sh` (173 bytes)
 - `scripts/transcript.sh` (20207 bytes)
@@ -331,7 +334,7 @@
 - `youtube_cache.db` (0 bytes)
 
 ## youtube_transcripts.db
-- `youtube_transcripts.db` (1056653312 bytes)
+- `youtube_transcripts.db` (51638272 bytes)
 
 ## youtube_transcripts_blobs.db
 - `youtube_transcripts_blobs.db` (468848640 bytes)

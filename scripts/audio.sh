@@ -1,5 +1,5 @@
 #!/bin/bash
-# Wrapper script untuk warm audio cache YouTube via yt-dlp download-only
+# Wrapper script untuk stage audio_download YouTube via yt-dlp download-only
 
 set -euo pipefail
 
@@ -17,11 +17,11 @@ fi
 cd "$REPO_DIR"
 
 echo "============================================="
-echo "🎵 YouTube Audio Cache Warmup Tool"
+echo "🎵 YouTube Audio Download Tool"
 echo "============================================="
 echo "Run dir: $REPO_DIR"
 echo "Python: $VENV_PYTHON"
-echo "Coordinator: ${YT_PROVIDER_COORDINATOR_URL:-http://8.215.77.132:8788}"
+echo "Coordinator: ${YT_PROVIDER_COORDINATOR_URL:-http://127.0.0.1:8788}"
 echo "============================================="
 echo ""
 
@@ -36,6 +36,7 @@ LANGUAGE_VALUE="multi"
 CHUNK_SECONDS_VALUE="45"
 OVERLAP_SECONDS_VALUE="2"
 VIDEO_WORKERS_VALUE="1"
+RATE_LIMIT_SAFE_VALUE="0"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -79,9 +80,13 @@ while [[ $# -gt 0 ]]; do
             OVERLAP_SECONDS_VALUE="$2"
             shift 2
             ;;
-        --video-workers)
+        --video-workers|--workers)
             VIDEO_WORKERS_VALUE="$2"
             shift 2
+            ;;
+        --rate-limit-safe)
+            RATE_LIMIT_SAFE_VALUE="1"
+            shift
             ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
@@ -97,7 +102,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --language CODE       Language hint, default: multi"
             echo "  --chunk-seconds N     Chunk duration in seconds, default: 45"
             echo "  --overlap-seconds N   Chunk overlap in seconds, default: 2"
-            echo "  --video-workers N     Parallel video workers, default: 1"
+            echo "  --workers N           Parallel download workers, default: 1"
+            echo "  --rate-limit-safe     Enable safer yt-dlp pacing"
             echo "  --help                Show this help message"
             exit 0
             ;;
@@ -133,7 +139,7 @@ if ! [[ "$VIDEO_WORKERS_VALUE" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-JOB_TYPE="audio"
+JOB_TYPE="audio_download"
 JOB_ID="${JOB_ID:-${JOB_TYPE}_$(date +%Y%m%d_%H%M%S)_$$}"
 JOB_SOURCE="${JOB_SOURCE:-cli-wrapper}"
 JOB_RUN_DIR="${JOB_RUN_DIR:-$RUN_DIR_VALUE}"
@@ -144,6 +150,11 @@ mkdir -p "$JOB_RUN_DIR"
 JOB_LOG_PATH="${JOB_LOG_PATH:-$REPO_DIR/logs/${JOB_ID}.log}"
 mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
+
+export ASR_AUDIO_DIR="${ASR_AUDIO_DIR:-$REPO_DIR/uploads/audio}"
+if [ "$RATE_LIMIT_SAFE_VALUE" = "1" ]; then
+    export YT_ASR_RATE_LIMIT_SAFE=1
+fi
 
 CMD_ARGS=(
     "recover_asr_transcripts.py"
@@ -212,7 +223,7 @@ echo "Job ID: $JOB_ID"
 echo ""
 
 set +e
-"${CMD_ARGS[@]}"
+"$VENV_PYTHON" "${CMD_ARGS[@]}"
 EXIT_CODE=$?
 set -e
 

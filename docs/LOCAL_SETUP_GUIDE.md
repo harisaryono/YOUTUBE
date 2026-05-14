@@ -1,6 +1,6 @@
 # Local Setup Guide - YouTube Transcript Repository
 
-This repository was copied from the production server (`yt-server` at `8.215.77.132`). To run it locally, you need to update the following server-specific configurations.
+This repository was copied from a production server. To run it locally, set the coordinator URL explicitly through `YT_PROVIDER_COORDINATOR_URL` and keep server-specific paths out of the runtime config.
 
 ## Critical Changes Required
 
@@ -9,17 +9,17 @@ This repository was copied from the production server (`yt-server` at `8.215.77.
 **Current (Server):**
 ```bash
 EXTERNAL_VENV_DIR=/media/harry/DATA120B/venv_youtube
-YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788
+YT_PROVIDER_COORDINATOR_URL=<production-coordinator-url>
 ```
 
 **Required (Local):**
 ```bash
 EXTERNAL_VENV_DIR=/media/harry/DATA120B/venv_youtube
-# Option 1: Use remote coordinator (recommended)
-YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788
+# Option 1: Use the configured coordinator URL
+YT_PROVIDER_COORDINATOR_URL=http://localhost:8788
 
-# Option 2: Run local coordinator (advanced)
-# YT_PROVIDER_COORDINATOR_URL=http://localhost:8788
+# Option 2: Point to a remote coordinator via the same env var
+# YT_PROVIDER_COORDINATOR_URL=<remote-coordinator-url>
 ```
 
 ### 2. Virtual Environment
@@ -204,7 +204,7 @@ sed -i 's|/media/harry/128NEW1/GIT/YOUTUBE/uploads|./uploads|g' partial_py/sync_
 /media/harry/DATA120B/venv_youtube/bin/python3 manage_database.py stats
 
 # Test coordinator connection (if using remote)
-curl -s http://8.215.77.132:8788/health
+curl -s http://localhost:8788/health
 
 # Test a simple script
 ./scripts/discover.sh --help
@@ -220,7 +220,7 @@ curl -s http://8.215.77.132:8788/health
 ## Coordinator Options
 
 ### Option A: Use Remote Coordinator (Recommended)
-Keep `YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788` in `.env`
+Keep `YT_PROVIDER_COORDINATOR_URL` set in `.env` so the coordinator source of truth stays explicit
 
 **Pros:**
 - No additional setup
@@ -235,7 +235,7 @@ Keep `YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788` in `.env`
 1. Copy coordinator server code from server
 2. Set up local database
 3. Configure local API keys
-4. Update `.env`: `YT_PROVIDER_COORDINATOR_URL=http://localhost:8788`
+4. Update `.env`: set `YT_PROVIDER_COORDINATOR_URL` to the correct coordinator URL
 
 **See:** `ssh yt-server 'cat /root/services/COORDINATOR_GUIDE.md'` for setup instructions
 
@@ -246,7 +246,7 @@ Keep `YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788` in `.env`
 
 ### Issue: "Coordinator tidak bisa dihubungi"
 **Solution:** 
-- Check network connectivity to `8.215.77.132:8788`
+- Check network connectivity to the configured coordinator URL
 - Or set up local coordinator
 - Or temporarily disable coordinator-dependent features
 
@@ -291,7 +291,7 @@ After completing the setup, verify:
 - [ ] Virtual environment exists and is accessible: `/media/harry/DATA120B/venv_youtube/bin/python3 --version`
 - [ ] All dependencies installed: `/media/harry/DATA120B/venv_youtube/bin/pip list`
 - [ ] Database accessible: `/media/harry/DATA120B/venv_youtube/bin/python3 manage_database.py stats`
-- [ ] Coordinator accessible (if using remote): `curl http://8.215.77.132:8788/health`
+- [ ] Coordinator accessible (if using remote): `curl "$YT_PROVIDER_COORDINATOR_URL/health"`
 - [ ] Documentation paths updated (no more `/root/YOUTUBE/` in README)
 - [ ] Cookie files exist in correct location
 - [ ] Flask app starts: `./run_flask.sh`
@@ -309,4 +309,4 @@ Once setup is complete:
 
 **Last Updated:** 2026-04-25  
 **Repository Root:** `/media/harry/DATA120B/GIT/YOUTUBE`  
-**Server Origin:** `yt-server` (8.215.77.132)
+**Server Origin:** production coordinator server

@@ -282,7 +282,7 @@ def safety_gate_for_job(
 
     # --- Stage-specific checks ---
 
-    if stage in ("discovery", "transcript"):
+    if stage in ("discovery", "transcript", "audio_download"):
         # YouTube-dependent stages
         if youtube_health.global_cooldown_active:
             return SafetyDecision.wait(
@@ -299,11 +299,22 @@ def safety_gate_for_job(
                 recommendation=cd.get("recommendation", ""),
             )
 
-    if stage in ("resume", "format"):
+    if stage == "asr":
+        if config.get("asr", {}).get("require_local_audio", True):
+            audio_path = str(job.get("audio_file_path") or "").strip()
+            if audio_path and not Path(audio_path).exists():
+                return SafetyDecision.wait(
+                    f"Local audio missing: {audio_path}",
+                    recommendation="Requeue audio_download for the video",
+                )
+
+    if stage in ("asr", "resume", "format"):
         # Memory check for LLM stages
         min_mem = config.get("system", {}).get(
             f"min_memory_mb_{stage}", 1200
         )
+        if stage == "asr":
+            min_mem = config.get("system", {}).get("min_memory_mb_asr", 2500)
         if sys_health.mem_available_mb < min_mem:
             return SafetyDecision.wait(
                 f"Memory low for {stage}: {sys_health.mem_available_mb:.0f} MB available (need {min_mem} MB)",
@@ -315,7 +326,7 @@ def safety_gate_for_job(
         # Lease acquisition is handled by the worker script itself (launch_resume_queue.py etc).
         # Blocking here based on coordinator_status_accounts is unreliable because
         # leaseable=None means "status unknown" not "unavailable".
-        if config.get(stage, {}).get("require_lease", True):
+        if stage in ("resume", "format", "asr") and config.get(stage, {}).get("require_lease", True):
             if not provider_health.coordinator_available:
                 return SafetyDecision.wait(
                     "Coordinator unavailable, cannot get provider lease",
@@ -331,19 +342,8 @@ def safety_gate_for_job(
         # Idle hours check for format
         if config.get("format", {}).get("prefer_idle_hours", False):
             if not _is_idle_hours(config):
-                return SafetyDecision.wait(
-                    "Format only runs during idle hours (22:00-05:00 Asia/Jakarta)",
-                    cooldown_seconds=1800,
-                    recommendation="Schedule format jobs during night hours",
-                )
-
-    if stage == "asr":
-        # ASR is expensive — be extra careful
-        min_mem = config.get("system", {}).get("min_memory_mb_asr", 2500)
-        if sys_health.mem_available_mb < min_mem:
-            return SafetyDecision.wait(
-                f"Memory low for ASR: {sys_health.mem_available_mb:.0f} MB available (need {min_mem} MB)",
-                cooldown_seconds=1800,
-            )
+                # Aggressive mode: idle hours are advisory, not a hard block.
+                # If the machine has room, keep formatting instead of cooling down.
+                return SafetyDecision.run()
 
     return SafetyDecision.run()

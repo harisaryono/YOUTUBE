@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from contextlib import contextmanager
 from database_blobs import BlobStorage
+from database_search import SearchStorage
 
 
 def _normalize_channel_url(channel_id: str, channel_url: str) -> str:
@@ -106,6 +107,8 @@ class OptimizedDatabase:
         # Initialize Blob Storage (separate DB)
         blob_db_path = str(Path(db_path).parent / "youtube_transcripts_blobs.db")
         self.blob_storage = BlobStorage(blob_db_path)
+        search_db_path = str(Path(db_path).parent / "youtube_transcripts_search.db")
+        self.search_storage = SearchStorage(search_db_path, self.db_path)
         
         # Create base directory
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -195,49 +198,6 @@ class OptimizedDatabase:
                 )
             """)
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS videos_search_cache (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    video_id TEXT UNIQUE NOT NULL,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    transcript_search TEXT,
-                    summary_search TEXT,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_videos_search_cache_video_id
-                ON videos_search_cache(video_id)
-            """)
-            cursor.execute("""
-                CREATE VIRTUAL TABLE IF NOT EXISTS videos_search_fts
-                USING fts5(title, description, transcript_search, summary_search,
-                           content='videos_search_cache', content_rowid='id')
-            """)
-            cursor.execute("DROP TRIGGER IF EXISTS videos_search_cache_ai")
-            cursor.execute("DROP TRIGGER IF EXISTS videos_search_cache_ad")
-            cursor.execute("DROP TRIGGER IF EXISTS videos_search_cache_au")
-            cursor.execute("""
-                CREATE TRIGGER videos_search_cache_ai AFTER INSERT ON videos_search_cache BEGIN
-                    INSERT INTO videos_search_fts(rowid, title, description, transcript_search, summary_search)
-                    VALUES (new.id, new.title, new.description, new.transcript_search, new.summary_search);
-                END
-            """)
-            cursor.execute("""
-                CREATE TRIGGER videos_search_cache_ad AFTER DELETE ON videos_search_cache BEGIN
-                    INSERT INTO videos_search_fts(videos_search_fts, rowid, title, description, transcript_search, summary_search)
-                    VALUES('delete', old.id, old.title, old.description, old.transcript_search, old.summary_search);
-                END
-            """)
-            cursor.execute("""
-                CREATE TRIGGER videos_search_cache_au AFTER UPDATE ON videos_search_cache BEGIN
-                    INSERT INTO videos_search_fts(videos_search_fts, rowid, title, description, transcript_search, summary_search)
-                    VALUES('delete', old.id, old.title, old.description, old.transcript_search, old.summary_search);
-                    INSERT INTO videos_search_fts(rowid, title, description, transcript_search, summary_search)
-                    VALUES (new.id, new.title, new.description, new.transcript_search, new.summary_search);
-                END
-            """)
-            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS channel_aliases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     channel_db_id INTEGER NOT NULL,
@@ -261,9 +221,8 @@ class OptimizedDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_videos_transcript_downloaded ON videos(transcript_downloaded)
             """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_videos_title ON videos(title)
-            """)
+            cursor.execute("DROP INDEX IF EXISTS idx_videos_title")
+            cursor.execute("DROP INDEX IF EXISTS idx_videos_upload_date")
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_videos_is_short ON videos(is_short)
             """)
@@ -377,6 +336,27 @@ class OptimizedDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_video_asr_chunks_provider_model
                 ON video_asr_chunks(provider, model_name, status, chunk_index)
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS video_audio_assets (
+                    video_id TEXT PRIMARY KEY,
+                    audio_file_path TEXT NOT NULL DEFAULT '',
+                    audio_format TEXT NOT NULL DEFAULT '',
+                    duration INTEGER DEFAULT 0,
+                    file_size_bytes INTEGER DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    retry_after TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    error_text TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(video_id) REFERENCES videos(video_id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_video_audio_assets_status_retry
+                ON video_audio_assets(status, retry_after)
             """)
 
             cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_insert")
@@ -732,7 +712,11 @@ class OptimizedDatabase:
                                      summary_file_path: str, transcript_language: str,
                                      word_count: int = 0, line_count: int = 0,
                                      transcript_text: Optional[str] = None):
-        """Update video dengan info transcript file paths"""
+        """Update video dengan info transcript file paths.
+
+        Transcript content disimpan ke blob storage; tabel videos hanya
+        menyimpan path/status agar tidak menduplikasi payload besar.
+        """
         try:
             if transcript_text is not None:
                 try:
@@ -754,9 +738,6 @@ class OptimizedDatabase:
                 word_count,
                 line_count,
             ]
-            if transcript_text is not None:
-                fields.append("transcript_text = ?")
-                params.append(transcript_text)
             fields.extend([
                 "transcript_retry_after = NULL",
                 "transcript_retry_reason = NULL",
@@ -838,7 +819,11 @@ class OptimizedDatabase:
             raise Exception(f"Gagal upsert chunk ASR: {str(e)}")
 
     def update_video_with_summary(self, video_id: str, summary_file_path: str, summary_text: str = ""):
-        """Persist hasil resume langsung ke DB."""
+        """Persist hasil resume langsung ke DB.
+
+        Summary content disimpan ke blob storage; tabel videos hanya
+        menyimpan path/status agar tidak menduplikasi payload besar.
+        """
         try:
             if summary_text:
                 try:
@@ -849,10 +834,9 @@ class OptimizedDatabase:
                 cursor.execute("""
                     UPDATE videos
                     SET summary_file_path = ?,
-                        summary_text = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE video_id = ?
-                """, (summary_file_path, summary_text, video_id))
+                """, (summary_file_path, video_id))
             try:
                 self.refresh_video_search_cache(video_id)
             except Exception:
@@ -872,6 +856,133 @@ class OptimizedDatabase:
                 """, (formatted_file_path, video_id))
         except Exception as e:
             raise Exception(f"Gagal update video dengan formatted transcript: {str(e)}")
+
+    def get_video_audio_asset(self, video_id: str) -> dict | None:
+        """Return a single audio asset row for a video if present."""
+        cursor = self.conn.cursor()
+        try:
+            row = cursor.execute(
+                "SELECT * FROM video_audio_assets WHERE video_id = ? LIMIT 1",
+                (video_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            cursor.close()
+
+    def upsert_video_audio_asset(
+        self,
+        video_id: str,
+        audio_file_path: str = "",
+        audio_format: str = "",
+        duration: int = 0,
+        file_size_bytes: int = 0,
+        status: str = "pending",
+        retry_after: str | None = None,
+        retry_count: int = 0,
+        error_text: str = "",
+    ) -> None:
+        """Create or update a local audio asset row."""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO video_audio_assets (
+                        video_id, audio_file_path, audio_format, duration,
+                        file_size_bytes, status, retry_after, retry_count,
+                        error_text, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(video_id) DO UPDATE SET
+                        audio_file_path = excluded.audio_file_path,
+                        audio_format = excluded.audio_format,
+                        duration = excluded.duration,
+                        file_size_bytes = excluded.file_size_bytes,
+                        status = excluded.status,
+                        retry_after = excluded.retry_after,
+                        retry_count = excluded.retry_count,
+                        error_text = excluded.error_text,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        str(video_id or ""),
+                        str(audio_file_path or ""),
+                        str(audio_format or ""),
+                        int(duration or 0),
+                        int(file_size_bytes or 0),
+                        str(status or "pending"),
+                        retry_after,
+                        int(retry_count or 0),
+                        str(error_text or "")[:1000],
+                    ),
+                )
+        except Exception as e:
+            raise Exception(f"Gagal upsert audio asset: {str(e)}")
+
+    def mark_video_audio_downloaded(
+        self,
+        video_id: str,
+        audio_file_path: str,
+        audio_format: str = "",
+        duration: int = 0,
+        file_size_bytes: int = 0,
+    ) -> None:
+        """Mark local audio as downloaded and ready for ASR."""
+        self.upsert_video_audio_asset(
+            video_id=video_id,
+            audio_file_path=audio_file_path,
+            audio_format=audio_format,
+            duration=duration,
+            file_size_bytes=file_size_bytes,
+            status="downloaded",
+            retry_after=None,
+            retry_count=0,
+            error_text="",
+        )
+
+    def mark_video_audio_consumed(
+        self,
+        video_id: str,
+        audio_file_path: str = "",
+        audio_format: str = "",
+        duration: int = 0,
+        file_size_bytes: int = 0,
+    ) -> None:
+        """Mark local audio as consumed after successful ASR."""
+        self.upsert_video_audio_asset(
+            video_id=video_id,
+            audio_file_path=audio_file_path,
+            audio_format=audio_format,
+            duration=duration,
+            file_size_bytes=file_size_bytes,
+            status="consumed",
+            retry_after=None,
+            retry_count=0,
+            error_text="",
+        )
+
+    def mark_video_audio_download_retry_later(self, video_id: str, reason: str, retry_after_hours: int = 24) -> None:
+        """Mark audio download as retryable after a cooldown."""
+        hours = max(1, int(retry_after_hours or 24))
+        modifier = f"+{hours} hours"
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO video_audio_assets (
+                        video_id, audio_file_path, audio_format, duration,
+                        file_size_bytes, status, retry_after, retry_count,
+                        error_text, created_at, updated_at
+                    ) VALUES (?, '', '', 0, 0, 'failed', datetime('now', ?), 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(video_id) DO UPDATE SET
+                        status = 'failed',
+                        retry_after = datetime('now', ?),
+                        retry_count = COALESCE(video_audio_assets.retry_count, 0) + 1,
+                        error_text = excluded.error_text,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (video_id, modifier, str(reason or "")[:1000], modifier),
+                )
+        except Exception as e:
+            raise Exception(f"Gagal menandai retry later untuk audio: {str(e)}")
 
     def mark_video_transcript_retry_later(self, video_id: str, reason: str, retry_after_hours: int = 24):
         """Tandai video untuk dicoba ulang nanti tanpa mengubah state transcript utama."""
@@ -934,13 +1045,11 @@ class OptimizedDatabase:
                 if not row:
                     return None
                 transcript_search = self.read_transcript(video_id) or ""
-                summary_search = self.read_summary(video_id) or ""
                 return {
                     "video_id": str(row["video_id"] or "").strip(),
                     "title": str(row["title"] or "").strip(),
                     "description": str(row["description"] or ""),
                     "transcript_search": transcript_search,
-                    "summary_search": summary_search,
                 }
         except Exception:
             return None
@@ -949,30 +1058,15 @@ class OptimizedDatabase:
         """Refresh blob-first FTS search cache for one video."""
         payload = self._build_search_cache_payload(video_id)
         try:
-            with self._get_cursor() as cursor:
-                if not payload:
-                    cursor.execute("DELETE FROM videos_search_cache WHERE video_id = ?", (video_id,))
-                    return
-                cursor.execute(
-                    """
-                    INSERT INTO videos_search_cache (
-                        video_id, title, description, transcript_search, summary_search, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(video_id) DO UPDATE SET
-                        title = excluded.title,
-                        description = excluded.description,
-                        transcript_search = excluded.transcript_search,
-                        summary_search = excluded.summary_search,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    (
-                        payload["video_id"],
-                        payload["title"],
-                        payload["description"],
-                        payload["transcript_search"],
-                        payload["summary_search"],
-                    ),
-                )
+            if not payload:
+                self.search_storage.delete_cache(video_id)
+                return
+            self.search_storage.upsert_cache(
+                payload["video_id"],
+                payload["title"],
+                payload["description"],
+                payload["transcript_search"],
+            )
         except Exception:
             pass
 
@@ -1749,51 +1843,20 @@ class OptimizedDatabase:
                 pass
 
         try:
-            with self._get_cursor() as cursor:
-                fts_query = self._build_fts_query(query)
-                if fts_query:
-                    cursor.execute("""
-                        SELECT v.id, v.video_id, v.title, v.video_url, v.duration, v.upload_date,
-                               v.view_count, v.thumbnail_url, v.transcript_downloaded, v.word_count, v.created_at,
-                               c.channel_id, c.channel_name
-                        FROM videos_search_fts
-                        JOIN videos_search_cache sc ON sc.id = videos_search_fts.rowid
-                        JOIN videos v ON v.video_id = sc.video_id
-                        JOIN channels c ON v.channel_id = c.id
-                        WHERE videos_search_fts MATCH ?
-                          AND (v.is_short = 0 OR v.is_short IS NULL)
-                          AND (v.is_member_only = 0 OR v.is_member_only IS NULL)
-                        ORDER BY bm25(videos_search_fts), v.created_at DESC
-                        LIMIT ? OFFSET ?
-                    """, (fts_query, limit, offset))
-                else:
-                    search_pattern = f"%{query}%"
-                    cursor.execute("""
-                        SELECT v.id, v.video_id, v.title, v.video_url, v.duration, v.upload_date,
-                               v.view_count, v.thumbnail_url, v.transcript_downloaded, v.word_count, v.created_at,
-                               c.channel_id, c.channel_name
-                        FROM videos v
-                        JOIN channels c ON v.channel_id = c.id
-                        WHERE (v.title LIKE ? OR v.description LIKE ?)
-                          AND (v.is_short = 0 OR v.is_short IS NULL)
-                          AND (v.is_member_only = 0 OR v.is_member_only IS NULL)
-                        ORDER BY v.created_at DESC
-                        LIMIT ? OFFSET ?
-                    """, (search_pattern, search_pattern, limit, offset))
-                
-                results = cursor.fetchall()
-                data = [dict(row) for row in results]
-                
-                # Update cache
-                try:
+            results = self.search_storage.search_videos(query, limit=limit, offset=offset)
+            data = [dict(row) for row in results]
+
+            # Update cache
+            try:
+                with self._get_cursor() as cursor:
                     cursor.execute(
                         "INSERT OR REPLACE INTO cached_stats (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-                        (cache_key, json.dumps(data))
+                        (cache_key, json.dumps(data)),
                     )
-                except Exception:
-                    pass
-                
-                return data
+            except Exception:
+                pass
+
+            return data
             
         except Exception as e:
             raise Exception(f"Gagal mencari video: {str(e)}")
@@ -1815,40 +1878,19 @@ class OptimizedDatabase:
                 pass
 
         try:
-            with self._get_cursor() as cursor:
-                fts_query = self._build_fts_query(query)
-                if fts_query:
-                    cursor.execute("""
-                        SELECT COUNT(*) as count
-                        FROM videos_search_fts
-                        JOIN videos_search_cache sc ON sc.id = videos_search_fts.rowid
-                        JOIN videos v ON v.video_id = sc.video_id
-                        WHERE videos_search_fts MATCH ?
-                          AND (v.is_short = 0 OR v.is_short IS NULL)
-                          AND (v.is_member_only = 0 OR v.is_member_only IS NULL)
-                    """, (fts_query,))
-                else:
-                    search_pattern = f"%{query}%"
-                    cursor.execute("""
-                        SELECT COUNT(*) as count
-                        FROM videos v
-                        WHERE (v.title LIKE ? OR v.description LIKE ?)
-                          AND (v.is_short = 0 OR v.is_short IS NULL)
-                          AND (v.is_member_only = 0 OR v.is_member_only IS NULL)
-                    """, (search_pattern, search_pattern))
-                result = cursor.fetchone()
-                count = int(result["count"]) if result else 0
-                
-                # Update cache
-                try:
+            count = int(self.search_storage.count_search_videos(query))
+
+            # Update cache
+            try:
+                with self._get_cursor() as cursor:
                     cursor.execute(
                         "INSERT OR REPLACE INTO cached_stats (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-                        (cache_key, str(count))
+                        (cache_key, str(count)),
                     )
-                except Exception:
-                    pass
-                
-                return count
+            except Exception:
+                pass
+
+            return count
         except Exception as e:
             raise Exception(f"Gagal menghitung hasil pencarian video: {str(e)}")
     
@@ -2358,6 +2400,11 @@ class OptimizedDatabase:
         """Tutup koneksi database"""
         if self.conn:
             self.conn.close()
+        if getattr(self, "search_storage", None) is not None:
+            try:
+                self.search_storage.close()
+            except Exception:
+                pass
 
     def __enter__(self):
         return self

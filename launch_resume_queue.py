@@ -348,7 +348,7 @@ def run_single_task(
     write_tasks_csv(task_csv, [{"video_id": video_id, "channel_name": str(task.get("channel_name") or "")}])
     env = os.environ.copy()
     env["YT_PROVIDER_COORDINATOR_URL"] = str(
-        os.getenv("YT_PROVIDER_COORDINATOR_URL", "http://8.215.77.132:8788")
+        os.getenv("YT_PROVIDER_COORDINATOR_URL", "http://127.0.0.1:8788")
     ).strip()
     cmd = [
         PYTHON_BIN,

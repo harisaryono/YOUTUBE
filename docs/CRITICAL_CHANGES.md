@@ -111,7 +111,7 @@ These can be ignored or updated later:
 
 **Keep as-is (Recommended):**
 ```bash
-YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788
+YT_PROVIDER_COORDINATOR_URL=http://127.0.0.1:8788
 ```
 
 This uses the production coordinator. You can run the system locally without setting up a local coordinator.

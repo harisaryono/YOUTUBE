@@ -263,7 +263,7 @@ Transkripsi audio/MP3 via lease coordinator.
 8. 429/timeout → mark retryable, release cleanly
 9. Auth error → stop, report blocker
 
-**Default coordinator:** `http://8.215.77.132:8788`
+**Default coordinator:** baca dari `YT_PROVIDER_COORDINATOR_URL` (fallback lokal `http://127.0.0.1:8788`)
 
 ## webshare-proxy-rotation
 

@@ -77,6 +77,13 @@ def run_once(
             message=f"Cleared {cleared_locks} expired lock(s)",
             severity="info",
         )
+    cleared_stale_locks = state.clear_stale_pid_locks()
+    if cleared_stale_locks > 0:
+        state.add_event(
+            event_type="cleanup",
+            message=f"Cleared {cleared_stale_locks} stale pid lock(s)",
+            severity="info",
+        )
 
     # 2. Check health
     sys_health = check_system_health(config)
@@ -133,29 +140,18 @@ def run_once(
             stage = job.get("stage", "")
             lock_key = f"stage:{stage}"
 
-            # Check stage lock — prevent duplicate stage runs
-            if state.is_locked(lock_key):
-                state.add_event(
-                    event_type="deferred",
-                    message=f"{stage} already running (lock held), deferring",
-                    stage=stage,
-                    scope=job.get("scope", ""),
-                    severity="info",
-                )
-                cycle_result["jobs_deferred"] += 1
-                continue
-
             if dry_run:
                 print(f"  [DRY-RUN] Would dispatch: {job.get('description', stage)}")
                 cycle_result["jobs_dispatched"] += 1
                 continue
 
-            # Acquire stage lock — check return to prevent race condition
+            # Acquire stage lock and always release it, even if dispatch fails.
             if not state.acquire_lock(lock_key, ttl_seconds=7200):
                 state.add_event(
                     event_type="deferred",
-                    message=f"{stage} lock contention (another process holds it), deferring",
+                    message=f"{stage} lock could not be acquired, deferring",
                     stage=stage,
+                    scope=job.get("scope", ""),
                     severity="info",
                 )
                 cycle_result["jobs_deferred"] += 1
@@ -291,8 +287,13 @@ def run_loop(
             else:
                 sleep_seconds = config.get("loop", {}).get("idle_sleep_seconds", 900)
         else:
-            # Jobs planned but all deferred — moderate wait
-            sleep_seconds = config.get("loop", {}).get("error_sleep_seconds", 1800)
+            # Jobs were planned but mostly/fully deferred.
+            # In aggressive mode, check again soon unless a real cooldown says otherwise.
+            next_wakeup = get_next_wakeup(state)
+            if next_wakeup > 0:
+                sleep_seconds = min(next_wakeup, config.get("loop", {}).get("idle_sleep_seconds", 900))
+            else:
+                sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
 
         # Ensure minimum sleep
         sleep_seconds = max(sleep_seconds, config.get("loop", {}).get("min_sleep_seconds", 60))
