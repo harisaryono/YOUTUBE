@@ -19,6 +19,7 @@ cookies*.txt
 
 # Internal documentation (server-specific, not for public repo)
 COORDINATOR_GUIDE.md
+/partial_ops/
 
 # Databases and SQLite sidecars
 db/*
@@ -30,7 +31,9 @@ db/*
 *.tar.gz
 
 # Runtime outputs
+/runs/orchestrator/
 artifacts/*
+
 !artifacts/README.md
 backups/*
 !backups/README.md

@@ -1,0 +1,65 @@
+# Orchestrator Configuration
+# Profile: safe | normal | fast
+profile: safe
+
+loop:
+  # Minimum sleep between cycles (seconds)
+  min_sleep_seconds: 60
+  # Sleep when no jobs found (seconds)
+  idle_sleep_seconds: 900
+  # Sleep after errors (seconds)
+  error_sleep_seconds: 1800
+
+system:
+  # Minimum free disk space (GB) before stopping jobs
+  min_free_disk_gb: 5
+  # Minimum available memory for resume jobs (MB)
+  min_memory_mb_resume: 1500
+  # Minimum available memory for format jobs (MB)
+  min_memory_mb_format: 1200
+  # Minimum available memory for ASR jobs (MB)
+  min_memory_mb_asr: 2500
+
+youtube:
+  # How often to re-discover channels (hours)
+  discovery_interval_hours: 24
+  # Workers when in safe mode
+  safe_transcript_workers: 2
+  # Workers when in normal mode
+  normal_transcript_workers: 5
+  # Cooldown after hard YouTube block (hours)
+  hard_block_cooldown_hours: 6
+  # Cooldown after bot detection (hours)
+  bot_detection_cooldown_hours: 24
+  # Max consecutive hard blocks before escalating
+  max_consecutive_hard_blocks: 3
+  # Delay between video transcript requests (seconds)
+  inter_video_delay_min: 8
+  inter_video_delay_max: 15
+
+resume:
+  enabled: true
+  max_workers: 8
+  require_lease: true
+  # Provider priority: nvidia_first | groq_first | auto
+  provider_plan: nvidia_first
+
+format:
+  enabled: true
+  max_workers: 6
+  # Only run during idle hours (when YouTube stages are paused)
+  prefer_idle_hours: true
+  idle_hours:
+    start: "22:00"
+    end: "05:00"
+
+asr:
+  # ASR is disabled by default — enable explicitly
+  enabled: false
+  max_video_workers: 1
+  max_duration_minutes: 60
+  require_cached_audio: false
+
+report:
+  write_markdown: true
+  notify_on_blocking: true

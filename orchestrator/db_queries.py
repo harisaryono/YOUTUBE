@@ -1,0 +1,291 @@
+"""
+Database Queries — Find work items from the YouTube database.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .state import OrchestratorState
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DB_PATH = PROJECT_ROOT / "db" / "youtube_transcripts.db"
+
+
+def _connect(db_path: str | Path | None = None) -> sqlite3.Connection:
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def count_pending_imports(state: OrchestratorState) -> int:
+    """Count pending updates in pending_updates directory."""
+    pending_dir = PROJECT_ROOT / "pending_updates"
+    if not pending_dir.exists():
+        return 0
+    return len(list(pending_dir.glob("*.csv"))) + len(list(pending_dir.glob("*.json")))
+
+
+def find_channels_need_discovery(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    limit: int = 5,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Find channels that need discovery.
+    Priority: never-discovered > stale > recently done.
+    """
+    conn = _connect(db_path)
+    interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
+
+    rows = conn.execute(
+        """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
+                  COALESCE(crs.scan_enabled, 1) as scan_enabled,
+                  COALESCE(crs.skip_reason, '') as skip_reason,
+                  c.updated_at as last_discovery_at
+           FROM channels c
+           LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
+           WHERE COALESCE(crs.scan_enabled, 1) = 1
+             AND (crs.skip_reason IS NULL OR crs.skip_reason = '')
+             AND (
+                 c.updated_at IS NULL
+                 OR c.updated_at < datetime('now', '-' || ? || ' hours')
+             )
+           ORDER BY
+               CASE WHEN c.updated_at IS NULL THEN 0 ELSE 1 END,
+               c.updated_at ASC
+           LIMIT ?""",
+        (interval_hours, limit),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["stage"] = "discovery"
+        d["scope"] = f"channel:{d['channel_id']}"
+        d["priority"] = 0 if d.get("last_discovery_at") is None else 1
+        result.append(d)
+
+    conn.close()
+    return result
+
+
+def find_videos_need_transcript(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    limit: int = 20,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Find videos that need transcript download.
+    Excludes: already downloaded, no_subtitle, member_only, shorts.
+    """
+    conn = _connect(db_path)
+
+    rows = conn.execute(
+        """SELECT v.id, v.video_id, v.title, v.channel_id,
+                  c.channel_id as channel_identifier,
+                  c.channel_name,
+                  COALESCE(v.duration, 0) as duration,
+                  COALESCE(v.transcript_retry_count, 0) as retry_count
+           FROM videos v
+           JOIN channels c ON v.channel_id = c.id
+           WHERE v.transcript_downloaded = 0
+             AND (v.transcript_language IS NULL OR v.transcript_language != 'no_subtitle')
+             AND COALESCE(v.is_member_only, 0) = 0
+             AND COALESCE(v.is_short, 0) = 0
+             AND (v.transcript_retry_after IS NULL OR v.transcript_retry_after <= datetime('now'))
+           ORDER BY
+               COALESCE(v.transcript_retry_count, 0) ASC,
+               v.upload_date DESC NULLS LAST,
+               v.id DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["stage"] = "transcript"
+        d["scope"] = f"channel:{d['channel_identifier']}"
+        result.append(d)
+
+    conn.close()
+    return result
+
+
+def find_videos_need_resume(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    limit: int = 30,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Find videos that have transcript but no resume.
+    """
+    conn = _connect(db_path)
+
+    rows = conn.execute(
+        """SELECT v.id, v.video_id, v.title, v.channel_id,
+                  c.channel_id as channel_identifier,
+                  c.channel_name,
+                  COALESCE(v.word_count, 0) as word_count
+           FROM videos v
+           JOIN channels c ON v.channel_id = c.id
+           WHERE v.transcript_downloaded = 1
+             AND (v.summary_file_path IS NULL OR v.summary_file_path = '')
+             AND (v.summary_text IS NULL OR v.summary_text = '')
+           ORDER BY v.word_count DESC, v.id DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["stage"] = "resume"
+        d["scope"] = "global"
+        result.append(d)
+
+    conn.close()
+    return result
+
+
+def find_videos_need_format(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    limit: int = 30,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Find videos that have transcript but no formatted version.
+    """
+    conn = _connect(db_path)
+
+    rows = conn.execute(
+        """SELECT v.id, v.video_id, v.title, v.channel_id,
+                  c.channel_id as channel_identifier,
+                  c.channel_name,
+                  COALESCE(v.word_count, 0) as word_count
+           FROM videos v
+           JOIN channels c ON v.channel_id = c.id
+           WHERE v.transcript_downloaded = 1
+             AND (v.transcript_formatted_path IS NULL OR v.transcript_formatted_path = '')
+           ORDER BY v.word_count DESC, v.id DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["stage"] = "format"
+        d["scope"] = "global"
+        result.append(d)
+
+    conn.close()
+    return result
+
+
+def find_videos_need_asr(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    limit: int = 5,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Find videos with no_subtitle that could use ASR.
+    Only if ASR is enabled in config.
+    """
+    if not config.get("asr", {}).get("enabled", False):
+        return []
+
+    max_duration = config.get("asr", {}).get("max_duration_minutes", 60) * 60
+    conn = _connect(db_path)
+
+    rows = conn.execute(
+        """SELECT v.id, v.video_id, v.title, v.channel_id,
+                  c.channel_id as channel_identifier,
+                  c.channel_name,
+                  COALESCE(v.duration, 0) as duration
+           FROM videos v
+           JOIN channels c ON v.channel_id = c.id
+           WHERE v.transcript_language = 'no_subtitle'
+             AND COALESCE(v.is_member_only, 0) = 0
+             AND COALESCE(v.is_short, 0) = 0
+             AND (v.duration IS NULL OR v.duration <= ?)
+           ORDER BY v.duration ASC NULLS LAST, v.id DESC
+           LIMIT ?""",
+        (max_duration, limit),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["stage"] = "asr"
+        d["scope"] = f"video:{d['video_id']}"
+        result.append(d)
+
+    conn.close()
+    return result
+
+
+def get_job_counts(db_path: str | Path | None = None) -> dict[str, int]:
+    """Get counts of pending work by category."""
+    conn = _connect(db_path)
+    counts: dict[str, int] = {}
+
+    # Channels needing discovery
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM channels c
+           LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
+           WHERE COALESCE(crs.scan_enabled, 1) = 1
+             AND (crs.skip_reason IS NULL OR crs.skip_reason = '')"""
+    ).fetchone()
+    counts["channels_total"] = row["cnt"] if row else 0
+
+    # Videos needing transcript
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_downloaded = 0
+             AND (transcript_language IS NULL OR transcript_language != 'no_subtitle')
+             AND COALESCE(is_member_only, 0) = 0
+             AND COALESCE(is_short, 0) = 0"""
+    ).fetchone()
+    counts["videos_need_transcript"] = row["cnt"] if row else 0
+
+    # Videos needing resume
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_downloaded = 1
+             AND (summary_file_path IS NULL OR summary_file_path = '')
+             AND (summary_text IS NULL OR summary_text = '')"""
+    ).fetchone()
+    counts["videos_need_resume"] = row["cnt"] if row else 0
+
+    # Videos needing format
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_downloaded = 1
+             AND (transcript_formatted_path IS NULL OR transcript_formatted_path = '')"""
+    ).fetchone()
+    counts["videos_need_format"] = row["cnt"] if row else 0
+
+    # Videos needing ASR
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_language = 'no_subtitle'
+             AND COALESCE(is_member_only, 0) = 0
+             AND COALESCE(is_short, 0) = 0"""
+    ).fetchone()
+    counts["videos_need_asr"] = row["cnt"] if row else 0
+
+    conn.close()
+    return counts
