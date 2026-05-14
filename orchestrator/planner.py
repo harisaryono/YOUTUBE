@@ -19,8 +19,8 @@ JOB_PRIORITY_AVAILABLE_WORK_FIRST = {
     "transcript": 1,
     "audio_download": 2,
     "asr": 3,
-    "resume": 4,
-    "format": 5,
+    "format": 4,
+    "resume": 5,
     "discovery": 6,
 }
 
@@ -30,8 +30,8 @@ JOB_PRIORITY_YOUTUBE_HEAVY = {
     "audio_download": 2,
     "discovery": 3,
     "asr": 4,
-    "resume": 5,
-    "format": 6,
+    "format": 5,
+    "resume": 6,
 }
 
 

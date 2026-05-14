@@ -195,15 +195,14 @@ def _build_stage_launch_command(
         return cmd, env, run_dir, log_path
 
     if stage == "format":
-        python = _get_venv_python()
-        script = PROJECT_ROOT / "format_transcripts_pool.py"
+        script = SCRIPTS_DIR / "format.sh"
         run_dir = _make_run_dir("format")
         log_path = run_dir / "stdout_stderr.log"
         max_workers = config.get("format", {}).get("max_workers", 4)
         limit = job.get("limit", config.get("format", {}).get("batch_limit", 500))
         channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
         cmd = [
-            python, str(script),
+            "bash", str(script),
             "--workers", str(max_workers),
             "--run-dir", str(run_dir),
         ]
@@ -259,20 +258,38 @@ def launch_job(
     exit_code_path = run_dir / "exit_code.txt"
     shell_cmd = _shell_wrap_command(cmd, exit_code_path)
     command_text = " ".join(shlex.quote(str(part)) for part in cmd)
+    job_id = f"{stage}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    env["JOB_ID"] = job_id
+    env["JOB_RUN_DIR"] = str(run_dir)
+    env["JOB_LOG_PATH"] = str(log_path)
+    env["JOB_SOURCE"] = "orchestrator"
+
+    try:
+        log_fh = open(log_path, "ab", buffering=0)
+    except Exception as e:
+        return {"success": False, "error": f"Failed to open log file: {e}"}
 
     try:
         process = subprocess.Popen(
             shell_cmd,
             cwd=str(PROJECT_ROOT),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
             env=env,
             start_new_session=True,
         )
     except Exception as e:
+        try:
+            log_fh.close()
+        except Exception:
+            pass
         return {"success": False, "error": f"Failed to launch {stage}: {e}"}
+    finally:
+        try:
+            log_fh.close()
+        except Exception:
+            pass
 
-    job_id = f"{stage}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
     group_name = _parallel_group_for_stage(stage)
     try:
         state.register_active_job(
