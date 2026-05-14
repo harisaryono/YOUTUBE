@@ -46,15 +46,18 @@ def plan_jobs(
             "count": pending_count,
         })
 
-    # 2. Discovery — max 1 batch per cycle
-    discovery_count = db_queries.count_channels_need_discovery(config, state)
-    if discovery_count > 0:
+    # 2. Discovery — max 1 batch per cycle, pick 1 real channel
+    channels = db_queries.find_channels_need_discovery(config, state, limit=1)
+    if channels:
+        ch = channels[0]
+        discovery_count = db_queries.count_channels_need_discovery(config, state)
         jobs.append({
             "stage": "discovery",
-            "scope": "youtube",
-            "priority": 1,
+            "scope": f"channel:{ch['channel_id']}",
+            "channel_id": ch["channel_id"],
             "limit": 1,
-            "description": f"Discover {discovery_count} channel(s) needing refresh",
+            "priority": 1,
+            "description": f"Discover {ch.get('channel_name', ch['channel_id'])} ({discovery_count} total pending)",
             "count": discovery_count,
         })
 

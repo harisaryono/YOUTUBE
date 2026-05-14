@@ -56,7 +56,7 @@ format:
 asr:
   # ASR untuk video no_subtitle — aktif
   enabled: true
-  max_video_workers: 2
+  max_video_workers: 1
   max_duration_minutes: 60
   require_cached_audio: false
 

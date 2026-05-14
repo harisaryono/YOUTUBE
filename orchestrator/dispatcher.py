@@ -144,9 +144,10 @@ def run_transcript(
     workers = config.get("youtube", {}).get("safe_transcript_workers", 2)
     run_dir = _make_run_dir("transcript")
 
+    limit = int(job.get("limit") or 20)
     cmd = [
         "bash", str(script),
-        "--limit", "20",
+        "--limit", str(limit),
         "--workers", str(workers),
         "--rate-limit-safe",
         "--run-dir", str(run_dir),
@@ -195,9 +196,10 @@ def run_resume(
     provider_plan = config.get("resume", {}).get("provider_plan", "nvidia_first")
     run_dir = _make_run_dir("resume")
 
+    limit = int(job.get("limit") or 20)
     cmd = [
         "bash", str(script),
-        "--limit", "20",
+        "--limit", str(limit),
         "--max-workers", str(max_workers),
         "--run-dir", str(run_dir),
     ]
@@ -237,9 +239,10 @@ def run_format(
     max_workers = config.get("format", {}).get("max_workers", 4)
     run_dir = _make_run_dir("format")
 
+    limit = int(job.get("limit") or 20)
     cmd = [
         python, str(script),
-        "--limit", "20",
+        "--limit", str(limit),
         "--workers", str(max_workers),
         "--run-dir", str(run_dir),
     ]

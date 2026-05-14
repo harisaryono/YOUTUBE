@@ -198,12 +198,13 @@ def check_provider_health(config: dict[str, Any], state: OrchestratorState) -> P
         )
         state.set("coordinator_last_ok", "1")
     except ImportError:
-        # Fallback: try direct HTTP health check
+        # Fallback: try direct HTTP health check via env var
         try:
             import urllib.request
             import json as _json
+            coordinator_url = os.getenv("YT_PROVIDER_COORDINATOR_URL", "http://127.0.0.1:8788").rstrip("/")
             req = urllib.request.Request(
-                "http://8.215.77.132:8788/health",
+                f"{coordinator_url}/health",
                 method="GET",
                 headers={"Accept": "application/json"},
             )

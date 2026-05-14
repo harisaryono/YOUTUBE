@@ -1,6 +1,6 @@
 # Project State
 
-- generated_at: `2026-05-14T10:50:36.009398+00:00`
+- generated_at: `2026-05-14T11:00:59.801028+00:00`
 - repo_type: YouTube transcript / resume / format / ASR pipeline
 - active web app: Flask under `flask_app/app.py`
 - database layout: active DBs are under `db/` with root symlinks for compat

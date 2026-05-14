@@ -150,14 +150,22 @@ def run_once(
                 cycle_result["jobs_dispatched"] += 1
                 continue
 
-            # Acquire stage lock
-            state.acquire_lock(lock_key, ttl_seconds=7200)
+            # Acquire stage lock — check return to prevent race condition
+            if not state.acquire_lock(lock_key, ttl_seconds=7200):
+                state.add_event(
+                    event_type="deferred",
+                    message=f"{stage} lock contention (another process holds it), deferring",
+                    stage=stage,
+                    severity="info",
+                )
+                cycle_result["jobs_deferred"] += 1
+                continue
 
             cycle_result["jobs_dispatched"] += 1
-            result = dispatch_job(job, config, state)
-
-            # Release stage lock
-            state.release_lock(lock_key)
+            try:
+                result = dispatch_job(job, config, state)
+            finally:
+                state.release_lock(lock_key)
 
             if result.get("success"):
                 cycle_result["jobs_succeeded"] += 1
