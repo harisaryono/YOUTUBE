@@ -196,8 +196,19 @@ def run_once(
                 continue
 
             cycle_result["jobs_dispatched"] += 1
+            result: dict[str, Any] = {
+                "success": False,
+                "error": "dispatch did not run",
+                "returncode": 1,
+            }
             try:
                 result = dispatch_job(job, config, state)
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "error": f"dispatch exception: {e}",
+                    "returncode": 1,
+                }
             finally:
                 state.release_lock(lock_key)
 

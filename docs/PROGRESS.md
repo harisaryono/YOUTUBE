@@ -320,3 +320,7 @@
   - Indentasi lock/dispatch di `orchestrator/daemon.py` sudah dibetulkan supaya `RUN` branch benar-benar acquire lock, dispatch job, dan release lock dalam satu blok yang sama.
   - Duplikasi mode `explain` dihapus; `explain` sekarang memakai inventory snapshot langsung.
   - Stage status report kini menampilkan `Audio Download` sebagai stage YouTube-limited yang terpisah.
+
+- **2026-05-14 (Local)**: Dispatch runner hardening ditambahkan.
+  - `run_once()` sekarang punya fallback `result` saat `dispatch_job()` melempar exception sebelum return.
+  - Lock tetap dilepas di `finally`, dan exception dispatch dicatat sebagai failure biasa agar cycle tidak mati mendadak.
