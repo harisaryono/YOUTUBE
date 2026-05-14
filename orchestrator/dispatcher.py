@@ -82,7 +82,9 @@ def _config_audio_dir(config: dict[str, Any]) -> str:
 
 def _parallel_group_for_stage(stage: str) -> str:
     stage = str(stage or "").strip().lower()
-    if stage in {"discovery", "transcript", "audio_download"}:
+    if stage == "discovery":
+        return "discovery"
+    if stage in {"transcript", "audio_download"}:
         return "youtube"
     if stage in {"resume", "asr"}:
         return "provider"
@@ -122,12 +124,15 @@ def _build_stage_launch_command(
         run_dir = _make_run_dir("discovery")
         log_path = run_dir / "stdout_stderr.log"
         channel_id = job.get("channel_id", "") or job.get("channel_identifier", "")
+        scan_mode = str(job.get("scan_mode") or "latest_only").strip().lower()
         cmd = [
             "bash", str(script),
-            "--latest-only",
-            "--recent-per-channel", "50",
             "--rate-limit-safe",
         ]
+        if scan_mode == "full_history":
+            cmd.append("--scan-all-missing")
+        else:
+            cmd.extend(["--latest-only", "--recent-per-channel", "50"])
         if channel_id:
             cmd.extend(["--channel-id", str(channel_id)])
         return cmd, env, run_dir, log_path
@@ -380,16 +385,19 @@ def run_discovery(
     python = _get_venv_python()
     script = SCRIPTS_DIR / "discover.sh"
     channel_id = job.get("channel_id", "") or job.get("channel_identifier", "")
+    scan_mode = str(job.get("scan_mode") or "latest_only").strip().lower()
 
     if not script.exists():
         return {"success": False, "error": f"Script not found: {script}"}
 
     cmd = [
         "bash", str(script),
-        "--latest-only",
-        "--recent-per-channel", "50",
         "--rate-limit-safe",
     ]
+    if scan_mode == "full_history":
+        cmd.append("--scan-all-missing")
+    else:
+        cmd.extend(["--latest-only", "--recent-per-channel", "50"])
     if channel_id:
         cmd.extend(["--channel-id", channel_id])
 

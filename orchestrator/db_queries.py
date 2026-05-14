@@ -24,6 +24,27 @@ def _connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_channel_runtime_discovery_columns(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA table_info(channel_runtime_state)").fetchall()
+    existing = {str(row["name"]) for row in rows}
+    if "last_discovery_scope" not in existing:
+        conn.execute("ALTER TABLE channel_runtime_state ADD COLUMN last_discovery_scope TEXT NOT NULL DEFAULT ''")
+    if "full_history_scanned_at" not in existing:
+        conn.execute("ALTER TABLE channel_runtime_state ADD COLUMN full_history_scanned_at TEXT")
+
+
+def _active_channel_cooldown_ids(state: OrchestratorState) -> set[str]:
+    active: set[str] = set()
+    for cd in state.list_active_cooldowns():
+        scope = str(cd.get("scope") or "").strip()
+        if not scope.startswith("channel:"):
+            continue
+        channel_id = scope.split("channel:", 1)[1].strip()
+        if channel_id:
+            active.add(channel_id)
+    return active
+
+
 def count_pending_imports(state: OrchestratorState) -> int:
     """Count pending updates in pending_updates directory."""
     pending_dir = PROJECT_ROOT / "pending_updates"
@@ -38,21 +59,65 @@ def count_channels_need_discovery(
     db_path: str | Path | None = None,
 ) -> int:
     """Count channels that need discovery."""
+    return len(find_channels_need_discovery(config, state, limit=1000000, db_path=db_path))
+
+
+def count_channels_need_full_history_discovery(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count channels that have never completed a full-history discovery scan."""
     conn = _connect(db_path)
-    interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
-    row = conn.execute(
-        """SELECT COUNT(*) as cnt FROM channels c
+    _ensure_channel_runtime_discovery_columns(conn)
+    active_cooldowns = _active_channel_cooldown_ids(state)
+    rows = conn.execute(
+        """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
+                  COALESCE(crs.scan_enabled, 1) as scan_enabled,
+                  COALESCE(crs.skip_reason, '') as skip_reason,
+                  c.updated_at as last_discovery_at,
+                  COALESCE(crs.last_discovery_scope, '') as last_discovery_scope,
+                  COALESCE(crs.full_history_scanned_at, '') as full_history_scanned_at
+           FROM channels c
            LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
            WHERE COALESCE(crs.scan_enabled, 1) = 1
              AND (crs.skip_reason IS NULL OR crs.skip_reason = '')
+             AND COALESCE(crs.full_history_scanned_at, '') = ''"""
+    ).fetchall()
+    conn.close()
+    return sum(1 for row in rows if str(row["channel_id"]) not in active_cooldowns)
+
+
+def count_channels_need_latest_discovery(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count channels that already had a full-history scan but are stale again."""
+    conn = _connect(db_path)
+    _ensure_channel_runtime_discovery_columns(conn)
+    interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
+    active_cooldowns = _active_channel_cooldown_ids(state)
+    rows = conn.execute(
+        """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
+                  COALESCE(crs.scan_enabled, 1) as scan_enabled,
+                  COALESCE(crs.skip_reason, '') as skip_reason,
+                  c.updated_at as last_discovery_at,
+                  COALESCE(crs.last_discovery_scope, '') as last_discovery_scope,
+                  COALESCE(crs.full_history_scanned_at, '') as full_history_scanned_at
+           FROM channels c
+           LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
+           WHERE COALESCE(crs.scan_enabled, 1) = 1
+             AND (crs.skip_reason IS NULL OR crs.skip_reason = '')
+             AND COALESCE(crs.full_history_scanned_at, '') != ''
              AND (
                  c.updated_at IS NULL
                  OR c.updated_at < datetime('now', '-' || ? || ' hours')
              )""",
         (interval_hours,),
-    ).fetchone()
+    ).fetchall()
     conn.close()
-    return row["cnt"] if row else 0
+    return sum(1 for row in rows if str(row["channel_id"]) not in active_cooldowns)
 
 
 def count_videos_need_transcript(
@@ -171,22 +236,28 @@ def find_channels_need_discovery(
     Priority: never-discovered > stale > recently done.
     """
     conn = _connect(db_path)
+    _ensure_channel_runtime_discovery_columns(conn)
     interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
+    active_cooldowns = _active_channel_cooldown_ids(state)
 
     rows = conn.execute(
         """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
                   COALESCE(crs.scan_enabled, 1) as scan_enabled,
                   COALESCE(crs.skip_reason, '') as skip_reason,
-                  c.updated_at as last_discovery_at
+                  c.updated_at as last_discovery_at,
+                  COALESCE(crs.last_discovery_scope, '') as last_discovery_scope,
+                  COALESCE(crs.full_history_scanned_at, '') as full_history_scanned_at
            FROM channels c
            LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
            WHERE COALESCE(crs.scan_enabled, 1) = 1
              AND (crs.skip_reason IS NULL OR crs.skip_reason = '')
              AND (
-                 c.updated_at IS NULL
+                 COALESCE(crs.full_history_scanned_at, '') = ''
+                 OR c.updated_at IS NULL
                  OR c.updated_at < datetime('now', '-' || ? || ' hours')
              )
            ORDER BY
+               CASE WHEN COALESCE(crs.full_history_scanned_at, '') = '' THEN 0 ELSE 1 END,
                CASE WHEN c.updated_at IS NULL THEN 0 ELSE 1 END,
                c.updated_at ASC
            LIMIT ?""",
@@ -196,9 +267,12 @@ def find_channels_need_discovery(
     result = []
     for row in rows:
         d = dict(row)
+        if str(d.get("channel_id") or "") in active_cooldowns:
+            continue
         d["stage"] = "discovery"
         d["scope"] = f"channel:{d['channel_id']}"
-        d["priority"] = 0 if d.get("last_discovery_at") is None else 1
+        d["scan_mode"] = "full_history" if not str(d.get("full_history_scanned_at") or "").strip() else "latest_only"
+        d["priority"] = 1 if d["scan_mode"] == "full_history" else 6
         result.append(d)
 
     conn.close()

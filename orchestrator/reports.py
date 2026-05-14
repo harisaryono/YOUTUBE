@@ -57,6 +57,8 @@ def build_inventory_snapshot(
         "resume": counts.get("videos_need_resume", 0),
         "format": counts.get("videos_need_format", 0),
         "discovery": db_queries.count_channels_need_discovery(config, state),
+        "discovery_full_history": counts.get("channels_need_discovery_full_history", 0),
+        "discovery_latest_only": counts.get("channels_need_discovery_latest_only", 0),
     }
 
     system = {

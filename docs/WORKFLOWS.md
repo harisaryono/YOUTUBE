@@ -39,6 +39,8 @@ Output:
 - plan discovery di `runs/<run_id>/01_discovery/discovery_plan.tsv`
 
 Catatan:
+- Channel yang belum punya `full_history_scanned_at` di `channel_runtime_state` diprioritaskan ke `scan-all-missing` dulu.
+- Setelah full-history pertama selesai, channel itu masuk rotasi `latest-only` untuk menangkap video baru dan retry incomplete tanpa mengulang full crawl terus-menerus.
 - Channel backlog diproses dengan `scan-all-missing`.
 - Channel bersih diproses dengan `latest-only`.
 

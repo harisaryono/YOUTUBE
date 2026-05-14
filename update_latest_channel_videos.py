@@ -520,17 +520,25 @@ def ensure_channel_runtime_table(con: sqlite3.Connection) -> None:
                 scan_enabled INTEGER NOT NULL DEFAULT 1,
                 skip_reason TEXT NOT NULL DEFAULT '',
                 source_status TEXT NOT NULL DEFAULT '',
+                last_discovery_scope TEXT NOT NULL DEFAULT '',
+                full_history_scanned_at TEXT,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        existing_cols = {str(row[1]) for row in con.execute(f"PRAGMA table_info({CHANNEL_RUNTIME_TABLE})").fetchall()}
+        if "last_discovery_scope" not in existing_cols:
+            con.execute(f"ALTER TABLE {CHANNEL_RUNTIME_TABLE} ADD COLUMN last_discovery_scope TEXT NOT NULL DEFAULT ''")
+        if "full_history_scanned_at" not in existing_cols:
+            con.execute(f"ALTER TABLE {CHANNEL_RUNTIME_TABLE} ADD COLUMN full_history_scanned_at TEXT")
 
 
 def get_channel_runtime_state(con: sqlite3.Connection, channel_id: str) -> sqlite3.Row | None:
     return con.execute(
         f"""
-        SELECT channel_id, scan_enabled, skip_reason, source_status, updated_at
+        SELECT channel_id, scan_enabled, skip_reason, source_status, last_discovery_scope,
+               full_history_scanned_at, updated_at
         FROM {CHANNEL_RUNTIME_TABLE}
         WHERE channel_id = ?
         LIMIT 1
@@ -564,6 +572,37 @@ def set_channel_scan_state(
                 1 if scan_enabled else 0,
                 str(skip_reason or "")[:1000],
                 str(source_status or "")[:200],
+            ),
+        )
+
+
+def set_channel_discovery_state(
+    con: sqlite3.Connection,
+    *,
+    channel_id: str,
+    scan_scope: str,
+    mark_full_history_scanned: bool = False,
+) -> None:
+    with con:
+        con.execute(
+            f"""
+            INSERT INTO {CHANNEL_RUNTIME_TABLE} (
+                channel_id, last_discovery_scope, full_history_scanned_at, updated_at
+            ) VALUES (
+                ?, ?, CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP
+            )
+            ON CONFLICT(channel_id) DO UPDATE SET
+                last_discovery_scope=excluded.last_discovery_scope,
+                full_history_scanned_at=CASE
+                    WHEN excluded.full_history_scanned_at IS NOT NULL THEN excluded.full_history_scanned_at
+                    ELSE {CHANNEL_RUNTIME_TABLE}.full_history_scanned_at
+                END,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                str(channel_id).strip(),
+                str(scan_scope or "")[:100],
+                1 if mark_full_history_scanned else 0,
             ),
         )
 
@@ -1091,252 +1130,136 @@ def main() -> int:
         )
         writer.writeheader()
 
-        for ch_index, channel in enumerate(channels, start=1):
-            channel_name = str(channel["channel_name"])
-            channel_id = str(channel["channel_id"])
-            channel_slug = safe_channel_slug(channel_id)
-            channel_url = str(channel["channel_url"])
-            runtime_state = get_channel_runtime_state(con, channel_id)
-            if runtime_state is not None and int(runtime_state["scan_enabled"] or 0) == 0:
-                note = str(runtime_state["skip_reason"] or runtime_state["source_status"] or "scan disabled").strip()
-                log(f"[CHANNEL {ch_index}/{len(channels)}] {channel_name} | skip permanen | {note}")
-                writer.writerow(
-                    {
-                        "channel_name": channel_name,
-                        "channel_id": channel_id,
-                        "video_id": "",
-                        "video_title": "",
-                        "video_url": "",
-                        "upload_date": "",
-                        "duration": "",
-                        "view_count": "",
-                        "thumbnail_url": "",
-                        "discovery_status": "channel_skipped",
-                        "transcript_status": "",
-                        "resume_status": "",
-                        "transcript_file_path": "",
-                        "summary_file_path": "",
-                        "scanned_entries": 0,
-                        "scan_scope": scope_label,
-                        "note": note,
-                    }
-                )
-                continue
-            log(f"[CHANNEL {ch_index}/{len(channels)}] {channel_name} | {channel_url}")
+    for ch_index, channel in enumerate(channels, start=1):
+        channel_name = str(channel["channel_name"])
+        channel_id = str(channel["channel_id"])
+        channel_slug = safe_channel_slug(channel_id)
+        channel_url = str(channel["channel_url"])
+        full_history_scan = args.scan_all_missing or args.recent_per_channel == 0
+        runtime_state = get_channel_runtime_state(con, channel_id)
+        if runtime_state is not None and int(runtime_state["scan_enabled"] or 0) == 0:
+            note = str(runtime_state["skip_reason"] or runtime_state["source_status"] or "scan disabled").strip()
+            log(f"[CHANNEL {ch_index}/{len(channels)}] {channel_name} | skip permanen | {note}")
+            writer.writerow(
+                {
+                    "channel_name": channel_name,
+                    "channel_id": channel_id,
+                    "video_id": "",
+                    "video_title": "",
+                    "video_url": "",
+                    "upload_date": "",
+                    "duration": "",
+                    "view_count": "",
+                    "thumbnail_url": "",
+                    "discovery_status": "channel_skipped",
+                    "transcript_status": "",
+                    "resume_status": "",
+                    "transcript_file_path": "",
+                    "summary_file_path": "",
+                    "scanned_entries": 0,
+                    "scan_scope": scope_label,
+                    "note": note,
+                }
+            )
+            continue
+        log(f"[CHANNEL {ch_index}/{len(channels)}] {channel_name} | {channel_url}")
 
-            try:
-                full_history_scan = args.scan_all_missing or args.recent_per_channel == 0
-                fetched_entries = fetch_channel_entries(
-                    channel_url,
-                    max_entries=None if full_history_scan else args.recent_per_channel,
-                    timeout_seconds=300.0 if full_history_scan else 90.0,
+        try:
+            fetched_entries = fetch_channel_entries(
+                channel_url,
+                max_entries=None if full_history_scan else args.recent_per_channel,
+                timeout_seconds=300.0 if full_history_scan else 90.0,
+            )
+        except Exception as exc:
+            detail = str(exc).strip()
+            if ("HTTP Error 404" in detail or "HTTP 404" in detail) and channel_id == "parkerprompts":
+                set_channel_scan_state(
+                    con,
+                    channel_id=channel_id,
+                    scan_enabled=False,
+                    skip_reason="YouTube channel/account banned or unavailable; skip permanent from normal scan",
+                    source_status="source_banned_404",
                 )
-            except Exception as exc:
-                detail = str(exc).strip()
-                if ("HTTP Error 404" in detail or "HTTP 404" in detail) and channel_id == "parkerprompts":
-                    set_channel_scan_state(
-                        con,
-                        channel_id=channel_id,
-                        scan_enabled=False,
-                        skip_reason="YouTube channel/account banned or unavailable; skip permanent from normal scan",
-                        source_status="source_banned_404",
-                    )
-                writer.writerow(
-                    {
-                        "channel_name": channel_name,
-                        "channel_id": channel_id,
-                        "video_id": "",
-                        "video_title": "",
-                        "video_url": "",
-                        "upload_date": "",
-                        "duration": "",
-                        "view_count": "",
-                        "thumbnail_url": "",
-                        "discovery_status": "channel_error",
-                        "transcript_status": "",
-                        "resume_status": "",
-                        "transcript_file_path": "",
-                        "summary_file_path": "",
-                        "scanned_entries": 0,
-                        "scan_scope": scope_label,
-                        "note": detail,
-                    }
-                )
-                continue
+            writer.writerow(
+                {
+                    "channel_name": channel_name,
+                    "channel_id": channel_id,
+                    "video_id": "",
+                    "video_title": "",
+                    "video_url": "",
+                    "upload_date": "",
+                    "duration": "",
+                    "view_count": "",
+                    "thumbnail_url": "",
+                    "discovery_status": "channel_error",
+                    "transcript_status": "",
+                    "resume_status": "",
+                    "transcript_file_path": "",
+                    "summary_file_path": "",
+                    "scanned_entries": 0,
+                    "scan_scope": scope_label,
+                    "note": detail,
+                }
+            )
+            continue
 
-            existing_state = get_existing_video_state(con, channel_db_id=int(channel["id"]))
-            candidates: list[tuple[str, dict]] = []
-            for entry in fetched_entries:
-                duration = int(entry.get("duration") or 0)
-                video_url = str(entry.get("video_url") or "")
+        existing_state = get_existing_video_state(con, channel_db_id=int(channel["id"]))
+        candidates: list[tuple[str, dict]] = []
+        for entry in fetched_entries:
+            duration = int(entry.get("duration") or 0)
+            video_url = str(entry.get("video_url") or "")
                 
-                # Filter Shorts: Jangan simpan, jangan proses (Kebijakan Baru)
-                is_short = (duration > 0 and duration < 60) or "/shorts/" in video_url
-                if is_short:
-                    continue
+            # Filter Shorts: Jangan simpan, jangan proses (Kebijakan Baru)
+            is_short = (duration > 0 and duration < 60) or "/shorts/" in video_url
+            if is_short:
+                continue
 
-                state = existing_state.get(entry["video_id"])
-                if state is None:
-                    candidates.append(("new", entry))
-                    continue
+            state = existing_state.get(entry["video_id"])
+            if state is None:
+                candidates.append(("new", entry))
+                continue
 
-                transcript_path = str(state["transcript_file_path"] or "")
-                summary_path = str(state["summary_file_path"] or "")
-                transcript_language = str(state["transcript_language"] or "")
-                transcript_downloaded = int(state["transcript_downloaded"] or 0)
+            transcript_path = str(state["transcript_file_path"] or "")
+            summary_path = str(state["summary_file_path"] or "")
+            transcript_language = str(state["transcript_language"] or "")
+            transcript_downloaded = int(state["transcript_downloaded"] or 0)
 
-                if transcript_language == "no_subtitle":
-                    continue
-                if transcript_downloaded == 1 and transcript_path and summary_path:
-                    continue
+            if transcript_language == "no_subtitle":
+                continue
+            if transcript_downloaded == 1 and transcript_path and summary_path:
+                continue
 
-                candidates.append(("retry_incomplete", entry))
+            candidates.append(("retry_incomplete", entry))
 
-            log(f"  found {len(candidates)} actionable videos within {len(fetched_entries)} scanned entries ({scope_label})")
-            if args.discovery_only and not candidates:
-                writer.writerow(
-                    {
-                        "channel_name": channel_name,
-                        "channel_id": channel["channel_id"],
-                        "video_id": "",
-                        "video_title": "",
-                        "video_url": "",
-                        "upload_date": "",
-                        "duration": "",
-                        "view_count": "",
-                        "thumbnail_url": "",
-                        "discovery_status": "no_actionable",
-                        "transcript_status": "",
-                        "resume_status": "",
-                        "transcript_file_path": "",
-                        "summary_file_path": "",
-                        "scanned_entries": len(fetched_entries),
-                        "scan_scope": scope_label,
-                        "note": "",
-                    }
-                )
+        log(f"  found {len(candidates)} actionable videos within {len(fetched_entries)} scanned entries ({scope_label})")
+        if args.discovery_only and not candidates:
+            writer.writerow(
+                {
+                    "channel_name": channel_name,
+                    "channel_id": channel["channel_id"],
+                    "video_id": "",
+                    "video_title": "",
+                    "video_url": "",
+                    "upload_date": "",
+                    "duration": "",
+                    "view_count": "",
+                    "thumbnail_url": "",
+                    "discovery_status": "no_actionable",
+                    "transcript_status": "",
+                    "resume_status": "",
+                    "transcript_file_path": "",
+                    "summary_file_path": "",
+                    "scanned_entries": len(fetched_entries),
+                    "scan_scope": scope_label,
+                    "note": "",
+                }
+            )
 
-            for discovery_status, entry in candidates:
-                if args.discovery_only:
-                    insert_note = ""
-                    if discovery_status == "new":
-                        insert_note = insert_video_if_missing(con, channel_db_id=int(channel["id"]), row=entry)
-                    writer.writerow(
-                        {
-                            "channel_name": channel_name,
-                            "channel_id": channel["channel_id"],
-                            "video_id": entry["video_id"],
-                            "video_title": entry["title"],
-                            "video_url": entry["video_url"],
-                            "upload_date": entry["upload_date"],
-                            "duration": entry["duration"],
-                            "view_count": entry["view_count"],
-                            "thumbnail_url": entry["thumbnail_url"],
-                            "discovery_status": discovery_status,
-                            "transcript_status": "",
-                            "resume_status": "",
-                            "transcript_file_path": "",
-                            "summary_file_path": "",
-                            "scanned_entries": len(fetched_entries),
-                            "scan_scope": scope_label,
-                            "note": insert_note,
-                        }
-                    )
-                    continue
-
-                note = insert_video_if_missing(con, channel_db_id=int(channel["id"]), row=entry)
-
-                transcript_status = ""
-                resume_status = ""
-                transcript_path = ""
-                summary_path = ""
-                current = con.execute(
-                    """
-                    SELECT transcript_downloaded,
-                           COALESCE(transcript_file_path, '') AS transcript_file_path,
-                           COALESCE(summary_file_path, '') AS summary_file_path
-                    FROM videos
-                    WHERE video_id = ?
-                    """,
-                    (entry["video_id"],),
-                ).fetchone()
-
-                existing_transcript_path = str(current["transcript_file_path"] or "") if current else ""
-                existing_summary_path = str(current["summary_file_path"] or "") if current else ""
-                existing_transcript_ok = bool(current and int(current["transcript_downloaded"] or 0) == 1 and existing_transcript_path)
-                existing_summary_ok = bool(existing_summary_path)
-
-                result = None
-                outcome = "fatal"
-                if existing_transcript_ok and Path(existing_transcript_path).exists():
-                    consecutive_hard_blocks = 0
-                    transcript_path = existing_transcript_path
-                    transcript_status = "existing"
-                else:
-                    try:
-                        result, outcome = recoverer.download_transcript(entry["video_id"])
-                    except Exception as exc:
-                        result, outcome = None, "fatal"
-                        note = "; ".join(part for part in [note, str(exc)] if part)
-
-                if result:
-                    consecutive_hard_blocks = 0
-                    transcript_path = save_transcript(
-                        recoverer,
-                        channel_slug=channel_slug,
-                        video_id=entry["video_id"],
-                        result=result,
-                        )
-                    transcript_status = "downloaded"
-                elif outcome == "retry_later":
-                    consecutive_hard_blocks = 0
-                    retry_reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip()
-                    mark_retry_later(con, entry["video_id"], retry_reason or "retry_later")
-                    transcript_status = "retry_later"
-                    note = note or "challenge/rate-limit; retry later"
-                elif outcome == "proxy_block":
-                    consecutive_hard_blocks += 1
-                    retry_reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip()
-                    mark_retry_later(con, entry["video_id"], retry_reason or "proxy_block")
-                    transcript_status = "proxy_block"
-                    note = note or "proxy block; retry later"
-                elif outcome == "fatal":
-                    consecutive_hard_blocks = 0
-                    transcript_status = "fatal_error"
-                    note = note or "fatal transcript error"
-                elif outcome == "blocked":
-                    consecutive_hard_blocks += 1
-                    retry_reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip()
-                    mark_blocked_member_only(con, entry["video_id"], retry_reason or "blocked_member_only")
-                    transcript_status = "blocked"
-                    resume_status = "skipped"
-                    note = note or retry_reason or "blocked member-only"
-                elif not transcript_status:
-                    consecutive_hard_blocks = 0
-                    mark_no_subtitle(con, entry["video_id"])
-                    transcript_status = "no_subtitle"
-                    resume_status = "skipped"
-
-                if transcript_status in {"downloaded", "existing"}:
-                    if existing_summary_ok and Path(existing_summary_path).exists():
-                        summary_path = existing_summary_path
-                        resume_status = "existing"
-                    else:
-                        try:
-                            summary_path, used_key_index = create_resume(
-                                con,
-                                video_id=entry["video_id"],
-                                title=entry["title"],
-                                transcript_path=transcript_path,
-                                provider_models=provider_models,
-                                start_index=next_provider_index,
-                            )
-                            next_provider_index = (used_key_index + 1) % len(provider_models)
-                            resume_status = "done"
-                        except Exception as exc:
-                            resume_status = "error"
-                            note = "; ".join(part for part in [note, str(exc)] if part)
-
+        for discovery_status, entry in candidates:
+            if args.discovery_only:
+                insert_note = ""
+                if discovery_status == "new":
+                    insert_note = insert_video_if_missing(con, channel_db_id=int(channel["id"]), row=entry)
                 writer.writerow(
                     {
                         "channel_name": channel_name,
@@ -1349,33 +1272,157 @@ def main() -> int:
                         "view_count": entry["view_count"],
                         "thumbnail_url": entry["thumbnail_url"],
                         "discovery_status": discovery_status,
-                        "transcript_status": transcript_status,
-                        "resume_status": resume_status,
-                        "transcript_file_path": transcript_path,
-                        "summary_file_path": summary_path,
+                        "transcript_status": "",
+                        "resume_status": "",
+                        "transcript_file_path": "",
+                        "summary_file_path": "",
                         "scanned_entries": len(fetched_entries),
                         "scan_scope": scope_label,
-                        "note": note,
+                        "note": insert_note,
                     }
                 )
+                continue
 
-                if consecutive_hard_blocks >= max_consecutive_hard_blocks:
-                    log(
-                        f"🛑 BERHENTI: {consecutive_hard_blocks} hard block berturut-turut "
-                        f"(threshold={max_consecutive_hard_blocks})."
-                    )
-                    stopped_early = True
-                    break
+            note = insert_video_if_missing(con, channel_db_id=int(channel["id"]), row=entry)
 
-            if stopped_early:
+            transcript_status = ""
+            resume_status = ""
+            transcript_path = ""
+            summary_path = ""
+            current = con.execute(
+                """
+                SELECT transcript_downloaded,
+                       COALESCE(transcript_file_path, '') AS transcript_file_path,
+                       COALESCE(summary_file_path, '') AS summary_file_path
+                FROM videos
+                WHERE video_id = ?
+                """,
+                (entry["video_id"],),
+            ).fetchone()
+
+            existing_transcript_path = str(current["transcript_file_path"] or "") if current else ""
+            existing_summary_path = str(current["summary_file_path"] or "") if current else ""
+            existing_transcript_ok = bool(current and int(current["transcript_downloaded"] or 0) == 1 and existing_transcript_path)
+            existing_summary_ok = bool(existing_summary_path)
+
+            result = None
+            outcome = "fatal"
+            if existing_transcript_ok and Path(existing_transcript_path).exists():
+                consecutive_hard_blocks = 0
+                transcript_path = existing_transcript_path
+                transcript_status = "existing"
+            else:
+                try:
+                    result, outcome = recoverer.download_transcript(entry["video_id"])
+                except Exception as exc:
+                    result, outcome = None, "fatal"
+                    note = "; ".join(part for part in [note, str(exc)] if part)
+
+            if result:
+                consecutive_hard_blocks = 0
+                transcript_path = save_transcript(
+                    recoverer,
+                    channel_slug=channel_slug,
+                    video_id=entry["video_id"],
+                    result=result,
+                )
+                transcript_status = "downloaded"
+            elif outcome == "retry_later":
+                consecutive_hard_blocks = 0
+                retry_reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip()
+                mark_retry_later(con, entry["video_id"], retry_reason or "retry_later")
+                transcript_status = "retry_later"
+                note = note or "challenge/rate-limit; retry later"
+            elif outcome == "proxy_block":
+                consecutive_hard_blocks += 1
+                retry_reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip()
+                mark_retry_later(con, entry["video_id"], retry_reason or "proxy_block")
+                transcript_status = "proxy_block"
+                note = note or "proxy block; retry later"
+            elif outcome == "fatal":
+                consecutive_hard_blocks = 0
+                transcript_status = "fatal_error"
+                note = note or "fatal transcript error"
+            elif outcome == "blocked":
+                consecutive_hard_blocks += 1
+                retry_reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip()
+                mark_blocked_member_only(con, entry["video_id"], retry_reason or "blocked_member_only")
+                transcript_status = "blocked"
+                resume_status = "skipped"
+                note = note or retry_reason or "blocked member-only"
+            elif not transcript_status:
+                consecutive_hard_blocks = 0
+                mark_no_subtitle(con, entry["video_id"])
+                transcript_status = "no_subtitle"
+                resume_status = "skipped"
+
+            if transcript_status in {"downloaded", "existing"}:
+                if existing_summary_ok and Path(existing_summary_path).exists():
+                    summary_path = existing_summary_path
+                    resume_status = "existing"
+                else:
+                    try:
+                        summary_path, used_key_index = create_resume(
+                            con,
+                            video_id=entry["video_id"],
+                            title=entry["title"],
+                            transcript_path=transcript_path,
+                            provider_models=provider_models,
+                            start_index=next_provider_index,
+                        )
+                        next_provider_index = (used_key_index + 1) % len(provider_models)
+                        resume_status = "done"
+                    except Exception as exc:
+                        resume_status = "error"
+                        note = "; ".join(part for part in [note, str(exc)] if part)
+
+            writer.writerow(
+                {
+                    "channel_name": channel_name,
+                    "channel_id": channel["channel_id"],
+                    "video_id": entry["video_id"],
+                    "video_title": entry["title"],
+                    "video_url": entry["video_url"],
+                    "upload_date": entry["upload_date"],
+                    "duration": entry["duration"],
+                    "view_count": entry["view_count"],
+                    "thumbnail_url": entry["thumbnail_url"],
+                    "discovery_status": discovery_status,
+                    "transcript_status": transcript_status,
+                    "resume_status": resume_status,
+                    "transcript_file_path": transcript_path,
+                    "summary_file_path": summary_path,
+                    "scanned_entries": len(fetched_entries),
+                    "scan_scope": scope_label,
+                    "note": note,
+                }
+            )
+
+            if consecutive_hard_blocks >= max_consecutive_hard_blocks:
+                log(
+                    f"🛑 BERHENTI: {consecutive_hard_blocks} hard block berturut-turut "
+                    f"(threshold={max_consecutive_hard_blocks})."
+                )
+                stopped_early = True
                 break
-            if channel_delay_seconds > 0 and ch_index < len(channels):
-                log(f"  sleeping {channel_delay_seconds:.1f}s before next channel")
-                time.sleep(channel_delay_seconds)
+
+        if not stopped_early:
+            set_channel_discovery_state(
+                con,
+                channel_id=channel_id,
+                scan_scope=scope_label,
+                mark_full_history_scanned=full_history_scan,
+            )
 
         if stopped_early:
-            log("🛑 Batch discovery/transcript dihentikan lebih awal karena hard block berulang.")
-            return 2
+            break
+        if channel_delay_seconds > 0 and ch_index < len(channels):
+            log(f"  sleeping {channel_delay_seconds:.1f}s before next channel")
+            time.sleep(channel_delay_seconds)
+
+    if stopped_early:
+        log("🛑 Batch discovery/transcript dihentikan lebih awal karena hard block berulang.")
+        return 2
 
     log(f"Report: {report_path}")
     return 0

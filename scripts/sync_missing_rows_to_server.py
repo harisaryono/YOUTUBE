@@ -435,6 +435,8 @@ def _ensure_target_schema(main_conn: sqlite3.Connection) -> None:
             scan_enabled INTEGER,
             skip_reason TEXT,
             source_status TEXT,
+            last_discovery_scope TEXT,
+            full_history_scanned_at TEXT,
             updated_at TEXT,
             created_at TEXT
         );

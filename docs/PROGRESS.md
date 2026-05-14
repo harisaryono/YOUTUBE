@@ -59,6 +59,7 @@
   - command `./scripts/orchestrator.sh explain` sekarang menampilkan inventori kerja, blocker, dan reason code defer aktif
   - command operasional tambahan sekarang tersedia: `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, dan `reconcile`
   - timeout stage dasar sekarang aktif lewat `timeouts:` di config; job yang lewat batas akan diterminasi dan dicatat sebagai `timeout` saat cycle polling normal
+  - discovery sekarang punya bootstrap state: channel yang belum punya `full_history_scanned_at` dipindai `scan-all-missing` dulu, lalu setelah itu masuk rotasi `latest-only`
 - Ingest metadata-only terbaru: `@MentalCuann`, `@JurnalInvestasiku`, `@SiPalingLogis`, `@nalarlambat`, `@ilmulidi`, dan video `rn9-P466MWw` dari `@SeniMengaturGaji` dicatat di `runs/manual_channel_ingest_20260514_062000/report.json`.
 - Ingest metadata-only berikutnya: `@KendatiDemikianStudio`, `@kayaalaceo`, `@FinansialMedia`, `@Jejolok`, `@RuangKaya`, serta normalisasi `@OasisCeritaUsaha` dicatat di `runs/manual_channel_ingest_20260514_062350/report.json`.
 - Ingest channel baru `@NosTec.id1` sudah dilakukan lewat source `/videos`; hasil metadata awal yang tersimpan: `Nostalgia Technologi`, `37` video, `channel_db_id=648`.

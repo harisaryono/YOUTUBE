@@ -16,19 +16,19 @@ from . import db_queries
 # When YouTube backlog grows, discovery is promoted so the pipeline keeps feeding.
 JOB_PRIORITY_AVAILABLE_WORK_FIRST = {
     "import_pending": 0,
+    "discovery": 1,
     "transcript": 1,
     "audio_download": 2,
-    "asr": 3,
-    "format": 4,
-    "resume": 5,
-    "discovery": 6,
+    "asr": 4,
+    "format": 5,
+    "resume": 6,
 }
 
 JOB_PRIORITY_YOUTUBE_HEAVY = {
     "import_pending": 0,
+    "discovery": 1,
     "transcript": 1,
     "audio_download": 2,
-    "discovery": 3,
     "asr": 4,
     "format": 5,
     "resume": 6,
@@ -267,18 +267,25 @@ def plan_jobs(
 
     # 7. Discovery — split by channel, one lane per discovered target.
     discovery_slots = _stage_slots(config, "discovery")
-    channels = db_queries.find_channels_need_discovery(config, state, limit=max(1, discovery_slots * 4))
+    discovery_fetch_limit = max(20, discovery_slots * 10)
+    channels = db_queries.find_channels_need_discovery(config, state, limit=discovery_fetch_limit)
     if channels:
         discovery_count = db_queries.count_channels_need_discovery(config, state)
         for ch in channels[:discovery_slots]:
+            scan_mode = str(ch.get("scan_mode") or "latest_only").strip().lower()
+            priority = int(ch.get("priority", _adaptive_priority("discovery", youtube_pressure, boost_threshold)))
             jobs.append({
                 "stage": "discovery",
                 "scope": f"channel:{ch['channel_id']}",
                 "channel_id": ch["channel_id"],
                 "channel_identifier": ch["channel_id"],
                 "limit": 1,
-                "priority": _adaptive_priority("discovery", youtube_pressure, boost_threshold),
-                "description": f"Discover {ch.get('channel_name', ch['channel_id'])} ({discovery_count} total pending)",
+                "scan_mode": scan_mode,
+                "priority": priority,
+                "description": (
+                    f"Discover {ch.get('channel_name', ch['channel_id'])} "
+                    f"({discovery_count} total pending, mode={scan_mode})"
+                ),
                 "count": discovery_count,
             })
 
@@ -294,4 +301,6 @@ def get_summary_counts(config: dict[str, Any], state: OrchestratorState) -> dict
     counts = db_queries.get_job_counts()
     counts["pending_imports"] = db_queries.count_pending_imports(state)
     counts["channels_need_discovery"] = db_queries.count_channels_need_discovery(config, state)
+    counts["channels_need_discovery_full_history"] = db_queries.count_channels_need_full_history_discovery(config, state)
+    counts["channels_need_discovery_latest_only"] = db_queries.count_channels_need_latest_discovery(config, state)
     return counts

@@ -53,6 +53,7 @@ def _parallel_config(config: dict[str, Any]) -> dict[str, Any]:
         "enabled": True,
         "max_total_jobs": config.get("orchestrator", {}).get("max_parallel_jobs", 1),
         "groups": {
+            "discovery": {"max_running": 1, "stages": ["discovery"]},
             "youtube": {"max_running": groups.get("youtube", 1), "stages": ["discovery", "transcript", "audio_download"]},
             "provider": {"max_running": groups.get("provider", 1), "stages": ["resume", "asr"]},
             "local": {"max_running": groups.get("local", 1), "stages": ["format", "janitor", "import_pending"]},
@@ -97,7 +98,9 @@ def _stage_group_name(config: dict[str, Any], stage: str) -> str:
         stages = {str(s).strip().lower() for s in (group_cfg.get("stages", []) or [])}
         if stage in stages:
             return str(group_name)
-    if stage in {"discovery", "transcript", "audio_download"}:
+    if stage == "discovery":
+        return "discovery"
+    if stage in {"transcript", "audio_download"}:
         return "youtube"
     if stage in {"resume", "asr"}:
         return "provider"

@@ -14,6 +14,7 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - Webshare proxy hanya boleh dipakai sebagai fallback terakhir ketika semua jalur direct/non-paid gagal.
 - Jika fallback non-paid terlalu sering, recoverer boleh menaikkan Webshare lebih awal untuk job yang sama; proxy list harus di-cache dan dirotasi per video.
 - `scripts/discover.sh` default sekarang harus berada di mode lebih aman: latest-only + rate-limit-safe, kecuali `--scan-all-missing` dipilih eksplisit.
+- Channel yang belum punya `full_history_scanned_at` harus diprioritaskan ke `scan-all-missing` dulu, lalu masuk `latest-only` setelah full crawl pertama selesai.
 - `scripts/transcript.sh --rate-limit-safe` harus membatasi worker paralel ke maksimum `2` dan tidak meneruskan batch yang sudah kena hard block berulang.
 - Jalur compat `partial_py/youtube_transcript_complete.py` juga harus mengikuti urutan yang sama: direct -> yt-dlp -> Webshare last.
 - `scripts/transcript.sh --workers N` harus membuat shard CSV per worker, menjalankan worker paralel, dan menggabungkan report hasilnya ke run dir utama.

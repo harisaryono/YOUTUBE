@@ -119,6 +119,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "max_jobs_per_cycle": 7,
             "max_parallel_jobs": 3,
             "parallel_groups": {
+                "discovery": 1,
                 "youtube": 1,
                 "local": 2,
                 "provider": 1,
@@ -131,9 +132,13 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "enabled": True,
             "max_total_jobs": 8,
             "groups": {
+                "discovery": {
+                    "max_running": 1,
+                    "stages": ["discovery"],
+                },
                 "youtube": {
                     "max_running": 2,
-                    "stages": ["discovery", "transcript", "audio_download"],
+                    "stages": ["transcript", "audio_download"],
                 },
                 "provider": {
                     "max_running": 3,

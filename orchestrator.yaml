@@ -19,6 +19,7 @@ orchestrator:
   max_parallel_jobs: 3
   # Parallel slots by stage group to avoid stacking YouTube-sensitive jobs.
   parallel_groups:
+    discovery: 1
     youtube: 1
     local: 2
     provider: 1
@@ -34,10 +35,13 @@ parallel:
   # Global rem so the server is not overloaded.
   max_total_jobs: 8
   groups:
+    discovery:
+      max_running: 1
+      stages:
+        - discovery
     youtube:
       max_running: 2
       stages:
-        - discovery
         - transcript
         - audio_download
     provider:
