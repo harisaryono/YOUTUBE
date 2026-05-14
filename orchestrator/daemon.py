@@ -77,6 +77,13 @@ def run_once(
             message=f"Cleared {cleared_locks} expired lock(s)",
             severity="info",
         )
+    cleared_stale_locks = state.clear_stale_pid_locks()
+    if cleared_stale_locks > 0:
+        state.add_event(
+            event_type="cleanup",
+            message=f"Cleared {cleared_stale_locks} stale pid lock(s)",
+            severity="info",
+        )
 
     # 2. Check health
     sys_health = check_system_health(config)
@@ -280,8 +287,13 @@ def run_loop(
             else:
                 sleep_seconds = config.get("loop", {}).get("idle_sleep_seconds", 900)
         else:
-            # Jobs planned but all deferred — moderate wait
-            sleep_seconds = config.get("loop", {}).get("error_sleep_seconds", 1800)
+            # Jobs were planned but mostly/fully deferred.
+            # In aggressive mode, check again soon unless a real cooldown says otherwise.
+            next_wakeup = get_next_wakeup(state)
+            if next_wakeup > 0:
+                sleep_seconds = min(next_wakeup, config.get("loop", {}).get("idle_sleep_seconds", 900))
+            else:
+                sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
 
         # Ensure minimum sleep
         sleep_seconds = max(sleep_seconds, config.get("loop", {}).get("min_sleep_seconds", 60))

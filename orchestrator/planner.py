@@ -14,12 +14,12 @@ from . import db_queries
 # Priority order for job types (lower = higher priority)
 JOB_PRIORITY = [
     "import_pending",   # 0 — highest
-    "discovery",        # 1
-    "transcript",       # 2
-    "audio_download",   # 3
+    "resume",           # 1
+    "format",           # 2
+    "transcript",       # 3
     "asr",              # 4
-    "resume",           # 5
-    "format",           # 6
+    "audio_download",   # 5
+    "discovery",        # 6
 ]
 
 
@@ -71,7 +71,7 @@ def plan_jobs(
             "scope": f"channel:{ch['channel_id']}",
             "channel_id": ch["channel_id"],
             "limit": 1,
-            "priority": 1,
+            "priority": 6,
             "description": f"Discover {ch.get('channel_name', ch['channel_id'])} ({discovery_count} total pending)",
             "count": discovery_count,
         })
@@ -83,7 +83,7 @@ def plan_jobs(
         jobs.append({
             "stage": "transcript",
             "scope": "youtube",
-            "priority": 2,
+            "priority": 3,
             "limit": batch_limit,
             "description": f"{_batch_description('transcript', batch_limit, 'videos')} ({transcript_count} total pending)",
             "count": transcript_count,
@@ -97,7 +97,7 @@ def plan_jobs(
             jobs.append({
                 "stage": "audio_download",
                 "scope": "youtube",
-                "priority": 3,
+                "priority": 5,
                 "limit": batch_limit,
                 "description": f"{_batch_description('audio download', batch_limit, 'videos')} ({audio_count} total pending)",
                 "count": audio_count,
@@ -111,7 +111,7 @@ def plan_jobs(
             jobs.append({
                 "stage": "asr",
                 "scope": "local:asr",
-                "priority": 4,
+            "priority": 4,
                 "limit": batch_limit,
                 "description": f"{_batch_description('asr', batch_limit, 'local audio files')} ({asr_count} total pending)",
                 "count": asr_count,
@@ -125,7 +125,7 @@ def plan_jobs(
             jobs.append({
                 "stage": "resume",
                 "scope": "provider",
-                "priority": 5,
+                "priority": 1,
                 "limit": batch_limit,
                 "description": f"{_batch_description('resume', batch_limit, 'videos')} ({resume_count} total pending)",
                 "count": resume_count,
@@ -139,7 +139,7 @@ def plan_jobs(
             jobs.append({
                 "stage": "format",
                 "scope": "global",
-                "priority": 6,
+                "priority": 2,
                 "limit": batch_limit,
                 "description": f"{_batch_description('format', batch_limit, 'videos')} ({format_count} total pending)",
                 "count": format_count,

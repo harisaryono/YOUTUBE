@@ -223,7 +223,7 @@ echo "Job ID: $JOB_ID"
 echo ""
 
 set +e
-"${CMD_ARGS[@]}"
+"$VENV_PYTHON" "${CMD_ARGS[@]}"
 EXIT_CODE=$?
 set -e
 

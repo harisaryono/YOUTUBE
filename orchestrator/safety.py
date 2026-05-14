@@ -305,7 +305,6 @@ def safety_gate_for_job(
             if audio_path and not Path(audio_path).exists():
                 return SafetyDecision.wait(
                     f"Local audio missing: {audio_path}",
-                    cooldown_seconds=1800,
                     recommendation="Requeue audio_download for the video",
                 )
 
@@ -343,10 +342,8 @@ def safety_gate_for_job(
         # Idle hours check for format
         if config.get("format", {}).get("prefer_idle_hours", False):
             if not _is_idle_hours(config):
-                return SafetyDecision.wait(
-                    "Format only runs during idle hours (22:00-05:00 Asia/Jakarta)",
-                    cooldown_seconds=1800,
-                    recommendation="Schedule format jobs during night hours",
-                )
+                # Aggressive mode: idle hours are advisory, not a hard block.
+                # If the machine has room, keep formatting instead of cooling down.
+                return SafetyDecision.run()
 
     return SafetyDecision.run()

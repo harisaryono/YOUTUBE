@@ -1342,8 +1342,9 @@ class ASRPipeline:
             or os.getenv("YT_ASR_AUDIO_FORMAT_SELECTOR")
             or DEFAULT_ASR_AUDIO_FORMAT_SELECTOR
         ).strip()
+        yt_dlp_cmd = yt_dlp_command()
         cmd = [
-            *yt_dlp_command(),
+            *yt_dlp_cmd,
             "--no-playlist",
             "--format",
             format_selector,
@@ -1357,7 +1358,12 @@ class ASRPipeline:
             video_url,
         ]
         if _env_bool("YT_ASR_RATE_LIMIT_SAFE", False):
-            cmd[1:1] = ["--sleep-interval", "8", "--max-sleep-interval", "15"]
+            cmd[len(yt_dlp_cmd):len(yt_dlp_cmd)] = [
+                "--sleep-interval",
+                "8",
+                "--max-sleep-interval",
+                "15",
+            ]
         logger.info("Download audio %s via yt-dlp (format=%s)", video_id, format_selector)
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
@@ -1426,8 +1432,9 @@ class ASRPipeline:
         return cached
 
     def _probe_access_state(self, video_id: str, video_url: str) -> tuple[bool, str, dict]:
+        yt_dlp_cmd = yt_dlp_command()
         cmd = [
-            *yt_dlp_command(),
+            *yt_dlp_cmd,
             "--no-playlist",
             "--skip-download",
             "--dump-single-json",

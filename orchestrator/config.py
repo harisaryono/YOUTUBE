@@ -87,9 +87,9 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "profile": "safe",
         "loop": {
-            "min_sleep_seconds": 60,
-            "idle_sleep_seconds": 900,
-            "error_sleep_seconds": 1800,
+            "min_sleep_seconds": 10,
+            "idle_sleep_seconds": 60,
+            "error_sleep_seconds": 300,
         },
         "system": {
             "min_free_disk_gb": 5,

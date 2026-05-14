@@ -297,6 +297,48 @@ class OrchestratorState:
         conn.commit()
         return cursor.rowcount
 
+    def clear_stale_pid_locks(self) -> int:
+        """
+        Remove locks owned by dead pid:* owners.
+
+        This helps recover from crashes or force-killed daemon/worker processes
+        that would otherwise keep a lock around until TTL expiry.
+        """
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT lock_key, owner FROM orchestrator_locks"
+        ).fetchall()
+        removed = 0
+        for row in rows:
+            owner = str(row["owner"] or "").strip()
+            if not owner.startswith("pid:"):
+                continue
+            try:
+                pid = int(owner.split(":", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            if self._pid_is_alive(pid):
+                continue
+            conn.execute("DELETE FROM orchestrator_locks WHERE lock_key = ?", (row["lock_key"],))
+            removed += 1
+        if removed > 0:
+            conn.commit()
+        return removed
+
+    @staticmethod
+    def _pid_is_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+
     def list_active_locks(self) -> list[dict[str, Any]]:
         """List all currently active (non-expired) locks."""
         conn = self._connect()

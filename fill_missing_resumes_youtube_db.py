@@ -277,11 +277,51 @@ def acquire_account_from_coordinator(
     eligible_account_ids: Optional[list[int]] = None,
     *,
     timeout_seconds: int = ACQUIRE_WAIT_TIMEOUT_SECONDS,
+    immediate: bool = False,
 ) -> ProviderAccount:
     started_at = time.monotonic()
     attempt = 0
     last_error = ""
     timeout_seconds = max(1, int(timeout_seconds or ACQUIRE_WAIT_TIMEOUT_SECONDS))
+    if immediate:
+        try:
+            leases = coordinator_acquire_accounts(
+                provider=provider,
+                model_name=model_name,
+                count=1,
+                holder=holder,
+                pid=pid,
+                eligible_account_ids=eligible_account_ids or [],
+                task_type="resume_generation",
+                lease_ttl_seconds=LEASE_TTL_SECONDS,
+            )
+            if leases:
+                lease = leases[0]
+                acct_id = int(lease["provider_account_id"])
+                raw_headers = lease.get("extra_headers") or {}
+                headers = raw_headers if isinstance(raw_headers, dict) else {}
+                api_key = str(lease.get("api_key") or "").strip()
+                if not api_key:
+                    raise RuntimeError(
+                        f"Coordinator acquire bundle tidak mengandung api_key untuk account {acct_id}"
+                    )
+                return ProviderAccount(
+                    id=acct_id,
+                    provider=str(lease.get("provider") or provider),
+                    account_name=str(lease.get("account_name") or acct_id),
+                    api_key=api_key,
+                    endpoint_url=str(lease.get("endpoint_url") or ""),
+                    model_name=model_name,
+                    usage_method=str(lease.get("usage_method") or ""),
+                    extra_headers={str(k): str(v) for k, v in headers.items()},
+                    lease_token=str(lease["lease_token"]),
+                    model_limits=dict(lease.get("model_limits") or {}),
+                )
+            last_error = f"No accounts for {provider}/{model_name}"
+        except Exception as exc:
+            last_error = str(exc).strip() or repr(exc)
+        raise LeaseUnavailable(last_error or f"No lease available for {provider}/{model_name}")
+
     while True:
         try:
             leases = coordinator_acquire_accounts(
@@ -648,7 +688,6 @@ def main():
                     candidate_ids = list(args.provider_account_ids or [])
                     if candidate_idx > 0:
                         candidate_ids = []
-                    acquire_timeout = ACQUIRE_WAIT_TIMEOUT_SECONDS if candidate_idx == 0 else max(3, ACQUIRE_WAIT_TIMEOUT_SECONDS // 2)
                     try:
                         account = acquire_account_from_coordinator(
                             candidate_provider,
@@ -656,16 +695,13 @@ def main():
                             holder=socket.gethostname(),
                             pid=os.getpid(),
                             eligible_account_ids=candidate_ids,
-                            timeout_seconds=acquire_timeout,
+                            immediate=True,
                         )
                         provider_used = candidate_provider
                         break
                     except LeaseUnavailable as lease_exc:
                         acquire_errors.append(f"{candidate_provider}:{lease_exc}")
-                        log(
-                            f"[FALLBACK] lease belum tersedia untuk {candidate_provider}/{args.model}; "
-                            f"coba provider berikutnya"
-                        )
+                        log(f"[FALLBACK] lease tidak tersedia untuk {candidate_provider}/{args.model}; lanjut provider berikutnya")
                         continue
 
                 if account is None:
