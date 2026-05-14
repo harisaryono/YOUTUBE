@@ -89,7 +89,7 @@ CHANNELS_DB=channels.db
 OUT_ROOT=out
 
 # Provider Coordinator
-YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788
+YT_PROVIDER_COORDINATOR_URL=http://127.0.0.1:8788
 YT_PROVIDER_COORDINATOR_SECRET=qHRzpfcby-9YtIAPatL0_Sqj70wU96Dv4EI-fOqoMqE
 
 # NVIDIA API Keys (3 keys active)
@@ -125,13 +125,13 @@ YOUTUBE_API_KEYS="ytapi_ituaja=...,ytapi_silfi=...,ytapi_albert=..."
 7. **API Integration** - YouTube API dan NVIDIA API berfungsi
 
 ### 📝 Notes
-- **Coordinator URL:** Menggunakan remote coordinator (`http://8.215.77.132:8788`)
+- **Coordinator URL:** Menggunakan coordinator yang diset di `YT_PROVIDER_COORDINATOR_URL`
 - **Provider Blocking:** NVIDIA tidak diblok (unlimited quota), Groq/Cerebras dengan TPD blocking
 - **Resume Storage:** Resume disimpan sebagai BLOB di database, file fisik dihapus setelah import
 - **Transcript Storage:** Transcript disimpan sebagai file fisik di `uploads/`
 
 ### ⚠️ Considerations
-1. **Remote Coordinator:** Menggunakan coordinator di remote server (8.215.77.132:8788)
+1. **Remote Coordinator:** Menggunakan coordinator yang diset lewat `YT_PROVIDER_COORDINATOR_URL`
    - Jika ingin full local, perlu setup local coordinator
    - Saat ini masih bergantung pada koneksi internet ke remote server
 

@@ -50,8 +50,8 @@ Recover missing transcripts for 4,217 videos to enable resume generation.
   - ada bukti kuat batch salah arah atau merusak target.
 
 ## Coordinator Source Of Truth
-- URL coordinator produksi yang benar untuk repo ini: `http://8.215.77.132:8788`
-- Jangan gunakan `http://localhost:8788` untuk batch produksi kecuali sudah diverifikasi port lokal itu benar-benar hidup dan sengaja dipakai.
+- URL coordinator yang benar untuk repo ini dibaca dari `YT_PROVIDER_COORDINATOR_URL` dan harus diset eksplisit di environment.
+- Default fallback lokal tetap `http://127.0.0.1:8788` jika environment memang mengarah ke coordinator lokal.
 - Saat start batch produksi, log harus menampilkan URL coordinator yang benar sebelum pekerjaan transcript/resume berjalan.
 - Sebelum membuat program baru yang menyentuh coordinator/provider/runtime lease, wajib baca source of truth operasional di server:
   - `ssh yt-server 'sed -n "1,260p" /root/services/COORDINATOR_GUIDE.md'`

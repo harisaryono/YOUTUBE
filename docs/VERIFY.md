@@ -56,7 +56,7 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
   - [ ] Row actionable mencakup seluruh `new` dan `retry_incomplete` dari seluruh feed channel yang berhasil diambil, bukan hanya jendela `N` terbaru.
 
 - **Coordinator Validation**:
-  - [ ] Batch produksi menampilkan URL coordinator yang benar: `http://8.215.77.132:8788`.
+  - [ ] Batch produksi menampilkan URL coordinator yang benar dari `YT_PROVIDER_COORDINATOR_URL`.
   - [ ] Jangan menganggap `localhost:8788` valid tanpa health check eksplisit.
   - [ ] Default `lease_ttl_seconds` coordinator adalah `300`.
   - [ ] Lease tanpa heartbeat/status update selama `300` detik menjadi expired.

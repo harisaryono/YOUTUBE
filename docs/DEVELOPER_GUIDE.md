@@ -46,7 +46,7 @@ Sistem ini bekerja dengan skema Client‑Coordinator:
 
 ## 2. Sinkronisasi & Koneksi Server
 
-Coordinator berjalan di `yt-server` (IP: `8.215.77.132`) pada port `8788`.
+Coordinator berjalan melalui URL yang diset di `YT_PROVIDER_COORDINATOR_URL`; untuk development lokal gunakan `http://localhost:8788`.
 
 ### Memeriksa Status Server
 
@@ -66,7 +66,7 @@ Jika port `8788` terblokir firewall, jalankan tunnel dari terminal lokal:
 ssh -L 8788:localhost:8788 yt-server
 ```
 
-Lalu pastikan `.env` lokal Anda mengarah ke: `YT_PROVIDER_COORDINATOR_URL=http://localhost:8788`
+Lalu pastikan `.env` lokal Anda mengarah ke nilai `YT_PROVIDER_COORDINATOR_URL` yang benar.
 
 Catatan: ini fallback darurat saja, bukan jalur utama.
 

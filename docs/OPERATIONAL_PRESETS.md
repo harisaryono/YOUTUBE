@@ -3,7 +3,7 @@
 Set environment once:
 
 ```bash
-export YT_PROVIDER_COORDINATOR_URL=http://8.215.77.132:8788
+export YT_PROVIDER_COORDINATOR_URL=http://127.0.0.1:8788
 ```
 
 ## 1. Daily Safe

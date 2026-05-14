@@ -18,6 +18,7 @@
   - `asr` untuk membaca file audio lokal saja, tanpa YouTube download
 - `scripts/audio.sh` / `scripts/audio_download.sh` sekarang jadi stage `audio_download`, sedangkan `scripts/asr.sh` hanya menjalankan ASR lokal.
 - `recover_asr_transcripts.py` sekarang menyimpan `video_audio_assets.audio_file_path`, mendukung `--local-audio-only`, dan bisa menghapus audio lokal setelah ASR sukses.
+- Policy orchestrator sekarang bukan transcript-only; urutan prioritas operasionalnya adalah `resume -> format -> transcript -> asr -> audio_download -> discovery`, supaya kerja massal yang tidak kena blocking tetap jalan sementara stage YouTube-limited tetap di belakang.
 - Supervisor sadar-state baru sudah disiapkan:
   - `scripts/audio.sh`
   - `scripts/supervisor.sh`
@@ -64,7 +65,7 @@
 - Jalur manual web untuk transcript sekarang memakai `scripts/manual_transcript_then_resume_format.sh`, sehingga tombol manual download tidak perlu ditekan dua kali dan setelah transcript sukses pipeline lanjut ke resume lalu format otomatis.
 - Search FTS sudah dipindah ke `videos_search_cache` + `videos_search_fts` dan dibackfill dari blob-first readers lewat `scripts/migrate_search_cache.py`; legacy `videos_fts` sudah dihapus dari DB aktif.
 - Constraint operator: pertanyaan status di tengah proses tidak boleh ditafsirkan sebagai perintah menghentikan job background. Cek status, laporkan snapshot, lalu biarkan job tetap berjalan kecuali user eksplisit meminta stop atau ada alasan fatal yang jelas.
-- Coordinator produksi yang benar untuk repo `YOUTUBE` adalah `http://8.215.77.132:8788`. `localhost:8788` pernah menyebabkan batch resume gagal massal karena port lokal tidak hidup.
+- Coordinator produksi untuk repo `YOUTUBE` harus dibaca dari `YT_PROVIDER_COORDINATOR_URL`; jangan hardcode host coordinator di docs atau runtime.
 - Coordinator `acquire lease` sekarang harus menjadi satu-satunya jalur distribusi credential worker: bundle lease wajib sudah berisi `api_key` plaintext + `usage_method` + `endpoint_url` + `extra_headers`.
 - Bundle lease sekarang juga membawa `model_limits` dari katalog `provider_model_limits`, supaya sizing/chunking worker tidak perlu lookup tambahan.
 - Smoke test kecil `smoke_test_coordinator.py` sudah divalidasi ke live coordinator: status/accounts -> acquire lease -> release berhasil pada `nvidia/openai/gpt-oss-120b`.
@@ -97,7 +98,7 @@
 - Admin summary `Sudah Terformat` sekarang menghitung `transcript_formatted_path` **atau** `link_file_formatted`, lalu state DB bisa disinkronkan ulang lewat `scripts/repair_db_state.py`.
 - Homepage `Latest Videos` sekarang menampilkan video terbaru per channel, bukan global recent list.
 - Audit smoke menemukan dua jalur yang sebelumnya bermasalah dan sudah diperbaiki:
-  - coordinator worker format sekarang memprioritaskan `YT_PROVIDER_COORDINATOR_URL` dari repo `.env` sehingga tidak lagi jatuh ke host lama `172.31.97.72`
+  - coordinator worker format sekarang memprioritaskan `YT_PROVIDER_COORDINATOR_URL` dari repo `.env` sehingga tidak lagi jatuh ke host hardcoded lama
   - `format_transcripts_pool.py` kini tetap menulis ke SQLite saat dijalankan dengan `--tasks-csv`, jadi `transcript_formatted_path` dan `link_file_formatted` benar-benar persisten
 - `database_optimized.py` sekarang membaca `transcript_formatted_path` yang tersimpan di DB dulu sebelum fallback legacy, sehingga endpoint `/api/formatted/<video_id>` kembali bisa membaca file yang sudah diformat.
 - Run `discovery_latest_channels_20260327_full` selesai: 42 channel discan, `140` video `new`, `24` channel `no_actionable`, `1` channel `channel_skipped` (`parkerprompts`).
