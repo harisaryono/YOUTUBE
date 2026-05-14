@@ -23,6 +23,8 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - `recover_asr_transcripts.py` harus menulis chunk state ke tabel `video_asr_chunks` per provider/model/chunk index agar batch bisa resume.
 - `scripts/audio.sh` / `scripts/audio_download.sh` harus menulis status local audio ke tabel `video_audio_assets`.
 - `scripts/asr.sh --local-audio-only` harus membaca audio lokal dari `video_audio_assets.audio_file_path` dan tidak lagi memanggil yt-dlp untuk download.
+- `orchestrator/daemon.py` harus menjaga lock/dispatch tetap satu blok saat `decision.verdict == "RUN"`, tanpa indentasi yang membuat dispatch unreachable.
+- `./scripts/orchestrator.sh explain` harus menampilkan inventory snapshot, stage decisions ringkas, dan stage `Audio Download` di status report.
 - Final ASR sukses harus menulis `videos.transcript_text`, `videos.transcript_file_path`, `transcript_downloaded = 1`, dan file `.txt` final di `uploads/asr/<video_id>/`.
 - Final ASR juga harus menyimpan `transcript_raw.txt` sebagai jejak timestamp mentah, lalu memakai GPT OSS 120B hanya untuk transcript yang masih kecil; transcript panjang boleh otomatis dilewati dan langsung pakai raw timestamped output.
 - Default ASR sekarang harus menyimpan transcript raw timestamped tanpa GPT OSS post-process, kecuali `--postprocess` dipilih eksplisit.

@@ -183,17 +183,17 @@ def run_once(
                 continue
 
             # Acquire stage lock and always release it, even if dispatch fails.
-        if not state.acquire_lock(lock_key, ttl_seconds=7200):
-            state.add_event(
-                event_type="deferred",
-                message=f"{stage} lock could not be acquired, deferring",
-                stage=stage,
-                scope=job.get("scope", ""),
-                severity="info",
-                reason_code="DEFER_STAGE_LOCKED",
-            )
-            cycle_result["jobs_deferred"] += 1
-            continue
+            if not state.acquire_lock(lock_key, ttl_seconds=7200):
+                state.add_event(
+                    event_type="deferred",
+                    message=f"{stage} lock could not be acquired, deferring",
+                    stage=stage,
+                    scope=job.get("scope", ""),
+                    severity="info",
+                    reason_code="DEFER_STAGE_LOCKED",
+                )
+                cycle_result["jobs_deferred"] += 1
+                continue
 
             cycle_result["jobs_dispatched"] += 1
             try:
@@ -209,6 +209,7 @@ def run_once(
                 error_msg = result.get("error", result.get("stderr", ""))
                 if error_msg:
                     from .error_analyzer import classify_error
+
                     classification = classify_error(error_msg, result.get("returncode", 0))
                     if classification.cooldown_seconds > 0:
                         # Use suggested_scope from classification, fallback to job scope
@@ -436,23 +437,6 @@ def main() -> None:
             print("No report yet. Run 'orchestrator once' first.")
 
     elif args.mode == "explain":
-        report = generate_report(config, state, None)
-        inventory = report.get("inventory", {})
-        print("Orchestrator explain")
-        print(f"Mode: {inventory.get('mode', config.get('orchestrator', {}).get('mode', 'work_conserving'))}")
-        print(f"Work remaining: {inventory.get('work_remaining', {})}")
-        print(f"Blocked: {inventory.get('blocked', {})}")
-        print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
-        print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
-        reasons = inventory.get("defer_reasons", {})
-        if reasons:
-            print("Defer reasons:")
-            for code, count in sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])):
-                print(f"  - {code}: {count}")
-        else:
-            print("Defer reasons: none")
-
-    elif args.mode == "explain":
         inventory = build_inventory_snapshot(config, state, None)
         print("Orchestrator explain")
         print(f"Mode: {inventory.get('mode', config.get('orchestrator', {}).get('mode', 'work_conserving'))}")
@@ -460,6 +444,47 @@ def main() -> None:
         print(f"Blocked: {inventory.get('blocked', {})}")
         print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
         print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
+        work_remaining = inventory.get("work_remaining", {})
+        blocked = inventory.get("blocked", {})
+        youtube_blocked = bool(blocked.get("youtube"))
+        provider_blocked = bool(blocked.get("provider"))
+        stage_decisions = [
+            ("Import Pending", "RUN" if work_remaining.get("import_pending", 0) else "NO_WORK"),
+            (
+                "Transcript",
+                "WAIT_YOUTUBE_COOLDOWN"
+                if youtube_blocked and work_remaining.get("transcript", 0)
+                else ("RUN" if work_remaining.get("transcript", 0) else "NO_WORK"),
+            ),
+            (
+                "Audio Download",
+                "WAIT_YOUTUBE_COOLDOWN"
+                if youtube_blocked and work_remaining.get("audio_download", 0)
+                else ("RUN" if work_remaining.get("audio_download", 0) else "NO_WORK"),
+            ),
+            ("ASR", "RUN" if work_remaining.get("asr", 0) else "NO_WORK"),
+            (
+                "Resume",
+                "WAIT_PROVIDER_COOLDOWN"
+                if provider_blocked and work_remaining.get("resume", 0)
+                else ("RUN" if work_remaining.get("resume", 0) else "NO_WORK"),
+            ),
+            (
+                "Format",
+                "WAIT_PROVIDER_COOLDOWN"
+                if provider_blocked and work_remaining.get("format", 0)
+                else ("RUN" if work_remaining.get("format", 0) else "NO_WORK"),
+            ),
+            (
+                "Discovery",
+                "WAIT_YOUTUBE_COOLDOWN"
+                if youtube_blocked and work_remaining.get("discovery", 0)
+                else ("RUN" if work_remaining.get("discovery", 0) else "NO_WORK"),
+            ),
+        ]
+        print("Stage decisions:")
+        for stage_name, decision_text in stage_decisions:
+            print(f"  - {stage_name}: {decision_text}")
         reasons = inventory.get("defer_reasons", {})
         if reasons:
             print("Defer reasons:")

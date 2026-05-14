@@ -307,16 +307,16 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
     lines.append("## Stage Status")
     lines.append("")
     stages = {
-        "Discovery": "youtube",
-        "Transcript": "youtube",
-        "Resume": "provider",
-        "Format": "provider",
-        "ASR": "system",
+        "Discovery": ("discovery", "youtube"),
+        "Transcript": ("transcript", "youtube"),
+        "Audio Download": ("audio_download", "youtube"),
+        "Resume": ("resume", "provider"),
+        "Format": ("format", "provider"),
+        "ASR": ("asr", "system"),
     }
     blocked_providers = cd_info.get("blocked_providers", [])
     youtube_blocked = any(cd_entry["scope"] == "youtube" for cd_entry in cd_info.get("details", []))
-    for stage, dep in stages.items():
-        stage_key = stage.lower()
+    for stage, (stage_key, dep) in stages.items():
         enabled = config.get(stage_key, {}).get("enabled", True)
         if not enabled:
             lines.append(f"- **{stage}**: disabled")

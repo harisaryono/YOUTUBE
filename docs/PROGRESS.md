@@ -315,3 +315,8 @@
 - **2026-05-14 (Local)**: Resume launcher tidak lagi abort saat status coordinator timeout.
   - `launch_resume_queue.py` sekarang retry lookup status coordinator secara singkat sebelum menyerah.
   - Jika status pool tetap tidak bisa dibaca, launcher turun ke direct NVIDIA fallback worker alih-alih menghentikan seluruh run.
+
+- **2026-05-14 (Local)**: Work-conserving daemon dispatch path diperbaiki.
+  - Indentasi lock/dispatch di `orchestrator/daemon.py` sudah dibetulkan supaya `RUN` branch benar-benar acquire lock, dispatch job, dan release lock dalam satu blok yang sama.
+  - Duplikasi mode `explain` dihapus; `explain` sekarang memakai inventory snapshot langsung.
+  - Stage status report kini menampilkan `Audio Download` sebagai stage YouTube-limited yang terpisah.
