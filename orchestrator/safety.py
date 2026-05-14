@@ -146,12 +146,25 @@ def check_system_health(config: dict[str, Any]) -> SystemHealth:
 
 
 def check_provider_health(config: dict[str, Any], state: OrchestratorState) -> ProviderHealth:
-    """Check provider/coordinator health via state cooldowns."""
+    """Check provider/coordinator health via real coordinator health check."""
     health = ProviderHealth()
 
-    # Check coordinator availability via state
-    coordinator_ok = state.get("coordinator_last_ok", "0")
-    health.coordinator_available = coordinator_ok == "1"
+    # Try real coordinator health check
+    try:
+        from local_services import coordinator_status_accounts
+        accounts = coordinator_status_accounts(include_inactive=False)
+        health.coordinator_available = True
+        health.total_leases = len(accounts)
+        health.available_leases = sum(1 for a in accounts if a.get("leaseable"))
+        state.set("coordinator_last_ok", "1")
+    except ImportError:
+        # Fallback: check via state
+        coordinator_ok = state.get("coordinator_last_ok", "0")
+        health.coordinator_available = coordinator_ok == "1"
+    except Exception as e:
+        health.coordinator_available = False
+        state.set("coordinator_last_ok", "0")
+        health.errors.append(f"Coordinator unavailable: {e}")
 
     # Check provider-specific cooldowns
     for cd in state.list_active_cooldowns():
@@ -162,6 +175,7 @@ def check_provider_health(config: dict[str, Any], state: OrchestratorState) -> P
             health.errors.append(f"Provider {provider_name} blocked: {cd['reason']}")
 
     return health
+
 
 
 def check_youtube_health(config: dict[str, Any], state: OrchestratorState) -> YouTubeHealth:

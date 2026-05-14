@@ -45,8 +45,9 @@ def plan_jobs(
 
     # 2. Discovery
     discovery_jobs = db_queries.find_channels_need_discovery(
-        config, state, limit=5
+        config, state, limit=20
     )
+
     for j in discovery_jobs:
         j["priority"] = 1
         j["description"] = f"Discover channel {j.get('channel_name', j.get('channel_id', '?'))}"
@@ -81,11 +82,12 @@ def plan_jobs(
             j["description"] = f"Format {j.get('video_id', '?')} — {j.get('title', '')[:60]}"
         jobs.extend(format_jobs)
 
-    # 6. ASR
+    # 6. ASR — untuk video no_subtitle
     if config.get("asr", {}).get("enabled", False):
         asr_jobs = db_queries.find_videos_need_asr(
-            config, state, limit=5
+            config, state, limit=3
         )
+
         for j in asr_jobs:
             j["priority"] = 5
             j["description"] = f"ASR {j.get('video_id', '?')} — {j.get('title', '')[:60]}"

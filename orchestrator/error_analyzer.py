@@ -47,12 +47,15 @@ class ErrorClassification:
         cooldown_seconds: int = 300,
         severity: str = "warning",
         recommendation: str = "",
+        suggested_scope: str = "",
     ):
         self.error_type = error_type
         self.description = description
         self.cooldown_seconds = cooldown_seconds
         self.severity = severity
         self.recommendation = recommendation
+        self.suggested_scope = suggested_scope
+
 
 
 # Recommendation map
@@ -109,15 +112,32 @@ def classify_error(
             severity = "blocking" if cooldown >= 3600 else "warning"
             if cooldown == 0:
                 severity = "info"
+            # Determine suggested scope based on error type
+            suggested_scope = ""
+            if error_type.startswith("youtube_"):
+                suggested_scope = "youtube"
+            elif error_type.startswith("provider_"):
+                # Try to extract provider name from log line
+                provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", log_line)
+                provider = provider_match.group(1).lower() if provider_match else "unknown"
+                suggested_scope = f"provider:{provider}"
+            elif error_type == "memory_low":
+                suggested_scope = "stage:llm"
+            elif error_type == "disk_low":
+                suggested_scope = "global"
+            elif error_type == "coordinator_unavailable":
+                suggested_scope = "coordinator"
             return ErrorClassification(
                 error_type, description, cooldown, severity,
-                RECOMMENDATIONS.get(error_type, "")
+                RECOMMENDATIONS.get(error_type, ""),
+                suggested_scope=suggested_scope,
             )
 
     return ErrorClassification(
         "unknown_error", f"Unclassified: {log_line[:100]}", 300, "warning",
         "Check logs manually"
     )
+
 
 
 def analyze_report_csv(

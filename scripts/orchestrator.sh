@@ -61,7 +61,8 @@ case "$MODE" in
         echo $$ > "$PID_FILE"
         trap 'rm -f "$PID_FILE"; echo "Orchestrator stopped."' EXIT
 
-        exec "$VENV_PYTHON" -m orchestrator.daemon run "$@"
+        "$VENV_PYTHON" -m orchestrator.daemon run "$@"
+
         ;;
 
     status)

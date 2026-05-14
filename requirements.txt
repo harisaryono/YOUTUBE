@@ -23,3 +23,7 @@ cerebras-cloud-sdk>=1.67.0
 
 # Browser automation (for savesubs_playwright.py)
 playwright>=1.45.0
+
+# Orchestrator
+PyYAML>=6.0.2
+

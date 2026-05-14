@@ -7,9 +7,11 @@ Modes:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -130,13 +132,16 @@ def run_once(
                     from .error_analyzer import classify_error
                     classification = classify_error(error_msg, result.get("returncode", 0))
                     if classification.cooldown_seconds > 0:
+                        # Use suggested_scope from classification, fallback to job scope
+                        scope = classification.suggested_scope or job.get("scope", "global")
                         state.set_cooldown(
-                            scope=job.get("scope", "global"),
+                            scope=scope,
                             reason=classification.description,
                             duration_seconds=classification.cooldown_seconds,
                             severity=classification.severity,
                             recommendation=classification.recommendation,
                         )
+
 
         elif decision.verdict == "WAIT":
             state.add_event(

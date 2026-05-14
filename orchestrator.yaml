@@ -54,11 +54,12 @@ format:
     end: "05:00"
 
 asr:
-  # ASR is disabled by default — enable explicitly
-  enabled: false
-  max_video_workers: 1
+  # ASR untuk video no_subtitle — aktif
+  enabled: true
+  max_video_workers: 2
   max_duration_minutes: 60
   require_cached_audio: false
+
 
 report:
   write_markdown: true

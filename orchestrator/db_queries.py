@@ -202,12 +202,10 @@ def find_videos_need_asr(
 ) -> list[dict[str, Any]]:
     """
     Find videos with no_subtitle that could use ASR.
-    Only if ASR is enabled in config.
+    Guarded by planner — only called when ASR is enabled in config.
     """
-    if not config.get("asr", {}).get("enabled", False):
-        return []
-
     max_duration = config.get("asr", {}).get("max_duration_minutes", 60) * 60
+
     conn = _connect(db_path)
 
     rows = conn.execute(
