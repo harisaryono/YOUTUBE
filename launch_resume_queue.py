@@ -32,6 +32,11 @@ QUEUE_DB_NAME = "resume_pool.sqlite3"
 IDLE_POLL_SECONDS = 2.0
 REQUEUE_PRIORITY_NVIDIA = 100
 TASK_TIMEOUT_SECONDS = max(120, int(os.getenv("YT_RESUME_TASK_TIMEOUT_SECONDS", "330") or 330))
+STATUS_LOOKUP_RETRIES = max(1, int(os.getenv("YT_RESUME_STATUS_LOOKUP_RETRIES", "2") or 2))
+STATUS_LOOKUP_INITIAL_WAIT_SECONDS = max(
+    0.5,
+    float(os.getenv("YT_RESUME_STATUS_LOOKUP_INITIAL_WAIT_SECONDS", "1.5") or 1.5),
+)
 
 # Global state for Groq-to-Nvidia prioritization
 active_groq_lock = threading.Lock()
@@ -42,22 +47,81 @@ def log(msg: str) -> None:
 
 
 def load_available_accounts(provider: str, model_name: str) -> list[dict]:
-    rows = coordinator_status_accounts(provider=provider, model_name=model_name)
-    items: list[dict] = []
-    for row in rows:
-        if int(row.get("is_active") or 0) != 1:
-            continue
-        if str(row.get("state") or "idle").strip().lower() != "idle":
-            continue
-        items.append(
-            {
-                "id": int(row["provider_account_id"]),
-                "provider": str(row["provider"]),
-                "account_name": str(row["account_name"]),
-            }
+    last_error = ""
+    wait_seconds = STATUS_LOOKUP_INITIAL_WAIT_SECONDS
+    for attempt in range(STATUS_LOOKUP_RETRIES):
+        try:
+            rows = coordinator_status_accounts(provider=provider, model_name=model_name)
+            items: list[dict] = []
+            for row in rows:
+                if int(row.get("is_active") or 0) != 1:
+                    continue
+                if str(row.get("state") or "idle").strip().lower() != "idle":
+                    continue
+                items.append(
+                    {
+                        "id": int(row["provider_account_id"]),
+                        "provider": str(row["provider"]),
+                        "account_name": str(row["account_name"]),
+                    }
+                )
+            items.sort(key=lambda item: int(item["id"]))
+            return items
+        except Exception as exc:
+            last_error = str(exc).strip() or repr(exc)
+            if attempt + 1 < STATUS_LOOKUP_RETRIES:
+                log(
+                    f"[WAIT] coordinator status lookup gagal untuk {provider}/{model_name}; "
+                    f"retry dalam {wait_seconds:.1f}s ({last_error})"
+                )
+                time.sleep(wait_seconds)
+                wait_seconds = min(5.0, wait_seconds * 2)
+                continue
+            log(
+                f"[FALLBACK] coordinator status lookup gagal untuk {provider}/{model_name}; "
+                f"gunakan direct fallback ({last_error})"
+            )
+            return []
+
+
+def run_direct_fallback(
+    *,
+    run_dir: Path,
+    tasks: list[dict],
+    model_name: str,
+    worker_dir: Path,
+    nvidia_only: bool,
+) -> int:
+    fallback_csv = run_dir / "all_tasks.csv"
+    write_tasks_csv(fallback_csv, tasks)
+    report_csv = worker_dir / "direct_fallback_report.csv"
+    log_path = worker_dir / "direct_fallback.log"
+    cmd = [
+        PYTHON_BIN,
+        WORKER_SCRIPT,
+        "--db", DB,
+        "--provider", "nvidia",
+        "--model", model_name,
+        "--tasks-csv", str(fallback_csv),
+        "--report-csv", str(report_csv),
+        "--limit", str(len(tasks)),
+        "--max-attempts", "3",
+        "--fallback-provider", "nvidia",
+    ]
+    if nvidia_only:
+        log("Direct fallback mode: NVIDIA-only worker path")
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} | direct_fallback | tasks={len(tasks)} ===\n")
+        handle.flush()
+        result = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=max(TASK_TIMEOUT_SECONDS, TASK_TIMEOUT_SECONDS * max(1, len(tasks))),
         )
-    items.sort(key=lambda item: int(item["id"]))
-    return items
+    return int(result.returncode)
 
 
 def load_missing_summary_tasks(video_ids: set[str] | None = None, limit: int = 0) -> list[dict]:
@@ -579,6 +643,31 @@ def main() -> int:
             flip_pending_tasks_provider(queue_db, "nvidia")
         except Exception as e:
             log(f"Failed to flip tasks: {e}")
+
+    if tasks and not accounts:
+        log("No coordinator account pool available; running direct NVIDIA fallback worker instead.")
+        (run_dir / "meta.txt").write_text(
+            "\n".join(
+                [
+                    f"started_at={time.strftime('%Y-%m-%dT%H:%M:%S')}",
+                    f"model={model_name}",
+                    "pool_mode=direct_fallback",
+                    f"groq_accounts={[a['id'] for a in groq_accounts]}",
+                    f"nvidia_accounts={[a['id'] for a in nvidia_accounts]}",
+                    f"task_count={len(tasks)}",
+                    f"queue_db={queue_db}",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return run_direct_fallback(
+            run_dir=run_dir,
+            tasks=tasks,
+            model_name=model_name,
+            worker_dir=worker_dir,
+            nvidia_only=args.nvidia_only,
+        )
 
     (run_dir / "meta.txt").write_text(
         "\n".join(

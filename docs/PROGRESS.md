@@ -311,3 +311,7 @@
   - Retry internal OpenAI client untuk NVIDIA dimatikan agar request tidak macet terlalu lama di `chat.completions.create()`.
   - Jalur NVIDIA sekarang memakai streaming chat completion ala contoh resmi, lalu mengumpulkan `delta.content` menjadi hasil final.
   - Kalau NVIDIA kena timeout-like error, provider itu ditandai disabled untuk sisa run supaya worker pindah ke backlog lain alih-alih mengulang macet yang sama.
+
+- **2026-05-14 (Local)**: Resume launcher tidak lagi abort saat status coordinator timeout.
+  - `launch_resume_queue.py` sekarang retry lookup status coordinator secara singkat sebelum menyerah.
+  - Jika status pool tetap tidak bisa dibaca, launcher turun ke direct NVIDIA fallback worker alih-alih menghentikan seluruh run.
