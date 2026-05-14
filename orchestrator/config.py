@@ -151,6 +151,33 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "write_markdown": True,
             "notify_on_blocking": True,
         },
+        "adaptive": {
+            "transcript": {
+                "enabled": True,
+                "min_batch": 20,
+                "max_batch": 300,
+                "step": 50,
+                "increase_after_success_batches": 3,
+                "decrease_on_block": True,
+            },
+            "audio_download": {
+                "enabled": True,
+                "min_batch": 10,
+                "max_batch": 100,
+                "step": 20,
+                "increase_after_success_batches": 3,
+                "decrease_on_block": True,
+            },
+        },
+        "janitor": {
+            "enabled": True,
+            "interval_minutes": 60,
+            "keep_events_days": 30,
+            "keep_logs_days": 14,
+            "keep_run_dirs_days": 7,
+            "keep_reports_days": 14,
+            "cleanup_audio_orphans": True,
+        },
     }
 
     if path.exists():

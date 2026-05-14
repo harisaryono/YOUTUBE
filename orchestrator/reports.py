@@ -13,6 +13,7 @@ from .state import OrchestratorState
 from . import cooldown as cd
 from . import planner
 from . import db_queries
+from .safety import check_system_health
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +35,12 @@ def build_inventory_snapshot(
     active_cooldowns = state.list_active_cooldowns()
     active_locks = state.list_active_locks()
     recent_events = state.get_recent_events(limit=50)
+    pauses = state.list_pauses()
+    sys_health = None
+    try:
+        sys_health = check_system_health(config)
+    except Exception:
+        sys_health = None
 
     blocked = {
         "youtube": any(cd_entry["scope"] == "youtube" for cd_entry in active_cooldowns),
@@ -50,6 +57,14 @@ def build_inventory_snapshot(
         "format": counts.get("videos_need_format", 0),
         "discovery": db_queries.count_channels_need_discovery(config, state),
     }
+
+    system = {
+        "disk_free_gb": (cycle_result or {}).get("disk_free_gb", 0),
+        "mem_available_mb": (cycle_result or {}).get("mem_available_mb", 0),
+    }
+    if sys_health is not None:
+        system["disk_free_gb"] = getattr(sys_health, "disk_free_gb", system["disk_free_gb"])
+        system["mem_available_mb"] = getattr(sys_health, "mem_available_mb", system["mem_available_mb"])
 
     defer_reasons: dict[str, int] = {}
     for event in recent_events:
@@ -71,6 +86,7 @@ def build_inventory_snapshot(
         "mode": config.get("orchestrator", {}).get("mode", "work_conserving"),
         "work_remaining": work_remaining,
         "blocked": blocked,
+        "system": system,
         "cooldowns": {
             "active_count": len(active_cooldowns),
             "details": active_cooldowns,
@@ -79,6 +95,7 @@ def build_inventory_snapshot(
             "active_count": len(active_locks),
             "details": active_locks,
         },
+        "pauses": pauses,
         "defer_reasons": defer_reasons,
         "cycle_result": cycle_result or {},
     }
@@ -133,6 +150,14 @@ def generate_report(
         "cycle_result": cycle_result,
         "suggestions": suggestions,
     }
+
+    try:
+        state.record_inventory_snapshot(inventory | {
+            "generated_at": now.isoformat(timespec="seconds"),
+            "profile": config.get("profile", "safe"),
+        })
+    except Exception:
+        pass
 
     # Write files
     reports_dir = _ensure_reports_dir()
@@ -290,8 +315,15 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"- Mode: `{inv.get('mode', '?')}`")
         lines.append(f"- Blocked: {inv.get('blocked', {})}")
+        sys_info = inv.get("system", {})
+        lines.append(f"- Disk free: {sys_info.get('disk_free_gb', 0):.1f} GB")
+        lines.append(f"- Memory available: {sys_info.get('mem_available_mb', 0):.0f} MB")
         lines.append(f"- Active cooldowns: {inv.get('cooldowns', {}).get('active_count', 0)}")
         lines.append(f"- Active locks: {inv.get('locks', {}).get('active_count', 0)}")
+        if inv.get("pauses"):
+            lines.append("- Pauses:")
+            for pause in inv["pauses"]:
+                lines.append(f"  - `{pause.get('pause_key', pause.get('key', ''))}`: {pause.get('value', '')}")
         lines.append("")
         lines.append("### Remaining Work")
         for key, val in sorted(inv.get("work_remaining", {}).items()):
@@ -316,10 +348,28 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
     }
     blocked_providers = cd_info.get("blocked_providers", [])
     youtube_blocked = any(cd_entry["scope"] == "youtube" for cd_entry in cd_info.get("details", []))
+    pause_keys = {str(p.get("pause_key", "")).strip() for p in inv.get("pauses", [])}
+    sys_info = inv.get("system", {})
+    mem_mb = float(sys_info.get("mem_available_mb", 0) or 0)
+    disk_gb = float(sys_info.get("disk_free_gb", 0) or 0)
     for stage, (stage_key, dep) in stages.items():
         enabled = config.get(stage_key, {}).get("enabled", True)
+        stage_paused = (
+            f"stage:{stage_key}" in pause_keys
+            or "scope:all" in pause_keys
+            or (dep == "youtube" and "scope:youtube" in pause_keys)
+            or (dep == "provider" and "scope:provider" in pause_keys)
+        )
         if not enabled:
             lines.append(f"- **{stage}**: disabled")
+        elif stage_paused:
+            lines.append(f"- **{stage}**: paused")
+        elif disk_gb < float(config.get("system", {}).get("min_free_disk_gb", 5) or 5):
+            lines.append(f"- **{stage}**: blocked (disk low)")
+        elif stage_key in ("resume", "format") and mem_mb < float(config.get("system", {}).get(f"min_memory_mb_{stage_key}", 1200) or 1200):
+            lines.append(f"- **{stage}**: limited (memory low)")
+        elif stage_key == "asr" and mem_mb < float(config.get("system", {}).get("min_memory_mb_asr", 2500) or 2500):
+            lines.append(f"- **{stage}**: limited (memory low)")
         elif dep == "youtube" and youtube_blocked:
             lines.append(f"- **{stage}**: blocked (YouTube cooldown)")
         elif dep == "provider" and blocked_providers:

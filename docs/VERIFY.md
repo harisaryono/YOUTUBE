@@ -25,6 +25,11 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - `scripts/asr.sh --local-audio-only` harus membaca audio lokal dari `video_audio_assets.audio_file_path` dan tidak lagi memanggil yt-dlp untuk download.
 - `orchestrator/daemon.py` harus menjaga lock/dispatch tetap satu blok saat `decision.verdict == "RUN"`, tanpa indentasi yang membuat dispatch unreachable.
 - `./scripts/orchestrator.sh explain` harus menampilkan inventory snapshot, stage decisions ringkas, dan stage `Audio Download` di status report.
+- `./scripts/preflight_orchestrator.sh` harus memeriksa schema utama, wrapper stage, audio dir, yt-dlp, dan coordinator opsional tanpa mengubah state kerja normal.
+- `./scripts/orchestrator_ctl.sh pause <target>` harus membuat safety gate menahan target tersebut, dan `resume` harus melepasnya lagi.
+- `orchestrator_inventory_snapshots` harus bertambah setiap cycle report agar trend backlog bisa diaudit.
+- `adaptive_batch_limit:<stage>` harus berubah dari cycle ke cycle ketika stage sukses berulang atau kena blok.
+- `./scripts/orchestrator_ctl.sh janitor` harus bisa menjalankan maintenance ringan tanpa error, dan cycle runtime boleh memanggil janitor periodik lewat `janitor_last_run_at`.
 - Final ASR sukses harus menulis `videos.transcript_text`, `videos.transcript_file_path`, `transcript_downloaded = 1`, dan file `.txt` final di `uploads/asr/<video_id>/`.
 - Final ASR juga harus menyimpan `transcript_raw.txt` sebagai jejak timestamp mentah, lalu memakai GPT OSS 120B hanya untuk transcript yang masih kecil; transcript panjang boleh otomatis dilewati dan langsung pakai raw timestamped output.
 - Default ASR sekarang harus menyimpan transcript raw timestamped tanpa GPT OSS post-process, kecuali `--postprocess` dipilih eksplisit.

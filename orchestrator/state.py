@@ -81,6 +81,15 @@ class OrchestratorState:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS orchestrator_inventory_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_inventory_snapshots_created
+                ON orchestrator_inventory_snapshots(created_at DESC);
         """)
         conn.commit()
 
@@ -328,6 +337,151 @@ class OrchestratorState:
         if removed > 0:
             conn.commit()
         return removed
+
+    # --- Pause / Resume ---
+
+    def set_pause(self, key: str, reason: str = "") -> None:
+        """Pause a stage/scope using an orchestrator_state key."""
+        pause_key = self._pause_key(key)
+        self.set(pause_key, reason or "1")
+
+    def clear_pause(self, key: str) -> None:
+        """Clear a pause key."""
+        pause_key = self._pause_key(key)
+        conn = self._connect()
+        conn.execute("DELETE FROM orchestrator_state WHERE key = ?", (pause_key,))
+        conn.commit()
+
+    def is_paused(self, key: str) -> bool:
+        """Return True if a pause key is currently set."""
+        pause_key = self._pause_key(key)
+        value = self.get(pause_key, "").strip()
+        return bool(value)
+
+    def list_pauses(self) -> list[dict[str, Any]]:
+        """List all active pause keys."""
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT key, value, updated_at
+               FROM orchestrator_state
+               WHERE key LIKE 'pause:%'
+               ORDER BY key ASC""",
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["pause_key"] = str(item.get("key", "")).replace("pause:", "", 1)
+            result.append(item)
+        return result
+
+    @staticmethod
+    def _pause_key(key: str) -> str:
+        value = str(key or "").strip()
+        if not value:
+            return "pause:scope:all"
+        if value.startswith("pause:"):
+            return value
+        return f"pause:{value}"
+
+    # --- Inventory snapshots ---
+
+    def record_inventory_snapshot(self, payload: dict[str, Any]) -> int:
+        """Persist a work inventory snapshot."""
+        conn = self._connect()
+        cursor = conn.execute(
+            """INSERT INTO orchestrator_inventory_snapshots (payload_json)
+               VALUES (?)""",
+            (json.dumps(payload),),
+        )
+        conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_latest_inventory_snapshot(self) -> dict[str, Any] | None:
+        """Return the latest inventory snapshot payload, if any."""
+        conn = self._connect()
+        row = conn.execute(
+            """SELECT payload_json, created_at
+               FROM orchestrator_inventory_snapshots
+               ORDER BY id DESC
+               LIMIT 1""",
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            payload.setdefault("created_at", row["created_at"])
+        return payload
+
+    # --- Adaptive batch state ---
+
+    def get_stage_batch_limit(self, stage: str, default: int) -> int:
+        """Get the current adaptive batch limit for a stage."""
+        value = self.get_int(f"adaptive_batch_limit:{stage}", default)
+        return value if value > 0 else default
+
+    def set_stage_batch_limit(self, stage: str, value: int) -> None:
+        """Set the adaptive batch limit for a stage."""
+        self.set_int(f"adaptive_batch_limit:{stage}", int(value))
+
+    def record_stage_batch_outcome(
+        self,
+        stage: str,
+        *,
+        success: bool,
+        blocked: bool,
+        min_batch: int,
+        max_batch: int,
+        step: int,
+        increase_after_success_batches: int,
+        decrease_on_block: bool = True,
+    ) -> dict[str, Any]:
+        """Adjust adaptive batch state for a stage and return the new values."""
+        stage = str(stage or "").strip()
+        if not stage:
+            return {"stage": "", "batch_limit": 0, "success_streak": 0, "blocked_streak": 0}
+
+        min_batch = max(int(min_batch), 1)
+        max_batch = max(int(max_batch), min_batch)
+        step = max(int(step), 1)
+        increase_after_success_batches = max(int(increase_after_success_batches), 1)
+
+        limit_key = f"adaptive_batch_limit:{stage}"
+        success_key = f"adaptive_success_streak:{stage}"
+        blocked_key = f"adaptive_blocked_streak:{stage}"
+
+        current_limit = self.get_stage_batch_limit(stage, min_batch)
+        success_streak = self.get_int(success_key, 0)
+        blocked_streak = self.get_int(blocked_key, 0)
+
+        if blocked:
+            success_streak = 0
+            blocked_streak += 1
+            if decrease_on_block:
+                current_limit = max(min_batch, min(current_limit, max_batch) // 2)
+                current_limit = max(current_limit, min_batch)
+        elif success:
+            blocked_streak = 0
+            success_streak += 1
+            if success_streak >= increase_after_success_batches:
+                current_limit = min(max_batch, max(current_limit, min_batch) + step)
+                success_streak = 0
+        else:
+            # Non-blocking failure: keep the current batch size but reset streaks gently.
+            success_streak = 0
+            blocked_streak = 0
+
+        self.set_int(limit_key, int(current_limit))
+        self.set_int(success_key, int(success_streak))
+        self.set_int(blocked_key, int(blocked_streak))
+        return {
+            "stage": stage,
+            "batch_limit": int(current_limit),
+            "success_streak": int(success_streak),
+            "blocked_streak": int(blocked_streak),
+        }
 
     @staticmethod
     def _pid_is_alive(pid: int) -> bool:

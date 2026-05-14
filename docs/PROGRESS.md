@@ -324,3 +324,9 @@
 - **2026-05-14 (Local)**: Dispatch runner hardening ditambahkan.
   - `run_once()` sekarang punya fallback `result` saat `dispatch_job()` melempar exception sebelum return.
   - Lock tetap dilepas di `finally`, dan exception dispatch dicatat sebagai failure biasa agar cycle tidak mati mendadak.
+
+- **2026-05-14 (Local)**: Stage 3 baseline mulai dipasang.
+  - `orchestrator/preflight.py` dan `scripts/preflight_orchestrator.sh` sudah menambah preflight check untuk DB schema, script wrapper, audio dir, yt-dlp, dan coordinator opsional.
+  - `orchestrator_state` sekarang menyimpan pause keys, inventory snapshot, dan state batch adaptif per stage.
+  - `./scripts/orchestrator.sh explain` sekarang menampilkan disk/memory, pause state, dan keputusan per stage yang lebih jelas.
+  - `orchestrator/janitor.py` dan `scripts/orchestrator_ctl.sh janitor` menambah maintenance pass ringan untuk event/log/run-dir/report/audio orphan.

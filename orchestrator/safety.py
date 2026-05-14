@@ -139,6 +139,11 @@ def _is_idle_hours(config: dict[str, Any]) -> bool:
         return True  # If config is malformed, allow
 
 
+def _pause_reason(state: OrchestratorState, key: str) -> str:
+    """Return the pause reason for a pause key, if any."""
+    return str(state.get(f"pause:{key}", "") or "").strip()
+
+
 # --- Health Checkers ---
 
 def check_system_health(config: dict[str, Any]) -> SystemHealth:
@@ -286,6 +291,27 @@ def safety_gate_for_job(
             f"Disk low: {sys_health.disk_free_gb:.1f} GB free",
             cooldown_seconds=1800,
             recommendation="Clean up runs/uploads/logs/cache",
+            reason_code="DEFER_DISK_LOW",
+        )
+
+    # Pause controls
+    pause_reasons = [
+        _pause_reason(state, "scope:all"),
+        _pause_reason(state, f"stage:{stage}"),
+    ]
+    if stage in ("discovery", "transcript", "audio_download"):
+        pause_reasons.append(_pause_reason(state, "scope:youtube"))
+    if stage in ("resume", "format", "asr"):
+        pause_reasons.append(_pause_reason(state, "scope:provider"))
+    if scope:
+        pause_reasons.append(_pause_reason(state, f"scope:{scope}"))
+    pause_reason = next((reason for reason in pause_reasons if reason), "")
+    if pause_reason:
+        return SafetyDecision.wait(
+            f"Paused: {pause_reason}",
+            cooldown_seconds=0,
+            recommendation="Resume the stage or scope when ready",
+            reason_code="DEFER_STAGE_PAUSED",
         )
 
     # --- Stage-specific checks ---

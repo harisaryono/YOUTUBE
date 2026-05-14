@@ -17,6 +17,10 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
   - Menjalankan web lokal Flask.
 - [supervisor.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/supervisor.sh)
   - Supervisor sadar-state untuk discovery, transcript, audio, ASR, resume, dan format.
+- [preflight_orchestrator.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/preflight_orchestrator.sh)
+  - Preflight runtime orchestrator: cek schema, wrapper stage, audio dir, dan yt-dlp sebelum daemon jalan panjang.
+- [orchestrator_ctl.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/orchestrator_ctl.sh)
+  - Kontrol pause/resume stage atau scope orchestrator, plus preflight dan janitor ad hoc.
 - [run_pipeline_one_channel.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_pipeline_one_channel.sh)
   - Wrapper kompatibilitas untuk satu channel.
 - [run_pipeline_all_channels.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_pipeline_all_channels.sh)
@@ -57,6 +61,8 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
   - Bantuan pencarian metadata / discovery.
 - [monitor_pipeline.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/monitor_pipeline.sh)
   - Monitor proses pipeline dan statistik.
+- [test_orchestrator_rules.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/test_orchestrator_rules.sh)
+  - Smoke-test rule orchestrator: YouTube cooldown, memory low, dan pause/resume stage.
 - [sync_missing_rows_to_server.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/sync_missing_rows_to_server.sh)
   - Sinkronisasi delta ke server.
 - [migrate_metadata.py](/media/harry/DATA120B/GIT/YOUTUBE/scripts/migrate_metadata.py)

@@ -55,6 +55,26 @@ def _adaptive_priority(stage: str, youtube_pressure: int, boost_threshold: int) 
     return int(JOB_PRIORITY_AVAILABLE_WORK_FIRST.get(stage, 99))
 
 
+def _adaptive_batch_limit(
+    stage: str,
+    default_limit: int,
+    config: dict[str, Any],
+    state: OrchestratorState,
+) -> int:
+    adaptive_cfg = config.get("adaptive", {}).get(stage, {})
+    if not adaptive_cfg.get("enabled", False):
+        return default_limit
+
+    min_batch = _limit_value(adaptive_cfg.get("min_batch", default_limit), default_limit or 1)
+    max_batch = _limit_value(adaptive_cfg.get("max_batch", default_limit), default_limit or 1)
+    if max_batch < min_batch:
+        max_batch = min_batch
+
+    current = state.get_stage_batch_limit(stage, default_limit)
+    current = max(min_batch, min(current, max_batch))
+    return current
+
+
 def plan_jobs(
     config: dict[str, Any],
     state: OrchestratorState,
@@ -130,6 +150,7 @@ def plan_jobs(
     # 5. Transcript — max 1 batch per cycle
     if transcript_count > 0:
         batch_limit = _limit_value(config.get("youtube", {}).get("batch_limit", 100), 100)
+        batch_limit = _adaptive_batch_limit("transcript", batch_limit, config, state)
         jobs.append({
             "stage": "transcript",
             "scope": "youtube",
@@ -143,6 +164,7 @@ def plan_jobs(
     if config.get("audio_download", {}).get("enabled", True):
         if audio_count > 0:
             batch_limit = _limit_value(config.get("audio_download", {}).get("batch_limit", 50), 50)
+            batch_limit = _adaptive_batch_limit("audio_download", batch_limit, config, state)
             jobs.append({
                 "stage": "audio_download",
                 "scope": "youtube",

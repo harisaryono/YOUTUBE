@@ -29,6 +29,8 @@ from .dispatcher import dispatch_job
 from .cooldown import clear_all_cooldowns, get_next_wakeup
 from .reports import generate_report
 from .reports import build_inventory_snapshot
+from .preflight import run_preflight, format_preflight
+from .janitor import run_janitor, janitor_due
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -67,6 +69,70 @@ def _idle_sleep_seconds(config: dict[str, Any]) -> int:
 def _error_sleep_seconds(config: dict[str, Any]) -> int:
     loop_cfg = config.get("loop", {})
     return int(loop_cfg.get("error_sleep_seconds", 1800) or 1800)
+
+
+def _maybe_update_adaptive_batch(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    stage: str,
+    success: bool,
+    blocked: bool,
+) -> None:
+    adaptive_cfg = config.get("adaptive", {}).get(stage, {})
+    if not adaptive_cfg.get("enabled", False):
+        return
+    state.record_stage_batch_outcome(
+        stage,
+        success=success,
+        blocked=blocked,
+        min_batch=adaptive_cfg.get("min_batch", 1),
+        max_batch=adaptive_cfg.get("max_batch", 1),
+        step=adaptive_cfg.get("step", 1),
+        increase_after_success_batches=adaptive_cfg.get("increase_after_success_batches", 3),
+        decrease_on_block=adaptive_cfg.get("decrease_on_block", True),
+    )
+
+
+def _target_to_pause_key(target: str) -> str:
+    value = str(target or "").strip()
+    if not value:
+        return "scope:all"
+    if value.startswith("pause:"):
+        return value.replace("pause:", "", 1)
+    if value in {"youtube", "provider", "all"}:
+        return f"scope:{value}"
+    if value.startswith(("stage:", "scope:")):
+        return value
+    return f"stage:{value}"
+
+
+def _run_preflight_or_exit(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    require_coordinator: bool = False,
+) -> None:
+    result = run_preflight(config, require_coordinator=require_coordinator, state=state)
+    state.add_event(
+        event_type="preflight",
+        message="Preflight passed" if result.ok else "Preflight failed",
+        severity="info" if result.ok else "blocking",
+        payload={
+            "ok": result.ok,
+            "checks": result.checks,
+            "warnings": result.warnings,
+            "errors": result.errors,
+        },
+    )
+    if not result.ok:
+        print(format_preflight(result))
+        raise SystemExit(1)
+
+
+def _maybe_run_janitor(config: dict[str, Any], state: OrchestratorState) -> None:
+    """Run janitor when the configured interval has elapsed."""
+    if not janitor_due(config, state):
+        return
+    run_janitor(config, state)
 
 
 def run_once(
@@ -214,14 +280,17 @@ def run_once(
 
             if result.get("success"):
                 cycle_result["jobs_succeeded"] += 1
+                _maybe_update_adaptive_batch(config, state, stage, success=True, blocked=False)
             else:
                 cycle_result["jobs_failed"] += 1
                 # Apply cooldown based on error
                 error_msg = result.get("error", result.get("stderr", ""))
+                blocked_failure = False
                 if error_msg:
                     from .error_analyzer import classify_error
 
                     classification = classify_error(error_msg, result.get("returncode", 0))
+                    blocked_failure = classification.cooldown_seconds > 0
                     if classification.cooldown_seconds > 0:
                         # Use suggested_scope from classification, fallback to job scope
                         scope = classification.suggested_scope or job.get("scope", "global")
@@ -246,6 +315,7 @@ def run_once(
                             "cooldown_seconds": classification.cooldown_seconds,
                         },
                     )
+                _maybe_update_adaptive_batch(config, state, stage, success=False, blocked=blocked_failure)
 
         elif decision.verdict == "WAIT":
             cycle_result["jobs_deferred"] += 1
@@ -314,6 +384,7 @@ def run_loop(
 
         try:
             result = run_once(config, state, max_jobs=max_jobs, dry_run=dry_run)
+            _maybe_run_janitor(config, state)
         except KeyboardInterrupt:
             state.add_event(
                 event_type="shutdown",
@@ -385,7 +456,7 @@ def main() -> None:
         "mode",
         nargs="?",
         default="once",
-        choices=["once", "run", "status", "explain", "report"],
+        choices=["once", "run", "status", "explain", "report", "preflight", "pause", "resume", "janitor"],
         help="Operation mode (default: once)",
     )
     parser.add_argument(
@@ -410,6 +481,26 @@ def main() -> None:
         action="store_true",
         help="Show what would run without dispatching anything",
     )
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip startup preflight checks for once/run modes",
+    )
+    parser.add_argument(
+        "--require-coordinator",
+        action="store_true",
+        help="Treat coordinator availability as a hard preflight requirement",
+    )
+    parser.add_argument(
+        "--target",
+        default=None,
+        help="Pause/resume target, e.g. youtube, transcript, audio_download, resume",
+    )
+    parser.add_argument(
+        "--reason",
+        default="",
+        help="Pause reason when using pause mode",
+    )
 
     args = parser.parse_args()
 
@@ -421,8 +512,31 @@ def main() -> None:
     # Init state
     state = OrchestratorState()
 
+    if args.mode in {"once", "run", "preflight"} and not args.skip_preflight:
+        preflight = run_preflight(config, require_coordinator=args.require_coordinator, state=state)
+        state.add_event(
+            event_type="preflight",
+            message="Preflight passed" if preflight.ok else "Preflight failed",
+            severity="info" if preflight.ok else "blocking",
+            payload={
+                "ok": preflight.ok,
+                "checks": preflight.checks,
+                "warnings": preflight.warnings,
+                "errors": preflight.errors,
+            },
+        )
+        if args.mode == "preflight":
+            print(format_preflight(preflight))
+            state.close()
+            raise SystemExit(0 if preflight.ok else 1)
+        if not preflight.ok:
+            print(format_preflight(preflight))
+            state.close()
+            raise SystemExit(1)
+
     if args.mode == "once":
         result = run_once(config, state, max_jobs=args.max_jobs, dry_run=args.dry_run)
+        _maybe_run_janitor(config, state)
         print(f"Cycle complete: {result.get('jobs_dispatched', 0)} dispatched, "
               f"{result.get('jobs_succeeded', 0)} succeeded, "
               f"{result.get('jobs_failed', 0)} failed, "
@@ -435,6 +549,41 @@ def main() -> None:
             print("⚠️  DRY-RUN MODE — no jobs will actually run")
         print("Press Ctrl+C to stop.")
         run_loop(config, state, max_jobs=args.max_jobs, dry_run=args.dry_run)
+
+    elif args.mode == "pause":
+        target = _target_to_pause_key(args.target or "all")
+        reason = args.reason.strip() or f"Paused via orchestrator daemon ({target})"
+        state.set_pause(target, reason)
+        state.add_event(
+            event_type="control",
+            message=f"Paused {target}: {reason}",
+            severity="info",
+            payload={"action": "pause", "target": target, "reason": reason},
+        )
+        print(f"Paused {target}")
+
+    elif args.mode == "resume":
+        target = _target_to_pause_key(args.target or "all")
+        state.clear_pause(target)
+        state.add_event(
+            event_type="control",
+            message=f"Resumed {target}",
+            severity="info",
+            payload={"action": "resume", "target": target},
+        )
+        print(f"Resumed {target}")
+
+    elif args.mode == "janitor":
+        result = run_janitor(config, state)
+        print(
+            "Janitor complete: "
+            f"success={result.get('success', False)} "
+            f"events={result.get('events_deleted', 0)} "
+            f"logs={result.get('log_files_deleted', 0)} "
+            f"run_dirs={result.get('run_dirs_deleted', 0)} "
+            f"reports={result.get('report_files_deleted', 0)} "
+            f"audio_orphans={result.get('audio_orphans_deleted', 0)}"
+        )
 
     elif args.mode == "status":
         from .reports import get_latest_report
@@ -455,40 +604,67 @@ def main() -> None:
         print(f"Blocked: {inventory.get('blocked', {})}")
         print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
         print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
+        system_info = inventory.get("system", {})
+        print(f"Disk free: {system_info.get('disk_free_gb', 0):.1f} GB")
+        print(f"Memory available: {system_info.get('mem_available_mb', 0):.0f} MB")
+        pauses = {str(p.get("pause_key", "")).strip(): str(p.get("value", "")).strip() for p in inventory.get("pauses", [])}
         work_remaining = inventory.get("work_remaining", {})
         blocked = inventory.get("blocked", {})
         youtube_blocked = bool(blocked.get("youtube"))
         provider_blocked = bool(blocked.get("provider"))
+        disk_low = float(system_info.get("disk_free_gb", 0) or 0) < float(config.get("system", {}).get("min_free_disk_gb", 5) or 5)
+        mem_low = float(system_info.get("mem_available_mb", 0) or 0)
         stage_decisions = [
             ("Import Pending", "RUN" if work_remaining.get("import_pending", 0) else "NO_WORK"),
             (
                 "Transcript",
-                "WAIT_YOUTUBE_COOLDOWN"
+                "PAUSED"
+                if pauses.get("pause:stage:transcript") or pauses.get("pause:scope:youtube") or pauses.get("pause:scope:all")
+                else "WAIT_YOUTUBE_COOLDOWN"
                 if youtube_blocked and work_remaining.get("transcript", 0)
                 else ("RUN" if work_remaining.get("transcript", 0) else "NO_WORK"),
             ),
             (
                 "Audio Download",
-                "WAIT_YOUTUBE_COOLDOWN"
+                "PAUSED"
+                if pauses.get("pause:stage:audio_download") or pauses.get("pause:scope:youtube") or pauses.get("pause:scope:all")
+                else "WAIT_YOUTUBE_COOLDOWN"
                 if youtube_blocked and work_remaining.get("audio_download", 0)
                 else ("RUN" if work_remaining.get("audio_download", 0) else "NO_WORK"),
             ),
-            ("ASR", "RUN" if work_remaining.get("asr", 0) else "NO_WORK"),
+            (
+                "ASR",
+                "PAUSED"
+                if pauses.get("pause:stage:asr") or pauses.get("pause:scope:provider") or pauses.get("pause:scope:all")
+                else "WAIT_MEMORY"
+                if mem_low < float(config.get("system", {}).get("min_memory_mb_asr", 2500) or 2500)
+                else ("RUN" if work_remaining.get("asr", 0) else "NO_WORK"),
+            ),
             (
                 "Resume",
-                "WAIT_PROVIDER_COOLDOWN"
+                "PAUSED"
+                if pauses.get("pause:stage:resume") or pauses.get("pause:scope:provider") or pauses.get("pause:scope:all")
+                else "WAIT_PROVIDER_COOLDOWN"
                 if provider_blocked and work_remaining.get("resume", 0)
+                else "WAIT_MEMORY"
+                if mem_low < float(config.get("system", {}).get("min_memory_mb_resume", 1500) or 1500)
                 else ("RUN" if work_remaining.get("resume", 0) else "NO_WORK"),
             ),
             (
                 "Format",
-                "WAIT_PROVIDER_COOLDOWN"
+                "PAUSED"
+                if pauses.get("pause:stage:format") or pauses.get("pause:scope:provider") or pauses.get("pause:scope:all")
+                else "WAIT_PROVIDER_COOLDOWN"
                 if provider_blocked and work_remaining.get("format", 0)
+                else "WAIT_MEMORY"
+                if mem_low < float(config.get("system", {}).get("min_memory_mb_format", 1200) or 1200)
                 else ("RUN" if work_remaining.get("format", 0) else "NO_WORK"),
             ),
             (
                 "Discovery",
-                "WAIT_YOUTUBE_COOLDOWN"
+                "PAUSED"
+                if pauses.get("pause:stage:discovery") or pauses.get("pause:scope:youtube") or pauses.get("pause:scope:all")
+                else "WAIT_YOUTUBE_COOLDOWN"
                 if youtube_blocked and work_remaining.get("discovery", 0)
                 else ("RUN" if work_remaining.get("discovery", 0) else "NO_WORK"),
             ),
