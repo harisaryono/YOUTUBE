@@ -1459,8 +1459,8 @@ class OptimizedDatabase:
         """Get adjacent videos within the same channel ordering.
 
         The public UI walks the channel list from newest to oldest, so
-        ``previous`` is treated as the older neighbor and ``next`` as the newer
-        neighbor to match how the legacy detail page is used.
+        ``previous`` means the item just before the current row in that
+        descending list and ``next`` means the item just after it.
         """
         try:
             with self._get_cursor() as cursor:
@@ -1515,7 +1515,7 @@ class OptimizedDatabase:
                           AND (v.is_short = 0 OR v.is_short IS NULL)
                     """, (
                         current["channel_id"],
-                        current_rank + 1,
+                        current_rank - 1,
                     )).fetchone()
                     if previous_row and not _is_member_only_row(previous_row):
                         previous_video = _row_to_nav(previous_row)
@@ -1528,7 +1528,7 @@ class OptimizedDatabase:
                           AND (v.is_short = 0 OR v.is_short IS NULL)
                     """, (
                         current["channel_id"],
-                        current_rank - 1,
+                        current_rank + 1,
                     )).fetchone()
                     if next_row and not _is_member_only_row(next_row):
                         next_video = _row_to_nav(next_row)
@@ -1556,10 +1556,10 @@ class OptimizedDatabase:
                     if current_index is None:
                         return {"previous": None, "next": None}
 
-                    if current_index + 1 < len(ordered_videos):
-                        previous_video = _row_to_nav(ordered_videos[current_index + 1])
                     if current_index - 1 >= 0:
-                        next_video = _row_to_nav(ordered_videos[current_index - 1])
+                        previous_video = _row_to_nav(ordered_videos[current_index - 1])
+                    if current_index + 1 < len(ordered_videos):
+                        next_video = _row_to_nav(ordered_videos[current_index + 1])
 
                 return {"previous": previous_video, "next": next_video}
         except Exception as e:
