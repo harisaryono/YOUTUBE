@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+
+{% block title %}{{ channel.channel_name }} Files - YouTube Transcript Manager{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('channel_detail', channel_id=channel_id) }}">{{ channel.channel_name }}</a></li>
+            <li class="breadcrumb-item active">Files</li>
+        </ol>
+    </nav>
+
+    <!-- Channel Header -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex align-items-center">
+                <div class="channel-icon flex-shrink-0">
+                    {% if channel.channel_id and channel.channel_id[0].isalpha() %}
+                    <span class="text-uppercase">{{ channel.channel_id[:2] }}</span>
+                    {% else %}
+                    <i class="bi bi-broadcast"></i>
+                    {% endif %}
+                </div>
+                <div class="flex-grow-1 ms-3">
+                    <h3 class="mb-1">{{ channel.channel_name }} Files</h3>
+                    <div class="text-muted">
+                        <i class="bi bi-folder"></i> 
+                        Channel ID: {{ channel.channel_id }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Structure -->
+    <div class="row">
+        <div class="col-md-6">
+            <!-- Transcript Files -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-file-earmark-text"></i> Text Files
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if transcript_files %}
+                    <div class="list-group list-group-flush">
+                        {% for file in transcript_files %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <div class="flex-grow-1">
+                                <h6 class="mb-1">
+                                    <i class="bi bi-file-text"></i>
+                                    {{ file.name }}
+                                </h6>
+                                <small class="text-muted">
+                                    <i class="bi bi-clock"></i> {{ file.modified.strftime('%Y-%m-%d %H:%M') }}
+                                </small>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-info">
+                                    {{ file.size|format_file_size }}
+                                </span>
+                                <a href="{{ url_for('serve_channel_file', channel_id=channel_id, file_type='text', filename=file.name) }}" 
+                                   class="btn btn-sm btn-outline-primary" 
+                                   download>
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-file-earmark-x text-muted" style="font-size: 2rem;"></i>
+                        <p class="text-muted mt-2">No transcript files found</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <!-- Summary Files -->
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-file-earmark-text"></i> Resume Files
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if summary_files %}
+                    <div class="list-group list-group-flush">
+                        {% for file in summary_files %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <div class="flex-grow-1">
+                                <h6 class="mb-1">
+                                    <i class="bi bi-file-text"></i>
+                                    {{ file.name }}
+                                </h6>
+                                <small class="text-muted">
+                                    <i class="bi bi-clock"></i> {{ file.modified.strftime('%Y-%m-%d %H:%M') }}
+                                </small>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-info">
+                                    {{ file.size|format_file_size }}
+                                </span>
+                                <a href="{{ url_for('serve_channel_file', channel_id=channel_id, file_type='resume', filename=file.name) }}" 
+                                   class="btn btn-sm btn-outline-success" 
+                                   download>
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-file-earmark-x text-muted" style="font-size: 2rem;"></i>
+                        <p class="text-muted mt-2">No summary files found</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Directory Info -->
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">
+                <i class="bi bi-info-circle text-primary"></i> Directory Information
+            </h5>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="p-3 bg-light rounded">
+                        <div class="small text-muted">Text Directory</div>
+                        <div class="fw-bold">
+                            <code>{{ transcripts_dir }}</code>
+                        </div>
+                        <div class="small text-muted mt-1">
+                            {{ transcript_files|length }} files
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-3 bg-light rounded">
+                        <div class="small text-muted">Resume Directory</div>
+                        <div class="fw-bold">
+                            <code>{{ summaries_dir }}</code>
+                        </div>
+                        <div class="small text-muted mt-1">
+                            {{ summary_files|length }} files
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-body">
+            <h5 class="card-title mb-3">
+                <i class="bi bi-tools text-primary"></i> Quick Actions
+            </h5>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <a href="{{ url_for('channel_detail', channel_id=channel_id) }}" 
+                       class="btn btn-primary w-100">
+                        <i class="bi bi-arrow-left"></i> Back to Channel
+                    </a>
+                </div>
+                <div class="col-md-4">
+                    <button onclick="downloadAllText()" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-download"></i> Download All Text
+                    </button>
+                </div>
+                <div class="col-md-4">
+                    <button onclick="downloadAllResumes()" class="btn btn-outline-success w-100">
+                        <i class="bi bi-download"></i> Download All Resumes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .channel-icon {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 1.5rem;
+    }
+</style>
+
+<script>
+    const channelId = '{{ channel_id }}';
+
+    function downloadAllText() {
+        if (confirm('Download all text files for this channel?')) {
+            const textFiles = document.querySelectorAll('.text-files .list-group-item a[download]');
+            let delay = 0;
+            
+            textFiles.forEach(link => {
+                setTimeout(() => {
+                    link.click();
+                }, delay);
+                delay += 1000; // 1 second delay between downloads
+            });
+        }
+    }
+
+    function downloadAllResumes() {
+        if (confirm('Download all resume files for this channel?')) {
+            const summaryFiles = document.querySelectorAll('.summary-files .list-group-item a[download]');
+            let delay = 0;
+            
+            summaryFiles.forEach(link => {
+                setTimeout(() => {
+                    link.click();
+                }, delay);
+                delay += 1000; // 1 second delay between downloads
+            });
+        }
+    }
+
+    // Add file type classes for download functions
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.list-group').forEach(list => {
+            if (list.querySelector('.card-header.bg-primary')) {
+                list.classList.add('text-files');
+            } else if (list.querySelector('.card-header.bg-success')) {
+                list.classList.add('summary-files');
+            }
+        });
+    });
+</script>
+{% endblock %}

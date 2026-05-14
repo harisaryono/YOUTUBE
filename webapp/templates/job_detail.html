@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Job{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-3">
+  <div>
+    <div class="h4 mb-1">
+      {% if channel_seq and job.kind == 'update_channel' and job.channel_id %}
+      Update channel #{{ channel_seq }} (id={{ job.channel_id }})
+      {% else %}
+      {{ job.title }}
+      {% endif %}
+    </div>
+    <div class="text-light-emphasis mono">
+      {{ job.kind }} • {{ job.status }}
+      {% if job.pid %} • pid={{ job.pid }}{% endif %}
+      {% if job.returncode is not none %} • rc={{ job.returncode }}{% endif %}
+    </div>
+    {% if job.log_path %}
+    <div class="small text-light-emphasis mono">{{ job.log_path }}</div>
+    {% endif %}
+    {% if job.error_msg %}
+    <div class="small text-danger mt-1">{{ job.error_msg }}</div>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-light" href="{{ url_for('channels') }}"><i class="bi bi-arrow-left me-1"></i>Back</a>
+    {% if job.status in ['running','stopping'] %}
+    <form method="post" action="{{ url_for('job_stop', job_id=job.id) }}" onsubmit="return confirm('Stop job ini?');">
+      <button class="btn btn-outline-danger" type="submit"><i class="bi bi-stop-circle me-1"></i>Stop</button>
+    </form>
+    {% endif %}
+    {% if job.status == 'running' %}
+    <span class="badge text-bg-info align-self-center">running</span>
+    {% elif job.status == 'stopping' %}
+    <span class="badge text-bg-warning text-dark align-self-center">stopping</span>
+    {% elif job.status == 'stopped' %}
+    <span class="badge text-bg-secondary align-self-center">stopped</span>
+    {% elif job.status == 'done' %}
+    <span class="badge text-bg-success align-self-center">done</span>
+    {% elif job.status == 'queued' %}
+    <span class="badge text-bg-warning text-dark align-self-center">queued</span>
+    {% else %}
+    <span class="badge text-bg-danger align-self-center">error</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card rounded-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="h6 mb-0"><i class="bi bi-terminal me-2"></i>Logs</div>
+      {% if job.status in ['running','stopping'] %}
+      <div class="text-light-emphasis small">auto-refresh</div>
+      {% endif %}
+    </div>
+    {% if not lines %}
+    <div class="text-light-emphasis">Belum ada output. Jika status masih <span class="mono">running</span>, tunggu
+      beberapa detik lalu refresh.</div>
+    {% endif %}
+    <pre class="transcript small">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if job.status in ['running','stopping'] %}
+<script>
+  setTimeout(() => location.reload(), 2500);
+</script>
+{% endif %}
+{% endblock %}

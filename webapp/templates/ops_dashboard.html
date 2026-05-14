@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}Ops Dashboard{% endblock %}
+
+{% block content %}
+<div class="p-4 rounded-4 hero mb-4">
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+    <div>
+      <div class="h3 mb-1">Ops Dashboard (Private)</div>
+      <div class="text-light-emphasis">Kontrol scraper queue, resume agents, dan monitoring proses background.</div>
+    </div>
+    <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+      <input type="hidden" name="action" value="resume_status">
+      <button class="btn btn-outline-light" type="submit"><i class="bi bi-arrow-clockwise me-1"></i>Refresh Status</button>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-6">
+    <div class="card rounded-4 h-100">
+      <div class="card-body">
+        <div class="h5 mb-3"><i class="bi bi-cpu me-2"></i>Resume Agents</div>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+            <input type="hidden" name="action" value="resume_start">
+            <button class="btn btn-success" type="submit"><i class="bi bi-play-fill me-1"></i>Start All</button>
+          </form>
+          <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+            <input type="hidden" name="action" value="resume_stop">
+            <button class="btn btn-outline-danger" type="submit"><i class="bi bi-stop-fill me-1"></i>Stop All</button>
+          </form>
+          <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+            <input type="hidden" name="action" value="resume_restart">
+            <button class="btn btn-outline-warning" type="submit"><i class="bi bi-bootstrap-reboot me-1"></i>Restart All</button>
+          </form>
+        </div>
+
+        <form method="post" action="{{ url_for('ops_dashboard_action') }}" class="row g-2 mb-3">
+          <input type="hidden" name="action" value="resume_start">
+          <div class="col-12 col-md-8">
+            <input class="form-control" type="text" name="targets" placeholder="Target agent, pisahkan spasi/koma (opsional)">
+          </div>
+          <div class="col-12 col-md-4 d-grid">
+            <button class="btn btn-outline-success" type="submit">Start Target</button>
+          </div>
+        </form>
+
+        <div class="small text-light-emphasis mb-2">Status command rc={{ resume_status_rc }}</div>
+        <pre class="transcript small mb-0">{{ resume_status_output }}</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card rounded-4 h-100">
+      <div class="card-body">
+        <div class="h5 mb-3"><i class="bi bi-hdd-network me-2"></i>Scraper Queue</div>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+            <input type="hidden" name="action" value="scrape_queue_stale">
+            <button class="btn btn-info" type="submit"><i class="bi bi-arrow-repeat me-1"></i>Queue Stale ({{ stale_count }})</button>
+          </form>
+          <form method="post" action="{{ url_for('ops_dashboard_action') }}" onsubmit="return confirm('Stop semua job scraper aktif/queued?');">
+            <input type="hidden" name="action" value="scrape_stop_all">
+            <button class="btn btn-outline-danger" type="submit"><i class="bi bi-slash-circle me-1"></i>Stop All Scrape</button>
+          </form>
+        </div>
+
+        <form method="post" action="{{ url_for('ops_dashboard_action') }}" class="row g-2">
+          <input type="hidden" name="action" value="scrape_queue_channel">
+          <div class="col-12 col-md-5">
+            <label class="form-label mb-1">Channel</label>
+            <select class="form-select" name="channel_id" required>
+              <option value="">Pilih channel...</option>
+              {% for c in channels_small %}
+              <option value="{{ c.id }}">#{{ c.id }} - {{ c.slug }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label mb-1">Mode</label>
+            <select class="form-select" name="mode">
+              <option value="quick">quick</option>
+              <option value="full">full</option>
+              <option value="pending">pending</option>
+              <option value="video">video</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label mb-1">Video ID (mode=video)</label>
+            <input class="form-control mono" type="text" name="video_id" placeholder="11 chars">
+          </div>
+          <div class="col-12 d-grid">
+            <button class="btn btn-outline-light" type="submit"><i class="bi bi-plus-circle me-1"></i>Queue Job</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card rounded-4 mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="h5 mb-0"><i class="bi bi-boxes me-2"></i>Shard Compactor</div>
+      <div>
+        {% if compact_info.running %}
+        <span class="badge text-bg-info">running</span>
+        {% elif compact_info.status == 'done' %}
+        <span class="badge text-bg-success">done</span>
+        {% elif compact_info.status == 'error' %}
+        <span class="badge text-bg-danger">error</span>
+        {% elif compact_info.status == 'stopped' %}
+        <span class="badge text-bg-secondary">stopped</span>
+        {% else %}
+        <span class="badge text-bg-secondary">{{ compact_info.status }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="small text-light-emphasis mb-2 mono">
+      pid={{ compact_info.pid or '-' }} |
+      kind={{ compact_info.kind }} |
+      min_age={{ compact_info.min_age_minutes }}m |
+      max_shard={{ compact_info.max_shard_mb }}MB
+      {% if compact_info.returncode is not none %}| rc={{ compact_info.returncode }}{% endif %}
+    </div>
+    <div class="small text-light-emphasis mb-3">
+      started={{ compact_info.started_at|fmt_iso }} {% if compact_info.ended_at %}| ended={{ compact_info.ended_at|fmt_iso }}{% endif %}
+      {% if compact_info.log_path %}<br><span class="mono">{{ compact_info.log_path }}</span>{% endif %}
+    </div>
+
+    <form method="post" action="{{ url_for('ops_dashboard_action') }}" class="row g-2 align-items-end mb-3">
+      <input type="hidden" name="action" value="compact_start">
+      <div class="col-12 col-md-3">
+        <label class="form-label mb-1">Kind</label>
+        <select class="form-select" name="compact_kind">
+          <option value="both" {% if compact_info.kind == 'both' %}selected{% endif %}>both</option>
+          <option value="text" {% if compact_info.kind == 'text' %}selected{% endif %}>text</option>
+          <option value="resume" {% if compact_info.kind == 'resume' %}selected{% endif %}>resume</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label mb-1">Min Age (m)</label>
+        <input class="form-control" type="number" min="0" max="1440" name="compact_min_age_minutes"
+          value="{{ compact_info.min_age_minutes }}">
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label mb-1">Max Shard (MB)</label>
+        <input class="form-control" type="number" min="8" max="1024" name="compact_max_shard_mb"
+          value="{{ compact_info.max_shard_mb }}">
+      </div>
+      <div class="col-12 col-md-3 d-flex gap-2">
+        <button class="btn btn-outline-success flex-fill" type="submit">Start</button>
+      </div>
+    </form>
+    <div class="d-flex gap-2 mb-3">
+      <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+        <input type="hidden" name="action" value="compact_stop">
+        <button class="btn btn-outline-danger" type="submit">Stop</button>
+      </form>
+      <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+        <input type="hidden" name="action" value="compact_status">
+        <button class="btn btn-outline-light" type="submit">Refresh Status</button>
+      </form>
+    </div>
+    <pre class="transcript small mb-0">{{ compact_info.log_tail or 'Belum ada log compactor.' }}</pre>
+  </div>
+</div>
+
+<div class="card rounded-4 mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="h5 mb-0"><i class="bi bi-activity me-2"></i>Active Scraper Jobs</div>
+      <div class="text-light-emphasis small">{{ active_jobs|length }} aktif/queued</div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Status</th>
+            <th>Channel</th>
+            <th>PID</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for j in active_jobs %}
+          <tr>
+            <td class="mono"><a class="link-info" href="{{ url_for('job_detail', job_id=j.id) }}">{{ j.id }}</a></td>
+            <td>
+              {% if j.status == 'running' %}
+              <span class="badge text-bg-info">running</span>
+              {% elif j.status == 'stopping' %}
+              <span class="badge text-bg-warning text-dark">stopping</span>
+              {% else %}
+              <span class="badge text-bg-warning text-dark">queued</span>
+              {% endif %}
+            </td>
+            <td>#{{ j.channel_id or '-' }}</td>
+            <td class="mono">{{ j.pid or '-' }}</td>
+            <td class="small text-light-emphasis">{{ j.created_at|fmt_iso }}</td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('ops_dashboard_action') }}">
+                <input type="hidden" name="action" value="scrape_stop_one">
+                <input type="hidden" name="job_id" value="{{ j.id }}">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Stop</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="text-center text-light-emphasis py-3">Tidak ada job aktif.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card rounded-4">
+  <div class="card-body">
+    <div class="h5 mb-2"><i class="bi bi-clock-history me-2"></i>Recent Jobs</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Status</th>
+            <th>Channel</th>
+            <th>Started</th>
+            <th>Finished</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for j in recent_jobs %}
+          <tr>
+            <td class="mono"><a class="link-info" href="{{ url_for('job_detail', job_id=j.id) }}">{{ j.id }}</a></td>
+            <td>{{ j.status }}</td>
+            <td>#{{ j.channel_id or '-' }}</td>
+            <td class="small text-light-emphasis">{{ j.started_at|fmt_iso }}</td>
+            <td class="small text-light-emphasis">{{ j.finished_at|fmt_iso }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-light-emphasis py-3">Belum ada job.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  setTimeout(() => location.reload(), 10000);
+</script>
+{% endblock %}

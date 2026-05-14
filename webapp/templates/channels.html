@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Channels{% endblock %}
+
+{% block content %}
+{% macro pagination() %}
+{% if page_count > 1 %}
+<div class="d-flex flex-wrap gap-1 align-items-center justify-content-center justify-content-md-end">
+  <a class="btn btn-sm btn-outline-light {% if page <= 1 %}disabled{% endif %}"
+    href="{{ url_for('channels', q=q, category=category_id, page=1, per_page=per_page) }}" title="First Page">
+    <i class="bi bi-chevron-double-left"></i>
+  </a>
+  <a class="btn btn-sm btn-outline-light {% if page <= 1 %}disabled{% endif %}"
+    href="{{ url_for('channels', q=q, category=category_id, page=page-1, per_page=per_page) }}" title="Previous Page">
+    <i class="bi bi-chevron-left"></i>
+  </a>
+
+  {% set start_p = page - 2 %}
+  {% set end_p = page + 2 %}
+  {% if start_p < 1 %}{% set start_p = 1 %}{% endif %}
+  {% if end_p > page_count %}{% set end_p = page_count %}{% endif %}
+
+  {% if start_p > 1 %}
+  <span class="btn btn-sm btn-outline-dark disabled border-0">...</span>
+  {% endif %}
+
+  {% for p in range(start_p, end_p + 1) %}
+  <a class="btn btn-sm {% if p == page %}btn-light{% else %}btn-outline-light{% endif %}"
+    href="{{ url_for('channels', q=q, category=category_id, page=p, per_page=per_page) }}">
+    {{ p }}
+  </a>
+  {% endfor %}
+
+  {% if end_p < page_count %}
+  <span class="btn btn-sm btn-outline-dark disabled border-0">...</span>
+  {% endif %}
+
+  <a class="btn btn-sm btn-outline-light {% if page >= page_count %}disabled{% endif %}"
+    href="{{ url_for('channels', q=q, category=category_id, page=page+1, per_page=per_page) }}" title="Next Page">
+    <i class="bi bi-chevron-right"></i>
+  </a>
+  <a class="btn btn-sm btn-outline-light {% if page >= page_count %}disabled{% endif %}"
+    href="{{ url_for('channels', q=q, category=category_id, page=page_count, per_page=per_page) }}" title="Last Page">
+    <i class="bi bi-chevron-double-right"></i>
+  </a>
+</div>
+{% endif %}
+{% endmacro %}
+
+<div class="p-4 rounded-4 hero mb-4">
+  <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+    <div>
+      <div class="h3 mb-1">Channel Dashboard</div>
+      <div class="text-light-emphasis">Search, play, transcript, resume, kategori, dan update channel.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-light" href="{{ url_for('add_channel') }}"><i class="bi bi-plus-lg me-1"></i>Add channel</a>
+      <form method="post" action="{{ url_for('db_cleanup') }}">
+        <button class="btn btn-outline-light" type="submit"
+          {% if cleanup_disabled_reason %}disabled aria-disabled="true" title="{{ cleanup_disabled_reason }}"{% else %}title="Checkpoint + cleanup WAL/SHM"{% endif %}>
+          <i class="bi bi-database-check me-1"></i>DB cleanup
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('db_migrate_resumes') }}">
+        <button class="btn btn-outline-light" type="submit" title="Pindahkan resume_text dari DB ke file .md">
+          <i class="bi bi-filetype-md me-1"></i>Migrate resumes
+        </button>
+      </form>
+      <form method="post" action="{{ url_for('update_stale_channels') }}"
+        onsubmit="return confirm('Queue update untuk semua channel yang belum di-scan seminggu terakhir?');">
+        <button class="btn btn-outline-info" type="submit" title="Queue update channel >7 hari tidak update">
+          <i class="bi bi-arrow-repeat me-1"></i>Update Stale (>7 days)
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="card rounded-4 mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <label class="form-label mb-1">Search channel</label>
+        <input class="form-control" name="q" value="{{ q }}" placeholder="Cari slug / URL channel...">
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label mb-1">Category</label>
+        <select class="form-select" name="category">
+          <option value="">(all)</option>
+          <option value="uncategorized" {% if category_id == 'uncategorized' %}selected{% endif %}>Tanpa kategori</option>
+          {% for cat in categories %}
+          <option value="{{ cat.id }}" {% if category_id|int==cat.id %}selected{% endif %}>{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label mb-1">Per page</label>
+        <select class="form-select" name="per_page">
+          {% for n in [25, 50, 100, 200] %}
+          <option value="{{ n }}" {% if per_page==n %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-md-2 d-grid">
+        <button class="btn btn-outline-light" type="submit"><i class="bi bi-search me-1"></i>Filter</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-8">
+    <div class="card rounded-4">
+      <div class="card-body">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+          <div class="h5 mb-0"><i class="bi bi-collection me-2"></i>Channels</div>
+          <div class="text-light-emphasis small">
+            Menampilkan {{ channels|length }} channel • total {{ total_channels }} • page {{ page }}/{{ page_count }} • per page {{ per_page }}
+          </div>
+          {{ pagination() }}
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th class="text-nowrap">#</th>
+                <th>Slug</th>
+                <th class="text-nowrap">Category</th>
+                <th class="text-nowrap">Last scan</th>
+                <th class="text-nowrap">Videos</th>
+                <th class="text-nowrap">OK</th>
+                <th class="text-nowrap">Pending</th>
+                <th class="text-nowrap">Error</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in channels %}
+              <tr>
+                <td class="text-nowrap text-light-emphasis">{{ c.chan_seq }}</td>
+                <td class="fw-semibold">
+                  <a class="link-info link-underline-opacity-25 link-underline-opacity-75-hover"
+                    href="{{ url_for('channel_detail', channel_id=c.id) }}">{{ c.slug }}</a>
+                </td>
+                <td class="text-nowrap">
+                  {% if categories %}
+                  <form method="post" action="{{ url_for('channel_category_set', channel_id=c.id) }}" class="d-flex gap-1">
+                    <input type="hidden" name="next" value="{{ request.full_path }}">
+                    <select class="form-select form-select-sm" name="category_id" style="min-width: 140px;">
+                      <option value="">(none)</option>
+                      {% for cat in categories %}
+                      <option value="{{ cat.id }}" {% if (c.category_id or 0)==cat.id %}selected{% endif %}>{{ cat.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="btn btn-sm btn-outline-light" type="submit">Save</button>
+                  </form>
+                  {% else %}
+                  <span class="text-light-emphasis small">No categories</span>
+                  {% endif %}
+                </td>
+                <td class="text-nowrap text-light-emphasis">{{ c.last_scanned|fmt_iso }}</td>
+                <td class="text-nowrap">{{ c.video_count }}</td>
+                <td class="text-nowrap"><span class="badge text-bg-success">{{ c.ok_count }}</span></td>
+                <td class="text-nowrap"><span class="badge text-bg-warning text-dark">{{ c.pending_count }}</span></td>
+                <td class="text-nowrap"><span class="badge text-bg-danger">{{ c.error_count }}</span></td>
+                <td class="text-end text-nowrap">
+                  <a class="btn btn-sm btn-outline-light" href="{{ url_for('channel_detail', channel_id=c.id) }}"><i
+                      class="bi bi-arrow-right me-1"></i>Open</a>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="9" class="text-center text-light-emphasis py-4">Belum ada channel. Klik “Add channel”.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="d-flex justify-content-end mt-3">
+          {{ pagination() }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-4">
+    <div class="card rounded-4">
+      <div class="card-body">
+        <div class="h5 mb-3"><i class="bi bi-activity me-2"></i>Recent jobs</div>
+        <div class="vstack gap-2">
+          {% for j in jobs %}
+          <a class="text-decoration-none" href="{{ url_for('job_detail', job_id=j.id) }}">
+            <div class="p-3 rounded-3 border border-light border-opacity-10">
+              <div class="d-flex justify-content-between align-items-center">
+                <div class="fw-semibold text-light">
+                  {% if j.kind == 'update_channel' and j.channel_id and channel_seq_by_id.get(j.channel_id) %}
+                  Update channel #{{ channel_seq_by_id.get(j.channel_id) }} (id={{ j.channel_id }})
+                  {% else %}
+                  {{ j.title }}
+                  {% endif %}
+                </div>
+                {% if j.status == 'running' %}
+                <span class="badge text-bg-info">running</span>
+                {% elif j.status == 'stopping' %}
+                <span class="badge text-bg-warning text-dark">stopping</span>
+                {% elif j.status == 'stopped' %}
+                <span class="badge text-bg-secondary">stopped</span>
+                {% elif j.status == 'done' %}
+                <span class="badge text-bg-success">done</span>
+                {% elif j.status == 'queued' %}
+                <span class="badge text-bg-warning text-dark">queued</span>
+                {% else %}
+                <span class="badge text-bg-danger">error</span>
+                {% endif %}
+              </div>
+              <div class="small text-light-emphasis mt-1 mono">{{ j.kind }} • {{ j.created_at|fmt_iso }}</div>
+            </div>
+          </a>
+          {% else %}
+          <div class="text-light-emphasis">Belum ada job.</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

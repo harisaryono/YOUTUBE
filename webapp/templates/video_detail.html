@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ v.title or v.video_id }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-3">
+  <div>
+    <div class="h4 mb-1">{{ v.title or v.video_id }}</div>
+    <div class="text-light-emphasis mono">{{ v.video_id }} • {{ v.upload_date|fmt_yyyymmdd }}</div>
+    <div class="mt-2 d-flex flex-wrap gap-2">
+      {% set back_url = request.args.get('back') %}
+      <a class="btn btn-outline-light btn-sm"
+        href="{{ back_url ~ '#video-' ~ v.id if back_url else url_for('channel_detail', channel_id=v.channel_id) }}">
+        <i class="bi bi-arrow-left me-1"></i>{{ v.channel_slug }}
+      </a>
+      <a class="btn btn-outline-light btn-sm" href="{{ watch_url }}" target="_blank" rel="noreferrer"><i
+          class="bi bi-youtube me-1"></i>YouTube</a>
+      {% if v.link_file %}
+      <a class="btn btn-outline-light btn-sm" href="{{ url_for('video_text', video_pk=v.id) }}"><i
+          class="bi bi-file-text me-1"></i>Transcript</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-7">
+    <div class="card rounded-4">
+      <div class="card-body">
+        <div class="ratio ratio-16x9 rounded-3 overflow-hidden">
+          <iframe src="https://www.youtube.com/embed/{{ v.video_id }}" title="YouTube video player"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen></iframe>
+        </div>
+        {% if text_preview %}
+        <div class="mt-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="fw-semibold"><i class="bi bi-file-text me-2"></i>Transcript preview</div>
+            <a class="btn btn-sm btn-outline-light" href="{{ url_for('video_text', video_pk=v.id) }}">Open</a>
+          </div>
+          <pre class="transcript small mb-0">{{ text_preview }}</pre>
+        </div>
+        {% elif text_unreadable %}
+        <div class="alert alert-warning mt-3 mb-0">
+          Transcript terdeteksi ada, tetapi gagal dibaca dari shard. Coba restart web app.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-5">
+    <div class="card rounded-4 mb-3" id="resume">
+      <div class="card-body">
+        <div class="h5 mb-3 d-flex align-items-center gap-2">
+          <span><i class="bi bi-journal-text me-2"></i>Resume</span>
+          {% if v.link_file and (not v.link_resume) %}
+          <span class="badge text-bg-warning text-dark" title="Resume belum ada, akan diproses ulang/requeue">
+            <i class="bi bi-arrow-repeat me-1"></i>Requeue
+          </span>
+          {% endif %}
+        </div>
+        <form method="post" action="{{ url_for('video_resume_save', video_pk=v.id) }}">
+          <textarea class="form-control" name="resume_text" rows="9"
+            placeholder="Tulis resume / poin penting / timestamp...">{{ resume_text or "" }}</textarea>
+          <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-light" type="submit"><i class="bi bi-save2 me-1"></i>Save</button>
+            {% if resume_text %}
+            <a class="btn btn-outline-light" href="{{ url_for('video_resume_read', video_pk=v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=v.id) }}"><i
+                class="bi bi-file-text me-1"></i>Read</a>
+            {% else %}
+            <a class="btn btn-outline-light disabled" aria-disabled="true" tabindex="-1"><i
+                class="bi bi-file-text me-1"></i>Read</a>
+            {% endif %}
+            {% if resume_mtime %}
+            <div class="ms-auto text-light-emphasis small">file updated {{ resume_mtime }}</div>
+            {% endif %}
+          </div>
+        </form>
+        {% if resume_unreadable %}
+        <div class="alert alert-warning mt-3 mb-0">
+          Resume terdeteksi ada, tetapi gagal dibaca dari shard. Coba restart web app.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card rounded-4">
+      <div class="card-body">
+        <div class="h5 mb-3"><i class="bi bi-tags me-2"></i>Categories</div>
+        <form method="post" action="{{ url_for('video_categories_save', video_pk=v.id) }}">
+          <div class="vstack gap-2">
+            {% for c in cats %}
+            <label class="d-flex align-items-center gap-2">
+              <input class="form-check-input" type="checkbox" name="category_ids" value="{{ c.id }}" {% if c.id in
+                selected %}checked{% endif %}>
+              <span class="badge badge-soft" {% if c.color %}style="border-color: {{ c.color }}; color: {{ c.color }};"
+                {% endif %}>{{ c.name }}</span>
+              <a class="link-info link-underline-opacity-25 link-underline-opacity-75-hover ms-auto"
+                href="{{ url_for('search', category=c.id) }}" title="Filter semua video dalam kategori ini">
+                <i class="bi bi-search"></i>
+              </a>
+            </label>
+            {% else %}
+            <div class="text-light-emphasis">Belum ada kategori. Buat di menu Categories.</div>
+            {% endfor %}
+          </div>
+          <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-outline-light" type="submit"><i class="bi bi-check2 me-1"></i>Update</button>
+            <a class="btn btn-outline-light" href="{{ url_for('categories') }}"><i
+                class="bi bi-plus-lg me-1"></i>Manage</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

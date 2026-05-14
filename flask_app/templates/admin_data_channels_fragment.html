@@ -1,0 +1,69 @@
+<div class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem;gap:.75rem;flex-wrap:wrap;">
+    <h2 style="margin:0;">Daftar Channel ({{ channels|length }})</h2>
+    <input type="text" id="ch-search" placeholder="Cari channel..." style="width:220px;padding:.4rem .7rem;font-size:.85rem;">
+  </div>
+  <div class="table-wrap">
+    <table id="ch-table">
+      <thead><tr>
+        <th>#</th><th>Channel</th>
+        <th style="text-align:right;">Video</th>
+        <th style="text-align:right;">Transkrip</th>
+        <th style="text-align:right;">Resume</th>
+        <th style="text-align:right;">Terformat</th>
+        <th style="text-align:right;">No Sub</th>
+        <th style="text-align:right;">Pending</th>
+        <th>Progress</th><th>Scan</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+      {% for ch in channels %}
+        <tr data-name="{{ ch.channel_name|lower }}">
+          <td>{{ loop.index }}</td>
+          <td>
+            <strong>{{ ch.channel_name }}</strong>
+            <div style="font-size:.76rem;color:var(--muted);">{{ ch.channel_id }}</div>
+            {% if ch.channel_handle %}
+            <div style="font-size:.74rem;color:var(--muted);">@{{ ch.channel_handle }}</div>
+            {% endif %}
+            <div style="margin-top:.25rem;">
+              <span class="badge badge-muted">aliases: {{ ch.alias_count or 0 }}</span>
+            </div>
+          </td>
+          <td style="text-align:right;">{{ ch.total_videos }}</td>
+          <td style="text-align:right;"><span class="{% if ch.has_transcript == ch.total_videos %}badge badge-good{% elif ch.has_transcript > 0 %}badge badge-warn{% else %}badge badge-danger{% endif %}">{{ ch.has_transcript }}</span></td>
+          <td style="text-align:right;"><span class="{% if ch.has_summary == ch.total_videos %}badge badge-good{% elif ch.has_summary > 0 %}badge badge-warn{% else %}badge badge-danger{% endif %}">{{ ch.has_summary }}</span></td>
+          <td style="text-align:right;"><span class="{% if ch.has_formatted == ch.total_videos %}badge badge-good{% elif ch.has_formatted > 0 %}badge badge-warn{% else %}badge badge-muted{% endif %}">{{ ch.has_formatted }}</span></td>
+          <td style="text-align:right;">{% if ch.no_subtitle > 0 %}<span class="badge badge-warn">{{ ch.no_subtitle }}</span>{% else %}<span class="badge badge-muted">0</span>{% endif %}</td>
+          <td style="text-align:right;">{% set pending = ch.total_videos - ch.has_transcript - ch.no_subtitle %}{% if pending > 0 %}<span class="badge badge-danger">{{ pending }}</span>{% else %}<span class="badge badge-good">0</span>{% endif %}</td>
+          <td style="min-width:100px;">{% if ch.total_videos > 0 %}{% set pct = (ch.has_transcript / ch.total_videos * 100)|int %}
+            <div class="pbar-track"><div class="pbar-fill" style="width:{{ pct }}%;background:{% if pct >= 95 %}var(--good){% elif pct >= 70 %}var(--warn){% else %}var(--danger){% endif %};"></div></div>
+            <div style="font-size:.72rem;color:var(--muted);text-align:right;">{{ pct }}%</div>{% endif %}</td>
+          <td>{% if ch.scan_enabled == 1 %}<span class="badge badge-good">on</span>{% elif ch.scan_enabled == 0 %}<span class="badge badge-danger">off</span>{% else %}<span class="badge badge-muted">-</span>{% endif %}</td>
+          <td>
+            <div style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;">
+              <form method="post" action="/admin/data/action/discover" style="display:inline;">
+                <input type="hidden" name="channel_id" value="{{ ch.channel_id }}">
+                <button type="submit" class="btn btn-primary btn-sm">Discover</button>
+              </form>
+               <form method="post" action="/admin/data/action/transcript" style="display:inline;">
+                <input type="hidden" name="channel_id" value="{{ ch.channel_id }}">
+                <button type="submit" class="btn btn-good btn-sm">Transcript</button>
+              </form>
+              <form method="post" action="/admin/data/action/resume" style="display:inline;">
+                <input type="hidden" name="channel_id" value="{{ ch.channel_id }}">
+                <button type="submit" class="btn btn-primary btn-sm" style="background:#fbbf24;color:#000;">Resume</button>
+              </form>
+              <form method="post" action="/admin/data/action/format" style="display:inline;">
+                <input type="hidden" name="channel_id" value="{{ ch.channel_id }}">
+                <button type="submit" class="btn btn-muted btn-sm">Format</button>
+              </form>
+              <a href="/admin/data/channel/{{ ch.channel_id }}/aliases" class="btn btn-muted btn-sm">Aliases</a>
+              <a href="/channel/{{ ch.channel_id }}" class="btn btn-muted btn-sm">View</a>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

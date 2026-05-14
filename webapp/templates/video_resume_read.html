@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Resume{% endblock %}
+
+{% block content %}
+  {% set back_url = request.args.get('back') %}
+  <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-3">
+    <div>
+      <div class="h4 mb-1">Resume</div>
+      <div class="text-light-emphasis mono">{{ v.video_id }} • {{ v.title or "" }}</div>
+      <div class="small text-light-emphasis mono">Updated: {{ mtime or "Unknown" }}</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-light" href="{{ url_for('video_detail', video_pk=v.id, back=back_url) if back_url else url_for('video_detail', video_pk=v.id) }}"><i class="bi bi-arrow-left me-1"></i>Back</a>
+      <a class="btn btn-light" href="{{ url_for('video_resume_raw', video_pk=v.id, download=1) }}"><i class="bi bi-download me-1"></i>Source</a>
+      <div class="btn-group" role="group" aria-label="Resume navigation">
+        {% if prev_v %}
+          <a class="btn btn-outline-light" data-no-transition="1" href="{{ url_for('video_resume_read', video_pk=prev_v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=prev_v.id) }}" title="{{ prev_v.video_id }} • {{ prev_v.title or '' }}">
+            <i class="bi bi-arrow-left me-1"></i>Prev
+          </a>
+        {% else %}
+          <a class="btn btn-outline-light disabled" aria-disabled="true" tabindex="-1"><i class="bi bi-arrow-left me-1"></i>Prev</a>
+        {% endif %}
+        {% if next_v %}
+          <a class="btn btn-outline-light" data-no-transition="1" href="{{ url_for('video_resume_read', video_pk=next_v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=next_v.id) }}" title="{{ next_v.video_id }} • {{ next_v.title or '' }}">
+            Next<i class="bi bi-arrow-right ms-1"></i>
+          </a>
+        {% else %}
+          <a class="btn btn-outline-light disabled" aria-disabled="true" tabindex="-1">Next<i class="bi bi-arrow-right ms-1"></i></a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card rounded-4">
+    <div class="card-body">
+      <div class="markdown-body">
+        {{ content|safe }}
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block floating %}
+  {% if prev_v %}
+    <a
+      class="resume-fab resume-fab-prev"
+      data-no-transition="1"
+      href="{{ url_for('video_resume_read', video_pk=prev_v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=prev_v.id) }}"
+      aria-label="Resume sebelumnya"
+      title="{{ prev_v.video_id }} • {{ prev_v.title or '' }}"
+    >
+      <i class="bi bi-chevron-left"></i><span class="visually-hidden">Prev</span>
+    </a>
+  {% else %}
+    <span class="resume-fab resume-fab-prev is-disabled" aria-hidden="true" title="No previous resume">
+      <i class="bi bi-chevron-left"></i><span class="visually-hidden">Prev</span>
+    </span>
+  {% endif %}
+
+  {% if next_v %}
+    <a
+      class="resume-fab resume-fab-next"
+      data-no-transition="1"
+      href="{{ url_for('video_resume_read', video_pk=next_v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=next_v.id) }}"
+      aria-label="Resume berikutnya"
+      title="{{ next_v.video_id }} • {{ next_v.title or '' }}"
+    >
+      <i class="bi bi-chevron-right"></i><span class="visually-hidden">Next</span>
+    </a>
+  {% else %}
+    <span class="resume-fab resume-fab-next is-disabled" aria-hidden="true" title="No next resume">
+      <i class="bi bi-chevron-right"></i><span class="visually-hidden">Next</span>
+    </span>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      var urls = [];
+      {% if prev_v %}
+      urls.push("{{ url_for('video_resume_read', video_pk=prev_v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=prev_v.id) }}");
+      {% endif %}
+      {% if next_v %}
+      urls.push("{{ url_for('video_resume_read', video_pk=next_v.id, back=back_url) if back_url else url_for('video_resume_read', video_pk=next_v.id) }}");
+      {% endif %}
+      urls.forEach(function (href) {
+        var link = document.createElement("link");
+        link.rel = "prefetch";
+        link.href = href;
+        document.head.appendChild(link);
+      });
+    })();
+  </script>
+{% endblock %}

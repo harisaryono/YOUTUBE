@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Channels - YouTube Transcript Manager{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="container">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Home</a></li>
+                    <li class="breadcrumb-item active">Channels</li>
+                </ol>
+            </nav>
+            <h1 class="page-title">
+                <i class="bi bi-broadcast text-primary"></i> All Channels
+            </h1>
+        </div>
+    </div>
+
+    <!-- Channels List -->
+    {% if channels %}
+    <div class="row g-4">
+        {% for channel in channels %}
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('channel_detail', channel_id=channel.channel_id) }}" class="text-decoration-none text-dark">
+                <div class="channel-card">
+                    <div class="d-flex align-items-start">
+                        <div class="channel-icon flex-shrink-0">
+                            {% if channel.channel_id and channel.channel_id[0].isalpha() %}
+                            <span class="text-uppercase">{{ channel.channel_id[:2] }}</span>
+                            {% else %}
+                            <i class="bi bi-broadcast"></i>
+                            {% endif %}
+                        </div>
+                        <div class="flex-grow-1 ms-3">
+                            <h5 class="mb-2">{{ channel.channel_name }}</h5>
+                            <div class="mb-2">
+                                <a href="{{ channel.channel_url }}" target="_blank" 
+                                   class="text-decoration-none text-muted small">
+                                    <i class="bi bi-box-arrow-up-right"></i> {{ channel.channel_url }}
+                                </a>
+                            </div>
+                            <div class="row g-2 text-muted">
+                                <div class="col-6">
+                                    <div class="small">
+                                        <i class="bi bi-play-circle"></i> 
+                                        {{ channel.actual_video_count or channel.video_count }} videos
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="small">
+                                        <i class="bi bi-file-earmark-text"></i> 
+                                        {{ channel.transcript_count }} transcripts
+                                    </div>
+                                </div>
+                            </div>
+                            {% if channel.subscriber_count %}
+                            <div class="small text-muted mt-2">
+                                <i class="bi bi-people"></i> 
+                                {{ channel.subscriber_count|format_number }} subscribers
+                            </div>
+                            {% endif %}
+                            <div class="small text-muted mt-1">
+                                <i class="bi bi-clock"></i> 
+                                Updated: {{ channel.updated_at[:10] }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Pagination -->
+    {% if channels|length >= 20 %}
+    <div class="d-flex justify-content-center mt-5">
+        <nav aria-label="Page navigation">
+            <ul class="pagination">
+                <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                    <a class="page-link" href="?page={{ page - 1 }}" aria-label="Previous">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+                <li class="page-item active">
+                    <a class="page-link" href="?page={{ page }}">{{ page }}</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page + 1 }}">{{ page + 1 }}</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page + 2 }}">{{ page + 2 }}</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page + 1 }}" aria-label="Next">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="text-center py-5">
+        <i class="bi bi-broadcast text-muted" style="font-size: 4rem;"></i>
+        <h3 class="mt-3">No Channels Found</h3>
+        <p class="text-muted">
+            Start by downloading transcripts from YouTube channels.
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

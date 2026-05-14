@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>View Log - {{ filename }}</title>
+<style>
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--ink:#e4e6eb;--muted:#8b8fa3;--line:#2e3348;--accent:#4f8cff;--good:#34d399;--warn:#fbbf24;--danger:#f87171;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.shell{max-width:1400px;margin:0 auto;padding:1rem}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.2rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:1rem}
+.topbar h1{font-size:1.3rem;font-weight:700}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:1.1rem;margin-bottom:1rem}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.55rem .9rem;border:none;border-radius:8px;font:inherit;font-weight:600;font-size:.85rem;cursor:pointer;transition:opacity .15s;text-decoration:none}
+.btn:hover{opacity:.85}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-muted{background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.log-content{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;max-height:70vh;overflow-y:auto}
+.log-content pre{font-family:"JetBrains Mono","Fira Code",monospace;font-size:.8rem;line-height:1.6;white-space:pre-wrap;word-wrap:break-word;color:#c9d1d9}
+.log-content pre::-webkit-scrollbar{height:8px;width:8px}
+.log-content pre::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.log-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;padding-bottom:.5rem;border-bottom:1px solid var(--line)}
+.log-filename{font-family:monospace;font-size:.9rem;color:var(--muted)}
+.auto-scroll-toggle{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--muted)}
+.auto-scroll-toggle input{accent-color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <h1>📄 Log: {{ filename }}</h1>
+    <div>
+      <a href="{{ url_for('admin_data_logs') }}" class="btn btn-muted">← Back to Logs</a>
+      <a href="{{ url_for('admin_data_page') }}" class="btn btn-muted">← Admin</a>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="log-header">
+      <span class="log-filename">{{ filename }}</span>
+      <label class="auto-scroll-toggle">
+        <input type="checkbox" id="auto-scroll" checked>
+        Auto-scroll
+      </label>
+    </div>
+    <div class="log-content">
+      <pre id="log-text">{{ content }}</pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var checkbox = document.getElementById('auto-scroll');
+  var logText = document.getElementById('log-text');
+  var logContainer = document.querySelector('.log-content');
+  
+  // Auto-scroll to bottom on load
+  if (checkbox.checked) {
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+  
+  // Poll for updates every 3 seconds
+  setInterval(function(){
+    if (checkbox.checked) {
+      fetch(window.location.href + '?partial=1')
+        .then(r => r.text())
+        .then(html => {
+          // Simple reload if content changed significantly
+          var parser = new DOMParser();
+          var doc = parser.parseFromString(html, 'text/html');
+          var newContent = doc.querySelector('#log-text');
+          if (newContent && newContent.textContent !== logText.textContent) {
+            logText.textContent = newContent.textContent;
+            logContainer.scrollTop = logContainer.scrollHeight;
+          }
+        })
+        .catch(function(){});
+    }
+  }, 3000);
+})();
+</script>
+</body>
+</html>

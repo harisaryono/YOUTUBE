@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block title %}Home - YouTube Transcript Manager{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Hero Section -->
+    <div class="text-center mb-5">
+        <h1 class="display-4 fw-bold mb-3">YouTube Transcript Manager</h1>
+        <p class="lead text-muted">
+            Kelola dan akses transkrip video YouTube dengan mudah
+        </p>
+        <div class="d-flex justify-content-center gap-3 mt-4">
+            <a href="{{ url_for('channels') }}" class="btn btn-primary btn-lg">
+                <i class="bi bi-people"></i> Explore Channels
+            </a>
+            <a href="{{ url_for('search') }}" class="btn btn-outline-primary btn-lg">
+                <i class="bi bi-search"></i> Search Videos
+            </a>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="row g-4 mb-5">
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-icon bg-danger bg-opacity-10">
+                    <i class="bi bi-people-fill text-danger fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.total_channels }}</div>
+                <div class="stats-label">Channels</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-icon bg-primary bg-opacity-10">
+                    <i class="bi bi-play-circle-fill text-primary fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.public_videos if stats.public_videos is defined else stats.total_videos }}</div>
+                <div class="stats-label">Public Videos</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-icon bg-success bg-opacity-10">
+                    <i class="bi bi-file-earmark-text-fill text-success fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.videos_with_transcript }}</div>
+                <div class="stats-label">Transcripts</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card">
+                <div class="stats-icon bg-info bg-opacity-10">
+                    <i class="bi bi-word-fill text-info fs-4"></i>
+                </div>
+                <div class="stats-value">{{ '{:,}'.format(stats.total_word_count) }}</div>
+                <div class="stats-label">Total Words</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-5">
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-danger bg-opacity-10">
+                    <i class="bi bi-x-circle-fill text-danger fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.videos_without_transcript or 0 }}</div>
+                <div class="stats-label">Without Transcript</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-warning bg-opacity-10">
+                    <i class="bi bi-cc-fill text-warning fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.videos_no_subtitle or 0 }}</div>
+                <div class="stats-label">No Subtitle</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-secondary bg-opacity-10">
+                    <i class="bi bi-hourglass-split text-secondary fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.videos_retry_later or 0 }}</div>
+                <div class="stats-label">Retry Later</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-danger bg-opacity-10">
+                    <i class="bi bi-shield-exclamation text-danger fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.videos_proxy_block or 0 }}</div>
+                <div class="stats-label">Proxy Block</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-info bg-opacity-10">
+                    <i class="bi bi-clock-history text-info fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.videos_pending_other or 0 }}</div>
+                <div class="stats-label">Pending Lain</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-dark bg-opacity-10">
+                    <i class="bi bi-film text-dark fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.shorts_videos or 0 }}</div>
+                <div class="stats-label">Shorts</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-lg-2">
+            <div class="stats-card">
+                <div class="stats-icon bg-muted bg-opacity-10">
+                    <i class="bi bi-lock-fill text-muted fs-4"></i>
+                </div>
+                <div class="stats-value">{{ stats.member_only_videos or 0 }}</div>
+                <div class="stats-label">Member Only</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Latest Videos Per Channel -->
+    <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h4 mb-0">
+                <i class="bi bi-clock-history text-primary"></i> Latest Videos per Channel
+            </h2>
+            <a href="{{ url_for('videos') }}" class="btn btn-outline-primary">
+                View All <i class="bi bi-arrow-right"></i>
+            </a>
+        </div>
+
+        <div class="row g-4">
+            {% for video in latest_videos %}
+            <div class="col-md-6 col-lg-4">
+                <a href="{{ url_for('video_detail', video_id=video.video_id) }}" class="text-decoration-none text-dark">
+                    <div class="video-card">
+                        <div class="video-thumbnail">
+                            {% if video.thumbnail_url %}
+                            <img src="{{ url_for('proxy_thumbnail', video_id=video.video_id) }}" alt="{{ video.title }}" loading="lazy">
+                            {% else %}
+                            <div class="d-flex align-items-center justify-content-center h-100 bg-light">
+                                <i class="bi bi-play-circle text-muted fs-1"></i>
+                            </div>
+                            {% endif %}
+                            <span class="video-duration">{{ video.duration|format_duration }}</span>
+                            {% if video.transcript_downloaded %}
+                            <span class="transcript-badge">
+                                <i class="bi bi-file-earmark-text"></i>
+                            </span>
+                            {% endif %}
+                        </div>
+                        <div class="video-info">
+                            <h5 class="video-title text-dark">{{ video.title }}</h5>
+                            <div class="video-channel">{{ video.channel_name }}</div>
+                            <div class="video-channel text-muted">
+                                <i class="bi bi-calendar-event"></i>
+                                Uploaded on {{ video.upload_date|format_date }}
+                            </div>
+                            <div class="video-stats">
+                                <span class="video-stat">
+                                    <i class="bi bi-eye"></i>
+                                    {{ video.view_count|format_number }}
+                                </span>
+                                {% if video.transcript_downloaded %}
+                                <span class="video-stat text-success">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                    {{ video.word_count|format_number }} words
+                                </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Channels -->
+    <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h4 mb-0">
+                <i class="bi bi-broadcast text-primary"></i> Popular Channels
+            </h2>
+            <a href="{{ url_for('channels') }}" class="btn btn-outline-primary">
+                View All <i class="bi bi-arrow-right"></i>
+            </a>
+        </div>
+
+        <div class="row g-4">
+            {% for channel in channels %}
+            <div class="col-md-6 col-lg-4">
+                <a href="{{ url_for('channel_detail', channel_id=channel.channel_id) }}" class="text-decoration-none text-dark">
+                    <div class="channel-card">
+                        <div class="d-flex align-items-center">
+                            <div class="channel-icon flex-shrink-0">
+                                {% if channel.channel_id and channel.channel_id[0].isalpha() %}
+                                <span class="text-uppercase">{{ channel.channel_id[:2] }}</span>
+                                {% else %}
+                                <i class="bi bi-broadcast"></i>
+                                {% endif %}
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h5 class="mb-1">{{ channel.channel_name }}</h5>
+                                <div class="text-muted small">
+                                    <i class="bi bi-play-circle"></i> {{ channel.actual_video_count or channel.video_count }} videos
+                                </div>
+                                <div class="text-muted small">
+                                    <i class="bi bi-file-earmark-text"></i> {{ channel.transcript_count }} transcripts
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Search functionality with suggestions
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchInput = document.querySelector('.search-input');
+        const searchForm = document.querySelector('.search-container');
+        
+        if (searchInput && searchForm) {
+            // Debounce search
+            let timeout;
+            searchInput.addEventListener('input', function(e) {
+                clearTimeout(timeout);
+                const query = e.target.value.trim();
+                
+                if (query.length >= 2) {
+                    timeout = setTimeout(() => {
+                        // Could implement live search suggestions here
+                    }, 300);
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

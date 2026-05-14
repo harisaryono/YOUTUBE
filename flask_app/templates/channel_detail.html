@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}{{ channel.channel_name }} - YouTube Transcript Manager{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('channels') }}">Channels</a></li>
+            <li class="breadcrumb-item active">{{ channel.channel_name }}</li>
+        </ol>
+    </nav>
+
+    <!-- Channel Header -->
+    <div class="row mb-5">
+        <div class="col-lg-3">
+            <div class="text-center">
+                <div class="channel-icon mx-auto mb-3">
+                    {% if channel.channel_id and channel.channel_id[0].isalpha() %}
+                    <span class="text-uppercase fs-3">{{ channel.channel_id[:2] }}</span>
+                    {% else %}
+                    <i class="bi bi-broadcast fs-3"></i>
+                    {% endif %}
+                </div>
+                <h3 class="mb-2">{{ channel.channel_name }}</h3>
+                <a href="{{ channel.channel_url }}" target="_blank" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-box-arrow-up-right"></i> Visit Channel
+                </a>
+            </div>
+        </div>
+        <div class="col-lg-9">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h4 class="card-title mb-3">Channel Information</h4>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="p-3 bg-light rounded">
+                                <div class="small text-muted">Channel ID</div>
+                                <div class="fw-bold">{{ channel.channel_id }}</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="p-3 bg-light rounded">
+                                <div class="small text-muted">Total Videos</div>
+                                <div class="fw-bold">{{ total_videos }}</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="p-3 bg-light rounded">
+                                <div class="small text-muted">Transcripts</div>
+                                <div class="fw-bold text-success">
+                                    {{ transcript_total }}/{{ total_videos }}
+                                </div>
+                                <div class="small text-muted">
+                                    This page: {{ transcript_page_count }}/{{ videos|length }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% if channel.subscriber_count %}
+                    <div class="row g-3 mt-2">
+                        <div class="col-md-6">
+                            <div class="p-3 bg-light rounded">
+                                <div class="small text-muted">Subscribers</div>
+                                <div class="fw-bold">{{ channel.subscriber_count|format_number }}</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 bg-light rounded">
+                                <div class="small text-muted">Last Updated</div>
+                                <div class="fw-bold">{{ channel.updated_at[:10] }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Channel Videos -->
+    <div class="mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h4 mb-0">
+                <i class="bi bi-play-circle text-primary"></i> Channel Videos
+                <span class="badge bg-secondary ms-2">{{ videos|length }}/{{ total_videos }}</span>
+            </h2>
+            <div class="text-muted">
+                Showing {{ videos|length }} of {{ total_videos }} videos
+            </div>
+        </div>
+
+        {% if videos %}
+        <div class="row g-4">
+            {% for video in videos %}
+            <div class="col-md-6 col-lg-4">
+                <a href="{{ url_for('video_detail', video_id=video.video_id) }}" class="text-decoration-none text-dark">
+                    <div class="video-card">
+                        <div class="video-thumbnail">
+                            {% if video.thumbnail_url %}
+                            <img src="{{ url_for('proxy_thumbnail', video_id=video.video_id) }}" alt="{{ video.title }}" loading="lazy">
+                            {% else %}
+                            <div class="d-flex align-items-center justify-content-center h-100 bg-light">
+                                <i class="bi bi-play-circle text-muted fs-1"></i>
+                            </div>
+                            {% endif %}
+                            <span class="video-duration">{{ video.duration|format_duration }}</span>
+                            {% if video.transcript_downloaded %}
+                            <span class="transcript-badge">
+                                <i class="bi bi-file-earmark-text"></i>
+                            </span>
+                            {% endif %}
+                        </div>
+                        <div class="video-info">
+                            <h5 class="video-title text-dark">{{ video.title }}</h5>
+                            <div class="video-channel text-muted">Uploaded on {{ video.upload_date|format_date }}</div>
+                            <div class="video-stats">
+                                <span class="video-stat">
+                                    <i class="bi bi-eye"></i>
+                                    {{ video.view_count|format_number }}
+                                </span>
+                                {% if video.transcript_downloaded %}
+                                <span class="video-stat text-success">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                    {{ video.word_count|format_number }} words
+                                </span>
+                                {% endif %}
+                                {% if video.summary_file_path %}
+                                <span class="video-stat text-primary">
+                                    <i class="bi bi-journal-text"></i>
+                                    Resume
+                                </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Pagination -->
+        {% if videos|length >= 12 %}
+        <div class="d-flex justify-content-center mt-5">
+            <nav aria-label="Page navigation">
+                <ul class="pagination">
+                    <!-- First Page -->
+                    {% if page > 1 %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page=1" aria-label="First">
+                            <i class="bi bi-chevron-double-left"></i>
+                        </a>
+                    </li>
+                    {% endif %}
+                    
+                    <!-- Previous Page -->
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ page - 1 }}" aria-label="Previous">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Page Numbers -->
+                    {% for p in range(page - 2, page + 3) %}
+                        {% if p > 0 and p <= total_pages %}
+                        <li class="page-item {% if p == page %}active{% endif %}">
+                            <a class="page-link" href="?page={{ p }}">{{ p }}</a>
+                        </li>
+                        {% endif %}
+                    {% endfor %}
+                    
+                    <!-- Next Page -->
+                    <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+                        <a class="page-link" href="?page={{ page + 1 }}" aria-label="Next">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                    
+                    <!-- Last Page -->
+                    {% if page < total_pages %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ total_pages }}" aria-label="Last">
+                            <i class="bi bi-chevron-double-right"></i>
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="text-center py-5">
+            <i class="bi bi-play-circle text-muted" style="font-size: 4rem;"></i>
+            <h3 class="mt-3">No Videos Found</h3>
+            <p class="text-muted">
+                This channel doesn't have any videos in the database yet.
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

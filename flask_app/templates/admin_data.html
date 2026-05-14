@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin - YouTube Data Manager</title>
+<style>
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--ink:#e4e6eb;--muted:#8b8fa3;--line:#2e3348;--accent:#4f8cff;--good:#34d399;--warn:#fbbf24;--danger:#f87171;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.shell{max-width:1400px;margin:0 auto;padding:1rem}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.2rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:1rem}
+.topbar h1{font-size:1.3rem;font-weight:700}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem;margin-bottom:1rem}
+.stat-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:.9rem 1rem}
+.stat-card .label{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.stat-card .value{font-size:1.6rem;font-weight:700;margin-top:.2rem}
+.stat-card .value.good{color:var(--good)}
+.stat-card .value.warn{color:var(--warn)}
+.stat-card .value.danger{color:var(--danger)}
+.tabs{display:flex;gap:.3rem;border-bottom:2px solid var(--line);margin-bottom:1rem}
+.tab-btn{background:transparent;border:none;color:var(--muted);padding:.6rem 1.1rem;font:inherit;font-weight:600;font-size:.9rem;cursor:pointer;border-radius:var(--radius) var(--radius) 0 0;margin-bottom:-2px;border:2px solid transparent;transition:all .15s}
+.tab-btn:hover{color:var(--ink);background:var(--surface)}
+.tab-btn.active{color:var(--accent);background:var(--surface2);border-color:var(--line);border-bottom-color:var(--surface2)}
+.tab-pane{display:none;animation:fadeIn .2s ease}
+.tab-pane.active{display:block}
+.mini-tabs{display:flex;gap:.3rem;border-bottom:2px solid var(--line);margin:.8rem 0 1rem}
+.mini-tab-btn{background:transparent;border:none;color:var(--muted);padding:.5rem .9rem;font:inherit;font-weight:600;font-size:.85rem;cursor:pointer;border-radius:var(--radius) var(--radius) 0 0;margin-bottom:-2px;border:2px solid transparent;transition:all .15s}
+.mini-tab-btn:hover{color:var(--ink);background:var(--surface)}
+.mini-tab-btn.active{color:var(--accent);background:var(--surface2);border-color:var(--line);border-bottom-color:var(--surface2)}
+.mini-tab-pane{display:none;animation:fadeIn .2s ease}
+.mini-tab-pane.active{display:block}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:1.1rem;margin-bottom:1rem}
+.panel h2{font-size:1.05rem;margin-bottom:.8rem}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid var(--line)}
+th{font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+tr:hover td{background:var(--surface2)}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:999px;font-size:.74rem;font-weight:700}
+.badge-good{background:rgba(52,211,153,.15);color:var(--good)}
+.badge-warn{background:rgba(251,191,36,.15);color:var(--warn)}
+.badge-danger{background:rgba(248,113,113,.15);color:var(--danger)}
+.badge-muted{background:rgba(139,143,163,.15);color:var(--muted)}
+label{display:block;font-size:.85rem;font-weight:600;margin-bottom:.6rem;color:var(--muted)}
+input,select,textarea{width:100%;padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--ink);font:inherit;font-size:.9rem}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.6rem 1rem}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.55rem .9rem;border:none;border-radius:8px;font:inherit;font-weight:600;font-size:.85rem;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-good{background:var(--good);color:#0f1117}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-muted{background:var(--surface2);color:var(--ink);border:1px solid var(--line)}
+.btn-sm{padding:.35rem .65rem;font-size:.8rem}
+.btn-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem}
+.pbar-track{height:6px;background:var(--surface2);border-radius:3px;overflow:hidden}
+.pbar-fill{height:100%;border-radius:3px;transition:width .3s}
+.toast{position:fixed;top:1rem;right:1rem;z-index:9999;padding:.8rem 1.2rem;border-radius:var(--radius);font-weight:600;font-size:.9rem;animation:slideIn .3s ease}
+.toast-ok{background:rgba(52,211,153,.18);color:var(--good);border:1px solid rgba(52,211,153,.3)}
+.toast-err{background:rgba(248,113,113,.18);color:var(--danger);border:1px solid rgba(248,113,113,.3)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.login-box{max-width:380px;margin:8rem auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:2rem}
+.login-box h1{font-size:1.3rem;margin-bottom:1rem;text-align:center}
+
+/* Combobox */
+.ch-combobox{position:relative}
+.ch-combobox-input{width:100%;padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--ink);font:inherit;font-size:.9rem}
+.ch-combobox-input:focus{outline:none;border-color:var(--accent)}
+.ch-combobox-list{position:absolute;left:0;top:calc(100% + 2px);width:100%;max-height:260px;overflow-y:auto;background:var(--surface2);border:1px solid var(--line);border-radius:8px;z-index:100;display:none;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.ch-combobox-list.open{display:block}
+.ch-combobox-item{padding:.5rem .75rem;cursor:pointer;font-size:.88rem;display:flex;justify-content:space-between;align-items:center}
+.ch-combobox-item:hover{background:rgba(79,140,255,.15)}
+.ch-combobox-item.selected{background:var(--accent);color:#fff}
+.ch-combobox-item .ch-id{font-size:.72rem;color:var(--muted);margin-left:.5rem}
+.ch-combobox-item.selected .ch-id{color:rgba(255,255,255,.7)}
+.ch-combobox-empty{padding:.6rem .75rem;color:var(--muted);font-size:.85rem;font-style:italic}
+.ch-combobox-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;line-height:1;padding:.2rem}
+.ch-combobox-clear:hover{color:var(--ink)}
+</style>
+</head>
+<body>
+{% if not authed %}
+<div class="login-box">
+  <h1>Admin Login</h1>
+  {% if error %}<p style="color:var(--danger);margin-bottom:.8rem;font-size:.88rem;">{{ error }}</p>{% endif %}
+  <form method="post" action="/admin/data/login">
+    <label>Token<input type="password" name="token" autofocus required placeholder="Masukkan admin token"></label>
+    <div class="btn-row" style="justify-content:center;"><button type="submit" class="btn btn-primary">Login</button></div>
+  </form>
+</div>
+{% else %}
+<div class="shell">
+  <div class="topbar">
+    <h1>Data Admin</h1>
+    <div style="display:flex;gap:.5rem;">
+      <a href="{{ url_for('admin_data_logs') }}" class="btn btn-muted btn-sm">📋 Logs</a>
+      <a href="{{ url_for('admin_data_jobs') }}" class="btn btn-muted btn-sm">Jobs</a>
+      <form method="post" action="/admin/data/logout" style="display:inline;"><button type="submit" class="btn btn-muted btn-sm">Logout</button></form>
+    </div>
+  </div>
+
+  {% if flash %}<div class="toast toast-ok" id="flash-toast">{{ flash }}</div>
+  {% elif error_flash %}<div class="toast toast-err" id="flash-toast">{{ error_flash }}</div>{% endif %}
+
+  <div class="summary-grid">
+    <div class="stat-card"><div class="label">Total Channel</div><div class="value">{{ summary.total_channels }}</div></div>
+    <div class="stat-card"><div class="label">Video Publik</div><div class="value">{{ summary.public_videos }}</div></div>
+    <div class="stat-card"><div class="label">Ada Transkrip</div><div class="value good">{{ summary.transcript_ok }}</div></div>
+    <div class="stat-card"><div class="label">Belum Transkrip</div><div class="value danger">{{ summary.without_transcript }}</div></div>
+    <div class="stat-card"><div class="label">Ada Resume</div><div class="value good">{{ summary.resume_ok }}</div></div>
+    <div class="stat-card"><div class="label">Sudah Terformat</div><div class="value good">{{ summary.formatted_ok }}</div></div>
+    <div class="stat-card"><div class="label">No Subtitle</div><div class="value warn">{{ summary.no_subtitle }}</div></div>
+    <div class="stat-card"><div class="label">Retry Later</div><div class="value warn">{{ summary.retry_later }}</div></div>
+    <div class="stat-card"><div class="label">Proxy Block</div><div class="value danger">{{ summary.proxy_block }}</div></div>
+    <div class="stat-card"><div class="label">Pending Lain</div><div class="value danger">{{ summary.pending_other }}</div></div>
+    <div class="stat-card"><div class="label">Shorts</div><div class="value">{{ summary.shorts }}</div></div>
+    <div class="stat-card"><div class="label">Member Only</div><div class="value">{{ summary.member_only }}</div></div>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;">
+      <h2 style="margin:0;">Jobs & Logs</h2>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+        <a href="{{ url_for('admin_data_jobs') }}" class="btn btn-muted btn-sm">JSON Jobs</a>
+        <a href="{{ url_for('admin_data_logs') }}" class="btn btn-muted btn-sm">All Logs</a>
+      </div>
+    </div>
+    <div id="jobs-fragment" class="panel" style="margin-top:.8rem;padding:.8rem 1rem;">
+      <p style="color:var(--muted);font-size:.88rem;">Memuat jobs dan log...</p>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="channels">Channels</button>
+    <button class="tab-btn" data-tab="add-channel">Tambah Channel</button>
+    <button class="tab-btn" data-tab="actions">Actions</button>
+  </div>
+
+  <!-- Tab: Channels -->
+  <div id="channels" class="tab-pane active">
+    <div id="channels-fragment" class="panel" style="padding:1rem;">
+      <p style="color:var(--muted);font-size:.88rem;">Memuat daftar channel...</p>
+    </div>
+  </div>
+
+  <!-- Tab: Add Channel -->
+  <div id="add-channel" class="tab-pane">
+    <div class="panel">
+      <h2>Tambah Channel Baru</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Setelah channel ditambahkan, pipeline discovery → transcript → resume → format akan dijalankan otomatis di background.</p>
+      <form method="post" action="/admin/data/channel/add">
+        <div class="form-grid">
+          <label>Channel ID atau URL<input name="channel_input" required placeholder="mis. UCxxxxxx atau https://youtube.com/@name"></label>
+          <label>Nama Channel (opsional)<input name="channel_name" placeholder="mis. ChannelName"></label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-good">Tambah & Jalankan Pipeline</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Tambah Multiple Channel</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Setiap channel yang berhasil ditambahkan akan langsung dijadwalkan pipeline discovery → transcript → resume → format secara background.</p>
+      <form method="post" action="/admin/data/channel/add-batch">
+        <label>Daftar channel (satu per baris, ID atau URL)<textarea name="channels_input" rows="8" placeholder="UCxxxxxx&#10;https://youtube.com/@name&#10;channel_id_lain"></textarea></label>
+        <div class="btn-row"><button type="submit" class="btn btn-good">Tambah & Jalankan Pipeline</button></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tab: Actions -->
+  <div id="actions" class="tab-pane">
+
+    <div class="panel">
+      <h2>Discovery - Cek Video Baru</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Scan channel untuk menemukan video baru yang belum ada di DB. Tanpa download transcript.</p>
+      <form method="post" action="/admin/data/action/discover">
+        <div class="form-grid">
+          <label>Channel (kosongkan = semua)
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+          <label>Mode discovery
+            <select name="limit">
+              <option value="0" selected>Full history (scan-all-missing, recommended)</option>
+              <option value="12">12 terbaru</option>
+              <option value="50">50 terbaru</option>
+              <option value="100">100 terbaru</option>
+            </select>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-primary">Jalankan Discovery</button></div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h2>Download Transcript</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Download transcript untuk video yang belum ada transkripnya (bukan no_subtitle).</p>
+      <form method="post" action="/admin/data/action/transcript">
+        <div class="form-grid">
+          <label>Channel (kosongkan = semua)
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+          <label>Limit video
+            <select name="limit">
+              <option value="50">50</option>
+              <option value="200" selected>200</option>
+              <option value="500">500</option>
+              <option value="0">Semua</option>
+            </select>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-good">Jalankan Download Transcript</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Resume Generation (AI)</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Buat ringkasan video menggunakan model AI (Nvidia/Groq/dll). Membutuhkan transkrip yang sudah terunduh.</p>
+      <form method="post" action="/admin/data/action/resume">
+        <div class="form-grid">
+          <label>Channel (kosongkan = semua)
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+          <label>Limit video
+            <select name="limit">
+              <option value="50">50</option>
+              <option value="100" selected>100</option>
+              <option value="500">500</option>
+              <option value="0">Semua</option>
+            </select>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-primary" style="background:#fbbf24;color:#000;">Jalankan Resume Generation</button></div>
+      </form>
+    </div>
+
+
+    <div class="panel">
+      <h2>Update Metadata Video</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Update duration, view count, like count, comment count, dan thumbnail video dari YouTube Data API.</p>
+      <form method="post" action="/admin/data/action/update-meta">
+        <div class="form-grid">
+          <label>Channel (kosongkan = semua)
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-primary">Update Metadata</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Markdown Formatting</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Rapikan transkrip mentah menjadi format Markdown yang cantik. Membutuhkan transkrip yang sudah terunduh.</p>
+      <form method="post" action="/admin/data/action/format">
+        <div class="form-grid">
+          <label>Channel (kosongkan = semua)
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+          <label>Limit video
+            <select name="limit">
+              <option value="100">100</option>
+              <option value="500" selected>500</option>
+              <option value="0">Semua</option>
+            </select>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-muted">Jalankan Formatting</button></div>
+      </form>
+    </div>
+
+
+    <div class="panel">
+      <h2>Hapus Channel</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">Hapus channel beserta seluruh video dari database. File fisik di uploads TIDAK dihapus.</p>
+      <form method="post" action="/admin/data/action/delete-channel" onsubmit="return confirm('PERHATIAN: Semua video dari channel ini akan dihapus dari DB. Lanjutkan?');">
+        <div class="form-grid">
+          <label>Pilih channel
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-danger">Hapus Channel</button></div>
+      </form>
+    </div>
+
+    <div class="panel" style="border:1px solid var(--accent);">
+      <h2 style="color:var(--accent);">Jalankan Pipeline Berurutan (Sequential)</h2>
+      <p style="color:var(--muted);font-size:.88rem;margin-bottom:.8rem;">
+        Jalankan seluruh pipeline secara <strong>berurutan (sequential)</strong>: <br>
+        <strong>1. Discovery</strong> → <strong>2. Transcript</strong> → <strong>3. Resume</strong> → <strong>4. Format</strong><br>
+        Setiap stage akan <strong>dijalankan setelah stage sebelumnya selesai</strong>.<br>
+        <span style="color:var(--warn);font-size:.82rem;">Catatan: Resume & Format pakai resource key yang sama (rate limit), jadi jangan jalankan bareng-bareng.</span>
+      </p>
+      <form method="post" action="/admin/data/action/run-all" onsubmit="return confirm('Ini akan menjalankan 4 job besar di background. Lanjutkan?');">
+        <div class="form-grid">
+          <label>Channel (opsional - kosongkan untuk semua channel)
+            <div class="ch-combobox" data-field="channel_id">
+              <input type="text" class="ch-combobox-input" placeholder="Ketik nama channel..." autocomplete="off">
+              <button type="button" class="ch-combobox-clear" title="Hapus">&times;</button>
+              <input type="hidden" name="channel_id" value="">
+              <div class="ch-combobox-list"></div>
+            </div>
+          </label>
+          <label style="background:rgba(79,140,255,0.08);padding:.7rem;border-radius:6px;">
+            <span style="font-weight:600;color:var(--accent);display:block;margin-bottom:.4rem;">Pipeline Berurutan:</span>
+            <div style="display:flex;gap:1.2rem;align-items:center;">
+              <span style="color:var(--muted);font-weight:600;">1.</span> <strong>Discovery</strong> <span style="color:var(--accent);">→</span>
+              <span style="color:var(--muted);font-weight:600;">2.</span> <strong>Transcript</strong> <span style="color:var(--accent);">→</span>
+              <span style="color:var(--muted);font-weight:600;">3.</span> <strong>Resume</strong> <span style="color:var(--accent);">→</span>
+              <span style="color:var(--muted);font-weight:600;">4.</span> <strong>Format</strong>
+            </div>
+          </label>
+        </div>
+        <div class="btn-row"><button type="submit" class="btn btn-good" style="background:var(--accent);color:#fff;">Jalankan Berurutan (Sequential)</button></div>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  var CHANNELS = {{ channels_json|safe }};
+
+  function loadFragment(targetId, url, onLoad){
+    var target = document.getElementById(targetId);
+    if(!target) return;
+    fetch(url, {credentials:'same-origin'})
+      .then(function(resp){
+        if(!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.text();
+      })
+      .then(function(html){
+        target.innerHTML = html;
+        if(onLoad) onLoad(target);
+      })
+      .catch(function(err){
+        target.innerHTML = '<p style="color:var(--danger);font-size:.88rem;">Gagal memuat data: ' + String(err).replace(/[<>&]/g, '') + '</p>';
+      });
+  }
+
+  function bindChannelSearch(root){
+    if(!root) return;
+    var search = root.querySelector('#ch-search');
+    if(!search) return;
+    search.addEventListener('input', function(){
+      var q = this.value.toLowerCase();
+      root.querySelectorAll('#ch-table tbody tr').forEach(function(row){
+        row.style.display = row.dataset.name.indexOf(q) !== -1 ? '' : 'none';
+      });
+    });
+  }
+
+  function bindMiniTabs(root){
+    if(!root) return;
+    root.querySelectorAll('.mini-tab-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        root.querySelectorAll('.mini-tab-btn').forEach(function(b){ b.classList.remove('active'); });
+        root.querySelectorAll('.mini-tab-pane').forEach(function(p){ p.classList.remove('active'); });
+        this.classList.add('active');
+        var target = root.querySelector('#' + this.dataset.miniTab);
+        if(target) target.classList.add('active');
+      });
+    });
+  }
+
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
+      document.querySelectorAll('.tab-pane').forEach(function(p){ p.classList.remove('active'); });
+      this.classList.add('active');
+      document.getElementById(this.dataset.tab).classList.add('active');
+    });
+  });
+
+  loadFragment('jobs-fragment', '{{ url_for("admin_data_fragment_jobs") }}', bindMiniTabs);
+  loadFragment('channels-fragment', '{{ url_for("admin_data_fragment_channels") }}', bindChannelSearch);
+
+  // Toast auto-hide
+  var toast = document.getElementById('flash-toast');
+  if(toast) setTimeout(function(){ toast.style.display='none'; }, 5000);
+
+  // Combobox init
+  document.querySelectorAll('.ch-combobox').forEach(function(cb){
+    var input = cb.querySelector('.ch-combobox-input');
+    var hidden = cb.querySelector('input[type=hidden]');
+    var list = cb.querySelector('.ch-combobox-list');
+    var clearBtn = cb.querySelector('.ch-combobox-clear');
+    var activeIdx = -1;
+
+    function render(filter){
+      list.innerHTML = '';
+      activeIdx = -1;
+      var q = (filter || '').toLowerCase();
+      var matches = CHANNELS.filter(function(c){
+        return !q || c.name.toLowerCase().indexOf(q) !== -1 || c.id.toLowerCase().indexOf(q) !== -1;
+      });
+      if(matches.length === 0){
+        var empty = document.createElement('div');
+        empty.className = 'ch-combobox-empty';
+        empty.textContent = 'Tidak ada channel cocok';
+        list.appendChild(empty);
+        return;
+      }
+      matches.forEach(function(c, i){
+        var item = document.createElement('div');
+        item.className = 'ch-combobox-item';
+        item.dataset.id = c.id;
+        item.dataset.idx = i;
+        var nameSpan = document.createElement('span');
+        nameSpan.textContent = c.name;
+        var idSpan = document.createElement('span');
+        idSpan.className = 'ch-id';
+        idSpan.textContent = c.id;
+        item.appendChild(nameSpan);
+        item.appendChild(idSpan);
+        item.addEventListener('mousedown', function(e){
+          e.preventDefault();
+          selectItem(c);
+        });
+        list.appendChild(item);
+      });
+    }
+
+    function selectItem(c){
+      input.value = c.name;
+      hidden.value = c.id;
+      list.classList.remove('open');
+    }
+
+    function clearSelection(){
+      input.value = '';
+      hidden.value = '';
+      list.classList.remove('open');
+    }
+
+    function highlightActive(){
+      var items = list.querySelectorAll('.ch-combobox-item');
+      items.forEach(function(it, i){
+        it.classList.toggle('selected', i === activeIdx);
+      });
+      if(activeIdx >= 0 && items[activeIdx]){
+        items[activeIdx].scrollIntoView({block:'nearest'});
+      }
+    }
+
+    input.addEventListener('focus', function(){
+      render(input.value);
+      list.classList.add('open');
+    });
+
+    input.addEventListener('input', function(){
+      render(input.value);
+      list.classList.add('open');
+    });
+
+    input.addEventListener('blur', function(){
+      setTimeout(function(){ list.classList.remove('open'); }, 150);
+    });
+
+    input.addEventListener('keydown', function(e){
+      var items = list.querySelectorAll('.ch-combobox-item');
+      if(e.key === 'ArrowDown'){
+        e.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, items.length - 1);
+        highlightActive();
+      } else if(e.key === 'ArrowUp'){
+        e.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+        highlightActive();
+      } else if(e.key === 'Enter'){
+        e.preventDefault();
+        if(activeIdx >= 0 && items[activeIdx]){
+          var c = CHANNELS.filter(function(ch){
+            return ch.id === items[activeIdx].dataset.id;
+          })[0];
+          if(c) selectItem(c);
+        }
+      } else if(e.key === 'Escape'){
+        list.classList.remove('open');
+      }
+    });
+
+    if(clearBtn){
+      clearBtn.addEventListener('mousedown', function(e){
+        e.preventDefault();
+        clearSelection();
+        input.focus();
+      });
+    }
+  });
+
+})();
+</script>
+{% endif %}
+</body>
+</html>

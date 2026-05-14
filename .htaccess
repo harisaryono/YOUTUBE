@@ -1,0 +1,99 @@
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
+PassengerAppRoot "/home/itcorpmy/itcorp.my.id/harry/YOUTUBE"
+PassengerBaseURI "/"
+PassengerPython "/home/itcorpmy/virtualenv/itcorp.my.id/harry/YOUTUBE/3.12/bin/python"
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
+
+# Optimasi Passenger - disesuaikan dengan load server
+PassengerMaxPoolSize 6
+PassengerMaxInstancesPerApp 4
+PassengerMinInstances 2
+PassengerMaxRequests 5000
+PassengerStartTimeout 90
+PassengerPoolIdleTime 900
+PassengerStatThrottleRate 30
+# Hindari prestart ke domain publik (hairpin/network dependent).
+# Warmup bisa dilakukan dari localhost atau lewat hit pertama user.
+# PassengerPrestart http://ytchannel.itcorp.my.id/
+
+# Block bad bots via User-Agent (sebelum request sampai ke Python)
+SetEnvIfNoCase User-Agent "^GPTBot" BadBot
+SetEnvIfNoCase User-Agent "^ChatGPT-User" BadBot
+SetEnvIfNoCase User-Agent "^Google-Extended" BadBot
+SetEnvIfNoCase User-Agent "^CCBot" BadBot
+SetEnvIfNoCase User-Agent "^ClaudeBot" BadBot
+SetEnvIfNoCase User-Agent "^anthropic-ai" BadBot
+SetEnvIfNoCase User-Agent "^FacebookBot" BadBot
+SetEnvIfNoCase User-Agent "^Bytespider" BadBot
+SetEnvIfNoCase User-Agent "^PetalBot" BadBot
+SetEnvIfNoCase User-Agent "^AhrefsBot" BadBot
+SetEnvIfNoCase User-Agent "^SemrushBot" BadBot
+SetEnvIfNoCase User-Agent "^DotBot" BadBot
+SetEnvIfNoCase User-Agent "^MJ12bot" BadBot
+SetEnvIfNoCase User-Agent "^Baiduspider" BadBot
+SetEnvIfNoCase User-Agent "^megaindex" BadBot
+SetEnvIfNoCase User-Agent "^paloalto" BadBot
+
+<IfModule mod_rewrite.c>
+  # Block bad bots - return 403
+  RewriteCond %{ENV:REDIRECT_BadBot} ^yes$ [OR]
+  RewriteCond %{ENV:BadBot} ^yes$
+  RewriteRule ^ - [F,L]
+
+  # Block direct access to sensitive files
+  RewriteCond %{REQUEST_URI} \.(env|bak|sql|log|pyc|db-shm|db-wal)$ [NC]
+  RewriteRule ^ - [F,L]
+</IfModule>
+
+# Jangan throttle seluruh response aplikasi secara global.
+# Jika butuh rate limiting, lakukan di reverse proxy/WAF per-IP.
+
+# Performance tuning for dynamic pages
+<IfModule mod_headers.c>
+  Header unset Alt-Svc
+  # Block bots with headers
+  <If "%{ENV:BadBot} == yes">
+    Header always set X-Robots-Tag "noindex, nofollow"
+  </If>
+</IfModule>
+<IfModule mod_http2.c>
+  H2Push off
+  H2Upgrade off
+</IfModule>
+
+# Caching untuk static assets (CSS, JS, images, fonts)
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType image/jpeg "access plus 1 month"
+  ExpiresByType image/png "access plus 1 month"
+  ExpiresByType image/gif "access plus 1 month"
+  ExpiresByType image/webp "access plus 1 month"
+  ExpiresByType image/svg+xml "access plus 1 month"
+  ExpiresByType image/x-icon "access plus 1 month"
+  ExpiresByType text/css "access plus 1 week"
+  ExpiresByType application/javascript "access plus 1 week"
+  ExpiresByType application/x-javascript "access plus 1 week"
+  ExpiresByType font/ttf "access plus 1 month"
+  ExpiresByType font/woff "access plus 1 month"
+  ExpiresByType font/woff2 "access plus 1 month"
+  ExpiresByType text/html "access plus 1 hour"
+</IfModule>
+
+# Cache-Control headers untuk static files
+<IfModule mod_headers.c>
+  <FilesMatch "\.(ico|jpg|jpeg|png|gif|svg|webp|css|js|woff|woff2|ttf|eot)$">
+    Header set Cache-Control "public, max-age=604800, stale-while-revalidate=86400"
+  </FilesMatch>
+</IfModule>
+
+# Kompresi GZIP untuk text-based files
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html
+  AddOutputFilterByType DEFLATE text/css
+  AddOutputFilterByType DEFLATE application/javascript
+  AddOutputFilterByType DEFLATE application/json
+  AddOutputFilterByType DEFLATE text/plain
+  AddOutputFilterByType DEFLATE text/xml
+  AddOutputFilterByType DEFLATE text/javascript
+  AddOutputFilterByType DEFLATE image/svg+xml
+</IfModule>

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Search{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 mb-3">
+    <div>
+      <div class="h3 mb-1">Search videos</div>
+      <div class="text-light-emphasis">Cari dari semua channel: title / video_id / resume.</div>
+    </div>
+    <a class="btn btn-outline-light" href="{{ url_for('channels') }}"><i class="bi bi-arrow-left me-1"></i>Back</a>
+  </div>
+
+  <div class="card rounded-4 mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-2 align-items-end">
+        <div class="col-12 col-md-6">
+          <label class="form-label mb-1">Query</label>
+          <input class="form-control" name="q" value="{{ q }}" placeholder="mis. 'Riyadush' / '16nQrYpj88c' / 'poin penting'">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label mb-1">Status</label>
+          <select class="form-select" name="status">
+            <option value="">(all)</option>
+            {% for s in ['downloaded','pending','no_subtitle','error'] %}
+              <option value="{{ s }}" {% if status==s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-6 col-md-3">
+          <label class="form-label mb-1">Category</label>
+          <select class="form-select" name="category">
+            <option value="">(all)</option>
+            {% for c in categories %}
+              <option value="{{ c.id }}" {% if category_id|int == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 col-md-1 d-grid">
+          <button class="btn btn-outline-light" type="submit"><i class="bi bi-search"></i></button>
+        </div>
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="resume" name="resume" value="1" {% if include_resume %}checked{% endif %}>
+            <label class="form-check-label" for="resume">
+              Include resume content (scan file .md)
+            </label>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card rounded-4">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('video_categories_bulk') }}" class="mb-3">
+        <input type="hidden" name="next" value="{{ request.full_path }}">
+        <div class="row g-2 align-items-end">
+          <div class="col-12 col-lg-6">
+            <label class="form-label mb-1">Bulk categories (untuk video yang dicentang)</label>
+            <div class="vstack gap-2 overflow-auto p-2 rounded-3" style="max-height: 240px; background: rgba(2, 6, 23, .35); border: 1px solid rgba(148, 163, 184, .18);">
+              {% for c in categories %}
+                <label class="d-flex align-items-center gap-2">
+                  <input class="form-check-input" type="checkbox" name="category_ids" value="{{ c.id }}">
+                  <span class="badge badge-soft" {% if c.color %}style="border-color: {{ c.color }}; color: {{ c.color }};"{% endif %}>{{ c.name }}</span>
+                </label>
+              {% else %}
+                <div class="text-light-emphasis">Belum ada kategori. Buat di menu Categories.</div>
+              {% endfor %}
+            </div>
+            <div class="text-light-emphasis small mt-1">Centang beberapa kategori lalu Apply.</div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <label class="form-label mb-1">Mode</label>
+            <select class="form-select" name="mode">
+              <option value="add" selected>Tambah</option>
+              <option value="replace">Set (replace)</option>
+            </select>
+          </div>
+          <div class="col-6 col-lg-3 d-grid">
+            <button class="btn btn-outline-info" type="submit">
+              <i class="bi bi-tags me-1"></i>Apply to selected (<span id="bulkSelCount">0</span>)
+            </button>
+          </div>
+        </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th class="text-nowrap">
+                <input class="form-check-input" type="checkbox" id="bulkSelectAll" title="Select all on this page">
+              </th>
+              <th class="text-nowrap">Dibaca</th>
+              <th>Video</th>
+              <th class="text-nowrap">Channel</th>
+              <th class="text-nowrap">Upload</th>
+              <th class="text-nowrap">Status</th>
+              <th class="text-nowrap">TXT</th>
+              <th class="text-nowrap">Resume</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in videos %}
+              <tr>
+                <td class="text-nowrap">
+                  <input class="form-check-input bulkVideoCb" type="checkbox" name="video_pks" value="{{ v.id }}">
+                </td>
+                <td class="text-nowrap">
+                  <input
+                    class="form-check-input readCb"
+                    type="checkbox"
+                    title="Checklist sudah dibaca"
+                    data-url="{{ url_for('video_read_set', video_pk=v.id) }}"
+                    {% if v.read_at %}checked{% endif %}
+                  >
+                </td>
+                <td>
+                  <a class="link-light link-underline-opacity-25 link-underline-opacity-75-hover fw-semibold"
+                     href="https://www.youtube.com/watch?v={{ v.video_id }}" target="_blank" rel="noreferrer">
+                    {{ v.title or v.video_id }}
+                  </a>
+                  <div class="small text-light-emphasis mono">
+                    {{ v.video_id }}
+                    • <a class="link-info link-underline-opacity-25" href="{{ url_for('video_detail', video_pk=v.id) }}">open in dashboard</a>
+                  </div>
+                </td>
+                <td class="text-nowrap"><a class="link-light link-underline-opacity-25" href="{{ url_for('channel_detail', channel_id=v.channel_id) }}">{{ v.channel_slug }}</a></td>
+                <td class="text-nowrap text-light-emphasis">{{ v.upload_date|fmt_yyyymmdd }}</td>
+                <td class="text-nowrap">
+                  {% if v.status_download == 'downloaded' %}<span class="badge text-bg-success">downloaded</span>
+                  {% elif v.status_download == 'pending' %}<span class="badge text-bg-warning text-dark">pending</span>
+                  {% elif v.status_download == 'no_subtitle' %}<span class="badge text-bg-secondary">no_subtitle</span>
+                  {% elif v.status_download == 'error' %}<span class="badge text-bg-danger">error</span>
+                  {% else %}<span class="badge text-bg-light text-dark">{{ v.status_download }}</span>
+                  {% endif %}
+                </td>
+                <td class="text-nowrap">
+                  {% if v.link_file %}
+                    <a class="btn btn-sm btn-outline-light" href="{{ url_for('video_text', video_pk=v.id) }}"><i class="bi bi-file-text"></i></a>
+                  {% else %}
+                    <span class="text-light-emphasis">-</span>
+                  {% endif %}
+                </td>
+                <td class="text-nowrap">
+                  {% set resume_requeue = v.link_file and (not v.link_resume) %}
+                  {% if v.link_resume %}
+                    <a class="btn btn-sm btn-outline-info" href="{{ url_for('video_detail', video_pk=v.id) }}#resume">
+                      <i class="bi bi-journal-text"></i>
+                    </a>
+                  {% elif resume_requeue %}
+                    <span class="badge text-bg-warning text-dark" title="Resume belum ada, akan diproses ulang/requeue">
+                      <i class="bi bi-arrow-repeat me-1"></i>Requeue
+                    </span>
+                  {% else %}
+                    <span class="text-light-emphasis">-</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8" class="text-center text-light-emphasis py-4">Tidak ada hasil.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      </form>
+      <div class="text-light-emphasis small mt-2">Menampilkan max 250 hasil • <span class="text-warning">badge kuning = resume akan di-requeue</span>.</div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (function () {
+      const postRead = async (url, read) => {
+        const body = new URLSearchParams();
+        body.set('read', read ? '1' : '0');
+        body.set('next', location.pathname + location.search);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'X-Requested-With': 'fetch',
+          },
+          body: body.toString(),
+        });
+        if (!res.ok) throw new Error('request failed');
+      };
+
+      Array.from(document.querySelectorAll('.readCb')).forEach(cb => {
+        cb.addEventListener('change', async () => {
+          const url = cb.getAttribute('data-url');
+          if (!url) return;
+          const desired = cb.checked;
+          cb.disabled = true;
+          try {
+            await postRead(url, desired);
+          } catch (e) {
+            cb.checked = !desired;
+          } finally {
+            cb.disabled = false;
+          }
+        });
+      });
+
+      const selAll = document.getElementById('bulkSelectAll');
+      const countEl = document.getElementById('bulkSelCount');
+      const cbs = () => Array.from(document.querySelectorAll('.bulkVideoCb'));
+      const updateCount = () => {
+        if (countEl) countEl.textContent = String(cbs().filter(cb => cb.checked).length);
+      };
+      if (selAll) {
+        selAll.addEventListener('change', () => {
+          const checked = selAll.checked;
+          cbs().forEach(cb => { cb.checked = checked; });
+          updateCount();
+        });
+      }
+      cbs().forEach(cb => cb.addEventListener('change', updateCount));
+      updateCount();
+    })();
+  </script>
+{% endblock %}

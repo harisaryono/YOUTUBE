@@ -1,0 +1,55 @@
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*~
+
+# Backup / editor leftovers
+*.bak
+*.bak.*
+*.bak-*
+*.orig
+.codex
+.mcp.json
+.vscode/
+
+# Local secrets and session cookies
+.env
+cookies*.txt
+
+# Internal documentation (server-specific, not for public repo)
+COORDINATOR_GUIDE.md
+
+# Databases and SQLite sidecars
+db/*
+!db/README.md
+*.db
+*.sqlite3
+*.db-wal
+*.db-shm
+*.tar.gz
+
+# Runtime outputs
+artifacts/*
+!artifacts/README.md
+backups/*
+!backups/README.md
+/logs/
+/runs/
+/downloads/
+/pending_updates/
+/by_channel/
+/public/
+/uploads/
+/uploads_tar/
+/tmp/
+/snap/
+/test_direct_run/
+/jsonl-*.zip
+/youtube_exports_data-*.zip
+/channels_export.csv
+/channels_export.json
+/missing_transcripts_*.csv
+/missing_transcripts_*.json
+/recover_*.log
+/run_audit_*.pid

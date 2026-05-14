@@ -1,0 +1,85 @@
+<div class="mini-tabs" style="margin-top:.8rem;">
+  <button class="mini-tab-btn active" data-mini-tab="recent-jobs">Recent Jobs</button>
+  <button class="mini-tab-btn" data-mini-tab="job-logs">Job Logs</button>
+</div>
+
+<div id="recent-jobs" class="mini-tab-pane active">
+  {% if recent_jobs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Job</th>
+          <th>Type</th>
+          <th>Source</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Updated</th>
+          <th>Exit</th>
+          <th>Log</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in recent_jobs %}
+        <tr>
+          <td>
+            <strong>{{ job.job_id }}</strong>
+            {% if job.command %}
+            <div style="font-size:.72rem;color:var(--muted);max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ job.command }}">{{ job.command }}</div>
+            {% endif %}
+          </td>
+          <td>{{ job.job_type }}</td>
+          <td>{{ job.source }}</td>
+          <td>
+            <span class="badge {% if job.status in ['completed', 'done', 'success'] %}badge-good{% elif job.status in ['running', 'queued'] %}badge-warn{% elif job.status in ['failed', 'error'] %}badge-danger{% else %}badge-muted{% endif %}">{{ job.status }}</span>
+          </td>
+          <td>{{ job.created_at or '-' }}</td>
+          <td>{{ job.updated_at or '-' }}</td>
+          <td>{% if job.exit_code is not none %}{{ job.exit_code }}{% else %}-{% endif %}</td>
+          <td>
+            {% if job.log_path %}
+            <a href="{{ url_for('admin_data_job_log', job_id=job.job_id) }}" title="{{ job.log_path }}">{{ job.log_path }}</a>
+            {% else %}
+            -
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p style="color:var(--muted);font-size:.88rem;margin-top:.2rem;">Belum ada job yang tercatat.</p>
+  {% endif %}
+</div>
+
+<div id="job-logs" class="mini-tab-pane">
+  {% if job_log_entries %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Job</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Log</th>
+          <th>Modified</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in job_log_entries %}
+        <tr>
+          <td><strong>{{ log.job_id }}</strong></td>
+          <td>{{ log.job_type }}</td>
+          <td>{{ log.status }}</td>
+          <td><a href="{{ url_for('admin_data_job_log', job_id=log.job_id) }}">{{ log.log_path }}</a></td>
+          <td>{{ log.modified }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p style="color:var(--muted);font-size:.88rem;margin-top:.2rem;">Belum ada job log yang ditemukan.</p>
+  {% endif %}
+</div>

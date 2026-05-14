@@ -1,0 +1,880 @@
+{% extends "base.html" %}
+
+{% block title %}{{ video.title }} - YouTube Transcript Manager{% endblock %}
+
+{% block content %}
+<div class="container">
+    {% if previous_video %}
+    <a href="{{ url_for('video_detail', video_id=previous_video.video_id) }}"
+       class="channel-nav-button channel-nav-prev"
+       title="Prev: {{ previous_video.title }}">
+        <span class="channel-nav-label">Prev</span>
+        <span class="channel-nav-arrow"><i class="bi bi-chevron-right"></i></span>
+    </a>
+    {% endif %}
+
+    {% if next_video %}
+    <a href="{{ url_for('video_detail', video_id=next_video.video_id) }}"
+       class="channel-nav-button channel-nav-next"
+       title="Next: {{ next_video.title }}">
+        <span class="channel-nav-arrow"><i class="bi bi-chevron-left"></i></span>
+        <span class="channel-nav-label">Next</span>
+    </a>
+    {% endif %}
+
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('channels') }}">Channels</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for('channel_detail', channel_id=video.channel_id) }}">{{ video.channel_name }}</a></li>
+            <li class="breadcrumb-item active">{{ video.title[:30] }}...</li>
+        </ol>
+    </nav>
+
+    <!-- Video Header -->
+    <div class="row mb-4">
+        <div class="col-lg-8">
+            <div class="ratio ratio-16x9 rounded overflow-hidden shadow-sm mb-3 position-relative" id="video-container" style="background: #000;">
+                <div id="lite-player" class="w-100 h-100 d-flex align-items-center justify-content-center cursor-pointer" 
+                     onclick="loadVideo()"
+                     style="background: url('{{ url_for('proxy_thumbnail', video_id=video.video_id) }}') center/cover; cursor: pointer;">
+                    
+                    <!-- Overlay darkness -->
+                    <div class="position-absolute top-0 start-0 w-100 h-100" style="background: rgba(0,0,0,0.2);"></div>
+                    
+                    <!-- Play Button Icon -->
+                    <div class="play-button-outer">
+                        <div class="play-button-inner">
+                            <i class="bi bi-play-fill text-white fs-1"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <style>
+                .play-button-outer {
+                    width: 68px;
+                    height: 48px;
+                    background-color: rgba(33, 33, 33, 0.8);
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: background-color 0.2s cubic-bezier(0, 0, 0.2, 1);
+                    z-index: 2;
+                }
+                #lite-player:hover .play-button-outer {
+                    background-color: #f00;
+                }
+                .speed-btn {
+                    padding: 4px 12px;
+                    font-size: 0.85rem;
+                    border-radius: 20px;
+                }
+                .speed-btn.active {
+                    background-color: #0d6efd;
+                    color: white;
+                    border-color: #0d6efd;
+                }
+            </style>
+
+            <div class="d-flex align-items-center gap-2 mb-3 bg-light p-2 rounded shadow-sm border">
+                <span class="small fw-semibold text-muted ms-1"><i class="bi bi-speedometer2"></i> Speed:</span>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary speed-btn" onclick="updateSpeed(1)">1x</button>
+                    <button type="button" class="btn btn-outline-secondary speed-btn" onclick="updateSpeed(1.25)">1.25x</button>
+                    <button type="button" class="btn btn-outline-secondary speed-btn" onclick="updateSpeed(1.5)">1.5x</button>
+                    <button type="button" class="btn btn-outline-secondary speed-btn" onclick="updateSpeed(1.75)">1.75x</button>
+                    <button type="button" class="btn btn-outline-secondary speed-btn active" onclick="updateSpeed(2)">2x</button>
+                </div>
+                <span class="small text-muted ms-auto pe-2" id="speed-status">Using saved preference</span>
+            </div>
+
+            {% if age_restricted %}
+            <div class="alert alert-warning border-0 shadow-sm small mb-0">
+                <div class="fw-semibold mb-1">
+                    <i class="bi bi-exclamation-triangle-fill"></i> Jika video age-restricted tidak terbuka di embed
+                </div>
+                <div>
+                    YouTube embed di `localhost` sering gagal untuk video age-restricted karena third-party cookies atau aturan embed.
+                    Gunakan tombol <span class="fw-semibold">Watch on YouTube</span> di panel kanan, atau izinkan third-party cookies untuk `youtube.com`.
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h1 class="card-title h4 mb-3">{{ video.title }}</h1>
+
+                    <div class="mb-3">
+                        <a href="{{ url_for('channel_detail', channel_id=video.channel_id) }}"
+                           class="text-decoration-none">
+                            <h5 class="text-primary mb-1">
+                                <i class="bi bi-broadcast"></i> {{ video.channel_name }}
+                            </h5>
+                        </a>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <div class="p-2 bg-light rounded">
+                                <div class="small text-muted">Duration</div>
+                                <div class="fw-bold">{{ video.duration|format_duration }}</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 bg-light rounded">
+                                <div class="small text-muted">Views</div>
+                                <div class="fw-bold">{{ video.view_count|format_number }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="p-2 bg-light rounded">
+                            <div class="small text-muted">Uploaded on</div>
+                            <div class="fw-bold">{{ video.upload_date|format_date }}</div>
+                            {% if upload_date_status and upload_date_status != 'exact' %}
+                            <div class="small text-muted mt-1">
+                                Estimated from discovery date{% if upload_date_reason %} · {{ upload_date_reason|replace('_', ' ') }}{% endif %}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if video.transcript_downloaded %}
+                    <div class="mb-3">
+                        <div class="p-2 bg-success bg-opacity-10 rounded">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="bi bi-check-circle-fill text-success fs-5"></i>
+                                <span class="fw-bold text-success">Transcript Available</span>
+                            </div>
+                            <div class="small text-muted">
+                                <div><i class="bi bi-file-earmark-text"></i> {{ video.word_count|format_number }} words</div>
+                                <div><i class="bi bi-translate"></i> {{ video.transcript_language|upper }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="mb-3">
+                        <div class="p-2 bg-warning bg-opacity-10 rounded">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="bi bi-exclamation-triangle-fill text-warning fs-5"></i>
+                                <span class="fw-bold text-warning">Transcript Not Available</span>
+                            </div>
+                            <div class="small text-muted">
+                                Transcript untuk video ini belum tersedia.
+                            </div>
+                        </div>
+                    </div>
+                    {% if manual_transcript_message %}
+                    <div class="alert alert-info py-2 small mb-3">
+                        <i class="bi bi-info-circle me-1"></i>{{ manual_transcript_message }}
+                    </div>
+                    {% endif %}
+                    {% if manual_transcript_job %}
+                    <div id="manual-transcript-status" class="alert alert-secondary py-2 small mb-3">
+                        <i class="bi bi-arrow-repeat me-1"></i>
+                        Manual download berjalan, halaman akan diperbarui otomatis saat transcript, resume, dan formatting sudah selesai.
+                    </div>
+                    {% endif %}
+                    {% if manual_transcript_retry_available or manual_transcript_running %}
+                    <form method="post" action="{{ url_for('manual_transcript_retry', video_id=video.video_id) }}" class="mb-3">
+                        <button type="submit" class="btn {% if manual_transcript_running %}btn-secondary{% else %}btn-warning{% endif %} w-100" {% if manual_transcript_running %}disabled aria-disabled="true"{% endif %}>
+                            <i class="bi bi-arrow-repeat"></i>
+                            {% if manual_transcript_running %}
+                            Manual Download Sedang Berjalan
+                            {% else %}
+                            Coba Manual Download
+                            {% endif %}
+                        </button>
+                        <div class="small text-muted mt-2">
+                            {% if manual_transcript_running %}
+                            Manual download sedang berjalan. Resume dan format akan dilanjutkan otomatis setelah selesai.
+                            {% else %}
+                            Akan mencoba jalur Webshare-first untuk video publik yang belum punya transcript.
+                            {% endif %}
+                        </div>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+
+                    <div class="d-grid gap-2">
+                        <a href="{{ video.video_url }}" target="_blank"
+                           class="btn btn-primary">
+                            <i class="bi bi-box-arrow-up-right"></i> Watch on YouTube
+                        </a>
+                        {% if video.transcript_downloaded %}
+                        <button onclick="copyTranscript()" class="btn btn-outline-primary">
+                            <i class="bi bi-clipboard"></i> Copy Transcript
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Video Description (Short) -->
+    {% if video.description %}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body py-3">
+            <div class="card-text text-muted small" style="max-height: 80px; overflow: hidden; text-overflow: ellipsis;">
+                {{ video.description|clean_description|striptags|truncate(200) }}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Tabs Navigation -->
+    {% if transcript or summary or formatted_transcript %}
+    <ul class="nav nav-tabs mb-4" id="contentTabs" role="tablist">
+        {% if summary %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab">
+                <i class="bi bi-lightbulb"></i> Summary
+            </button>
+        </li>
+        {% endif %}
+        {% if formatted_transcript %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link {% if not summary %}active{% endif %}" id="formatted-transcript-tab" data-bs-toggle="tab" data-bs-target="#formatted-transcript" type="button" role="tab">
+                <i class="bi bi-file-earmark-text"></i> Transcript Formatted
+            </button>
+        </li>
+        {% endif %}
+        {% if transcript %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link {% if not summary and not formatted_transcript %}active{% endif %}" id="transcript-tab" data-bs-toggle="tab" data-bs-target="#transcript" type="button" role="tab">
+                <i class="bi bi-captions"></i> Transcript Raw
+            </button>
+        </li>
+        {% endif %}
+    </ul>
+
+    <!-- Tabs Content -->
+    <div class="tab-content" id="contentTabsContent">
+        <!-- Summary Tab -->
+        {% if summary %}
+        <div class="tab-pane fade show active" id="summary" role="tabpanel">
+            <div class="summary-box p-4">
+                <div class="summary-content">
+                    {{ summary|safe }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Formatted Transcript Tab -->
+        {% if formatted_transcript %}
+        <div class="tab-pane fade {% if not summary %}show active{% endif %}" id="formatted-transcript" role="tabpanel">
+            <div class="transcript-container">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3 class="mb-0">
+                        <i class="bi bi-file-earmark-text text-success"></i> Transcript Formatted
+                    </h3>
+                    <div class="d-flex gap-2">
+                        <button onclick="toggleFormattedTranscript()" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrows-expand"></i> Toggle Full View
+                        </button>
+                        <button onclick="copyFormattedTranscript()" class="btn btn-outline-primary">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                        <button onclick="downloadFormattedTranscript()" class="btn btn-success">
+                            <i class="bi bi-download"></i> Download
+                        </button>
+                    </div>
+                </div>
+
+                <div id="formatted-transcript-content" class="transcript-wrapper" style="max-height: 600px; overflow-y: auto;">
+                    {% set lines = formatted_transcript.split('\n') %}
+                    {% for line in lines %}
+                    {% if line.strip() %}
+                    <div class="transcript-line">
+                        <div class="transcript-text no-timestamp">
+                            {{ line|safe }}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Transcript Tab -->
+        {% if transcript %}
+        <div class="tab-pane fade {% if not summary and not formatted_transcript %}show active{% endif %}" id="transcript" role="tabpanel">
+            <div class="transcript-container">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3 class="mb-0">
+                        <i class="bi bi-captions text-primary"></i> Transcript Raw
+                    </h3>
+                    <div class="d-flex gap-2">
+                        <button onclick="toggleTranscript()" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrows-expand"></i> Toggle Full View
+                        </button>
+                        <button onclick="copyTranscript()" class="btn btn-outline-primary">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                        <button onclick="downloadTranscript()" class="btn btn-primary">
+                            <i class="bi bi-download"></i> Download
+                        </button>
+                    </div>
+                </div>
+
+                <div id="transcript-content" class="transcript-wrapper" style="max-height: 600px; overflow-y: auto;">
+                    {% set lines = transcript.split('\n') %}
+                    {% for line in lines %}
+                    {% if line.strip() %}
+                    <div class="transcript-line">
+                        {% set match = line|regex_match('\\[([0-9:,.]+)\\]') %}
+                        {% if match %}
+                        <div class="transcript-timestamp">
+                            <span onclick="seekToVideo('{{ match.group(1) }}')" class="timestamp-link">
+                                {{ match.group(1) }}
+                            </span>
+                        </div>
+                        <div class="transcript-text">
+                            {{ line|regex_replace('^\\[[0-9:,.]+\\]\\s*', '')|safe }}
+                        </div>
+                        {% else %}
+                        <!-- No timestamp - plain text -->
+                        <div class="transcript-text no-timestamp">
+                            {{ line|safe }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .channel-nav-button {
+        position: fixed;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 1030;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        background: rgba(13, 110, 253, 0.92);
+        color: #fff;
+        text-decoration: none;
+        border-radius: 999px;
+        box-shadow: 0 8px 24px rgba(13, 110, 253, 0.28);
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        max-width: min(220px, 24vw);
+    }
+
+    .channel-nav-button:hover {
+        color: #fff;
+        background: rgba(11, 94, 215, 0.98);
+        transform: translateY(-50%) scale(1.03);
+        box-shadow: 0 12px 28px rgba(13, 110, 253, 0.34);
+    }
+
+    .channel-nav-prev {
+        right: 18px;
+    }
+
+    .channel-nav-next {
+        left: 18px;
+    }
+
+    .channel-nav-arrow {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.18);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font-size: 1.1rem;
+    }
+
+    .channel-nav-label {
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    /* Tab styling */
+    .nav-tabs {
+        border-bottom: 2px solid #dee2e6;
+        margin-bottom: 20px;
+        background: #f1f3f5;
+        padding: 8px 16px;
+        border-radius: 12px 12px 0 0;
+    }
+
+    .nav-tabs .nav-link {
+        color: #495057;
+        border: 2px solid transparent;
+        border-bottom: none;
+        padding: 12px 28px;
+        font-weight: 600;
+        background: #e9ecef;
+        margin: 0 4px;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+        position: relative;
+        bottom: -2px;
+    }
+
+    .nav-tabs .nav-link:hover {
+        background: #dee2e6;
+        color: #0d6efd;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+
+    .nav-tabs .nav-link.active {
+        color: #fff;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-color: transparent;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+        transform: translateY(-2px);
+    }
+
+    .nav-tabs .nav-link:not(.active) {
+        border: 2px solid #ced4da;
+    }
+
+    .tab-content {
+        background: white;
+        border-radius: 0 0 12px 12px;
+        padding: 25px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        border: 1px solid #dee2e6;
+        border-top: none;
+    }
+
+    /* Transcript styling */
+    .transcript-wrapper::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .transcript-wrapper::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+    }
+
+    .transcript-wrapper::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+    }
+
+    .transcript-wrapper::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+
+    .transcript-line {
+        display: flex;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .transcript-line:last-child {
+        border-bottom: none;
+    }
+
+    .transcript-timestamp {
+        min-width: 80px;
+        flex-shrink: 0;
+    }
+
+    .timestamp-link {
+        color: #065fd4;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: monospace;
+        font-size: 0.9em;
+        transition: all 0.2s ease;
+    }
+
+    .timestamp-link:hover {
+        color: #ff0000;
+        text-decoration: underline;
+    }
+
+    .transcript-text {
+        flex: 1;
+        line-height: 1.8;
+        color: #333;
+    }
+
+    .transcript-text.no-timestamp {
+        padding-left: 0;
+    }
+
+    /* Summary styling */
+    .summary-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 12px;
+        color: white;
+    }
+
+    .summary-content {
+        color: white;
+    }
+
+    .summary-content h1,
+    .summary-content h2,
+    .summary-content h3,
+    .summary-content h4,
+    .summary-content h5,
+    .summary-content h6 {
+        color: white;
+        margin-top: 1.5em;
+        margin-bottom: 0.5em;
+        font-weight: 600;
+    }
+
+    .summary-content h1 { 
+        font-size: 1.8em; 
+        border-bottom: 1px solid rgba(255,255,255,0.3); 
+        padding-bottom: 0.3em; 
+    }
+    .summary-content h2 { font-size: 1.5em; }
+    .summary-content h3 { font-size: 1.3em; }
+    .summary-content h4 { font-size: 1.1em; }
+
+    .summary-content p {
+        margin-bottom: 1em;
+        line-height: 1.8;
+    }
+
+    .summary-content ul,
+    .summary-content ol {
+        margin-bottom: 1em;
+        padding-left: 2em;
+    }
+
+    .summary-content li {
+        margin-bottom: 0.5em;
+        line-height: 1.6;
+    }
+
+    .summary-content strong {
+        font-weight: 600;
+        color: #ffd700;
+    }
+
+    .summary-content em {
+        font-style: italic;
+    }
+
+    .summary-content code {
+        background: rgba(255,255,255,0.1);
+        padding: 0.2em 0.4em;
+        border-radius: 3px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+    }
+
+    .summary-content pre {
+        background: rgba(0,0,0,0.3);
+        padding: 1em;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin: 1em 0;
+    }
+
+    .summary-content pre code {
+        background: transparent;
+        padding: 0;
+    }
+
+    .summary-content blockquote {
+        border-left: 4px solid rgba(255,255,255,0.5);
+        padding-left: 1em;
+        margin: 1em 0;
+        font-style: italic;
+        opacity: 0.9;
+    }
+
+    .summary-content hr {
+        border: none;
+        border-top: 1px solid rgba(255,255,255,0.3);
+        margin: 2em 0;
+    }
+
+    .summary-content a {
+        color: #ffd700;
+        text-decoration: underline;
+    }
+
+    .summary-content a:hover {
+        color: #fff;
+    }
+
+    @media (max-width: 768px) {
+        .channel-nav-button {
+            top: auto;
+            bottom: 18px;
+            transform: none;
+            max-width: none;
+            padding: 10px 14px;
+        }
+
+        .channel-nav-button:hover {
+            transform: scale(1.03);
+        }
+
+        .channel-nav-prev {
+            right: 12px;
+        }
+
+        .channel-nav-next {
+            left: 12px;
+        }
+    }
+</style>
+
+<script>
+    const videoId = '{{ video.video_id }}';
+    const manualTranscriptJob = {{ manual_transcript_job|default('', true)|tojson }};
+    const transcriptContent = document.getElementById('transcript-content');
+    const formattedTranscriptContent = document.getElementById('formatted-transcript-content');
+
+    function getSavedSpeed() {
+        return localStorage.getItem('yt_speed') || '2';
+    }
+
+    function updateSpeed(rate) {
+        localStorage.setItem('yt_speed', rate);
+        
+        // Update UI
+        document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.classList.remove('active');
+            // Remove 'x' and parse
+            const btnRate = parseFloat(btn.innerText.replace('x', ''));
+            if (btnRate === parseFloat(rate)) {
+                btn.classList.add('active');
+            }
+        });
+
+        // Apply to player if loaded
+        const iframe = document.getElementById('youtube-player');
+        if (iframe) {
+            iframe.contentWindow.postMessage(JSON.stringify({
+                event: 'command',
+                func: 'setPlaybackRate',
+                args: [parseFloat(rate), true]
+            }), '*');
+        }
+        
+        const status = document.getElementById('speed-status');
+        if (status) status.innerText = `Preference: ${rate}x`;
+    }
+
+    function loadVideo() {
+        const container = document.getElementById('video-container');
+        if (!container) return;
+        
+        const savedSpeed = getSavedSpeed();
+        
+        container.innerHTML = `<iframe id="youtube-player"
+                        src="https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1"
+                        title="{{ video.title }}"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen
+                        class="w-100 h-100"
+                        style="border: none;"></iframe>`;
+        
+        // Auto-set physical playback rate from preference
+        setTimeout(() => {
+            const iframe = document.getElementById('youtube-player');
+            if (iframe) {
+                iframe.contentWindow.postMessage(JSON.stringify({
+                    event: 'command',
+                    func: 'setPlaybackRate',
+                    args: [parseFloat(savedSpeed), true]
+                }), '*');
+            }
+        }, 1500);
+    }
+
+    // Initialize UI speed buttons on load
+    document.addEventListener('DOMContentLoaded', () => {
+        const savedSpeed = getSavedSpeed();
+        updateSpeed(savedSpeed);
+    });
+
+    function toggleTranscript() {
+        const wrapper = document.getElementById('transcript-content');
+        if (wrapper) {
+            if (wrapper.style.maxHeight === 'none' || wrapper.classList.contains('full-view')) {
+                wrapper.style.maxHeight = '600px';
+                wrapper.classList.remove('full-view');
+            } else {
+                wrapper.style.maxHeight = 'none';
+                wrapper.classList.add('full-view');
+            }
+        }
+    }
+
+    function toggleFormattedTranscript() {
+        const wrapper = document.getElementById('formatted-transcript-content');
+        if (wrapper) {
+            if (wrapper.style.maxHeight === 'none' || wrapper.classList.contains('full-view')) {
+                wrapper.style.maxHeight = '600px';
+                wrapper.classList.remove('full-view');
+            } else {
+                wrapper.style.maxHeight = 'none';
+                wrapper.classList.add('full-view');
+            }
+        }
+    }
+
+    function copyTranscript() {
+        if (transcriptContent) {
+            const text = transcriptContent.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Transcript copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+    }
+
+    function copyFormattedTranscript() {
+        if (formattedTranscriptContent) {
+            const text = formattedTranscriptContent.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Formatted transcript copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+    }
+
+    function downloadTranscript() {
+        if (transcriptContent) {
+            const text = transcriptContent.innerText;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transcript_${videoId}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    function downloadFormattedTranscript() {
+        if (formattedTranscriptContent) {
+            const text = formattedTranscriptContent.innerText;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `formatted_transcript_${videoId}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    function seekToVideo(timestamp) {
+        // Convert timestamp to seconds
+        const parts = timestamp.split(':').map(parseFloat);
+        let seconds = 0;
+        if (parts.length === 3) {
+            seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        } else if (parts.length === 2) {
+            seconds = parts[0] * 60 + parts[1];
+        }
+
+        // Seek YouTube video
+        let iframe = document.querySelector('#youtube-player');
+        
+        // If iframe doesn't exist yet (lite-player still active), load it first
+        if (!iframe) {
+            loadVideo();
+            // Wait for iframe to load before seeking
+            setTimeout(() => {
+                iframe = document.querySelector('#youtube-player');
+                if (iframe) {
+                    iframe.contentWindow.postMessage(
+                        JSON.stringify({
+                            event: 'command',
+                            func: 'seekTo',
+                            args: [seconds, true]
+                        }),
+                        '*'
+                    );
+                }
+            }, 1000);
+        } else {
+            iframe.contentWindow.postMessage(
+                JSON.stringify({
+                    event: 'command',
+                    func: 'seekTo',
+                    args: [seconds, true]
+                }),
+                '*'
+            );
+        }
+    }
+
+    let manualTranscriptPollTimer = null;
+    let manualTranscriptPollDone = false;
+
+    function stopManualTranscriptPolling() {
+        if (manualTranscriptPollTimer) {
+            clearInterval(manualTranscriptPollTimer);
+            manualTranscriptPollTimer = null;
+        }
+    }
+
+    function startManualTranscriptPolling() {
+        if (!manualTranscriptJob || manualTranscriptPollDone) return;
+
+        const pollTranscript = async () => {
+            if (manualTranscriptPollDone) return;
+            try {
+                const response = await fetch(`{{ url_for('api_video_detail', video_id=video.video_id) }}`, {
+                    cache: 'no-store',
+                });
+                if (!response.ok) return;
+
+                const payload = await response.json();
+                if (payload && payload.success && payload.video && payload.video.transcript_downloaded && payload.video.transcript_formatted_path) {
+                    manualTranscriptPollDone = true;
+                    stopManualTranscriptPolling();
+                    const status = document.getElementById('manual-transcript-status');
+                    if (status) {
+                        status.className = 'alert alert-success py-2 small mb-3';
+                        status.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>Transcript, resume, dan formatting sudah tersedia. Halaman akan dimuat ulang.';
+                    }
+                    const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+                    setTimeout(() => window.location.replace(cleanUrl), 500);
+                }
+            } catch (err) {
+                console.warn('manual transcript poll failed', err);
+            }
+        };
+
+        pollTranscript();
+        manualTranscriptPollTimer = setInterval(pollTranscript, 10000);
+    }
+
+    // Store plain transcript for copying
+    {% if transcript %}
+    const plainTranscript = {{ transcript|default('', true)|tojson }};
+    {% endif %}
+
+    document.addEventListener('DOMContentLoaded', startManualTranscriptPolling);
+</script>
+{% endblock %}

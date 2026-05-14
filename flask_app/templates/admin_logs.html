@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logs - YouTube Admin</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--ink:#e4e6eb;--muted:#8b8fa3;--line:#2e3348;--accent:#4f8cff;--good:#34d399;--warn:#fbbf24;--danger:#f87171;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.shell{max-width:1400px;margin:0 auto;padding:1rem}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.2rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:1rem}
+.topbar h1{font-size:1.3rem;font-weight:700}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:1.1rem;margin-bottom:1rem}
+.panel h2{font-size:1.05rem;margin-bottom:.8rem}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid var(--line)}
+th{font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+tr:hover td{background:var(--surface2)}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.55rem .9rem;border:none;border-radius:8px;font:inherit;font-weight:600;font-size:.85rem;cursor:pointer;transition:opacity .15s;text-decoration:none}
+.btn:hover{opacity:.85}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-muted{background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:999px;font-size:.74rem;font-weight:700}
+.badge-good{background:rgba(52,211,153,.15);color:var(--good)}
+.badge-warn{background:rgba(251,191,36,.15);color:var(--warn)}
+.badge-info{background:rgba(79,140,255,.15);color:var(--accent)}
+.flash{padding:.7rem 1rem;border-radius:8px;margin-bottom:1rem}
+.flash-good{background:rgba(52,211,153,.15);border:1px solid var(--good);color:var(--good)}
+.flash-danger{background:rgba(248,113,113,.15);border:1px solid var(--danger);color:var(--danger)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <h1>📋 Log Files</h1>
+    <div>
+      <a href="{{ url_for('admin_data_page') }}" class="btn btn-muted">← Back to Admin</a>
+      <a href="{{ url_for('admin_data_jobs') }}" class="btn btn-primary">Jobs</a>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+        <div class="flash flash-good">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="panel">
+    <h2>🔗 Job Logs</h2>
+    {% if job_log_entries %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Log Path</th>
+            <th>Modified</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in job_log_entries %}
+          <tr>
+            <td><strong>{{ log.job_id }}</strong></td>
+            <td>{{ log.job_type }}</td>
+            <td>{{ log.status }}</td>
+            <td><a href="{{ url_for('admin_data_job_log', job_id=log.job_id) }}">{{ log.log_path }}</a></td>
+            <td>{{ log.modified }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);padding:1rem 0;">No job logs found.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>📁 Log Files</h2>
+    {% if log_files %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Filename</th>
+            <th>Size</th>
+            <th>Modified</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in log_files %}
+          <tr>
+            <td><code>{{ log.name }}</code></td>
+            <td>{{ (log.size / 1024)|round(1) }} KB</td>
+            <td>{{ log.modified }}</td>
+            <td>
+              <a href="{{ log.url }}" class="btn btn-primary">View</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);padding:1rem 0;">No log files found.</p>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

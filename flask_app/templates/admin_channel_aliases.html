@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Channel Aliases - YouTube Data Manager</title>
+<style>
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--ink:#e4e6eb;--muted:#8b8fa3;--line:#2e3348;--accent:#4f8cff;--good:#34d399;--warn:#fbbf24;--danger:#f87171;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.shell{max-width:1200px;margin:0 auto;padding:1rem}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.2rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:1rem}
+.topbar h1{font-size:1.25rem}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.7rem}
+.card{background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);padding:.9rem 1rem}
+.label{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.value{margin-top:.25rem;font-weight:700}
+.btn{display:inline-flex;align-items:center;gap:.35rem;padding:.5rem .85rem;border:none;border-radius:8px;font:inherit;font-weight:600;font-size:.85rem;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.88}
+.btn-sm{padding:.35rem .65rem;font-size:.78rem}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-good{background:var(--good);color:#0f1117}
+.btn-muted{background:var(--surface2);color:var(--ink);border:1px solid var(--line)}
+.btn-row{display:flex;gap:.5rem;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:999px;font-size:.74rem;font-weight:700}
+.badge-good{background:rgba(52,211,153,.15);color:var(--good)}
+.badge-warn{background:rgba(251,191,36,.15);color:var(--warn)}
+.badge-muted{background:rgba(139,143,163,.15);color:var(--muted)}
+.badge-danger{background:rgba(248,113,113,.15);color:var(--danger)}
+.search{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.search input{min-width:280px;flex:1;padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--ink);font:inherit}
+.search input:focus{outline:none;border-color:var(--accent)}
+.results{margin-top:1rem}
+.results .row{display:flex;justify-content:space-between;gap:1rem;padding:.65rem .75rem;border-bottom:1px solid var(--line)}
+.results .row:hover{background:var(--surface2)}
+.muted{color:var(--muted)}
+.toast{position:fixed;top:1rem;right:1rem;z-index:9999;padding:.8rem 1.2rem;border-radius:var(--radius);font-weight:600;font-size:.9rem}
+.toast-ok{background:rgba(52,211,153,.18);color:var(--good);border:1px solid rgba(52,211,153,.3)}
+.toast-err{background:rgba(248,113,113,.18);color:var(--danger);border:1px solid rgba(248,113,113,.3)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div>
+      <h1>{{ channel.channel_name }} Aliases</h1>
+      <div class="muted" style="font-size:.9rem;margin-top:.2rem;">
+        {{ channel.channel_id }}{% if channel.channel_handle %} · @{{ channel.channel_handle }}{% endif %} · {{ channel.channel_url }}
+      </div>
+    </div>
+    <div class="btn-row">
+      <a href="{{ url_for('admin_data_page') }}" class="btn btn-muted">← Admin</a>
+      <a href="{{ url_for('channel_detail', channel_id=channel.channel_id) }}" class="btn btn-muted">View Channel</a>
+      <form method="post" action="{{ url_for('admin_data_action_rebuild_channel_aliases') }}" style="display:inline;">
+        <input type="hidden" name="channel_id" value="{{ channel.channel_id }}">
+        <button type="submit" class="btn btn-good">Rebuild Aliases</button>
+      </form>
+    </div>
+  </div>
+
+  {% if flash %}<div class="toast toast-ok">{{ flash }}</div>{% elif error_flash %}<div class="toast toast-err">{{ error_flash }}</div>{% endif %}
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Alias Count</div>
+      <div class="value">{{ alias_count }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Videos</div>
+      <div class="value">{{ channel.video_count }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Subscriber</div>
+      <div class="value">{{ channel.subscriber_count or 0 }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Handle</div>
+      <div class="value">{% if channel.channel_handle %}@{{ channel.channel_handle }}{% else %}<span class="muted">-</span>{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="btn-row" style="justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;">Aliases</h2>
+      <form method="post" action="{{ url_for('admin_data_action_rebuild_channel_aliases') }}" style="display:inline;">
+        <button type="submit" class="btn btn-muted">Rebuild All Aliases</button>
+      </form>
+    </div>
+    <div style="overflow-x:auto;margin-top:.8rem;">
+      <table>
+        <thead>
+          <tr>
+            <th>Alias</th>
+            <th>Kind</th>
+            <th>Normalized</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alias in aliases %}
+          <tr>
+            <td><strong>{{ alias.alias_value }}</strong></td>
+            <td><span class="badge badge-muted">{{ alias.alias_kind }}</span></td>
+            <td class="muted">{{ alias.alias_key }}</td>
+            <td class="muted">{{ alias.updated_at }}</td>
+          </tr>
+          {% endfor %}
+          {% if not aliases %}
+          <tr><td colspan="4" class="muted">Belum ada alias tersimpan.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2 style="margin-bottom:.7rem;">Search Channel</h2>
+    <div class="search">
+      <input id="channel-search" type="text" placeholder="Cari UC..., @handle, atau nama channel">
+      <button class="btn btn-primary" id="channel-search-btn" type="button">Search</button>
+    </div>
+    <div id="search-status" class="muted" style="margin-top:.6rem;font-size:.88rem;">Gunakan search untuk melompat ke channel lain.</div>
+    <div id="search-results" class="results"></div>
+  </div>
+</div>
+
+<script>
+const searchInput = document.getElementById('channel-search');
+const searchBtn = document.getElementById('channel-search-btn');
+const searchStatus = document.getElementById('search-status');
+const searchResults = document.getElementById('search-results');
+
+function renderResults(items) {
+  if (!items.length) {
+    searchResults.innerHTML = '<div class="muted" style="padding:.8rem 0;">Tidak ada hasil.</div>';
+    return;
+  }
+  searchResults.innerHTML = items.map(item => `
+    <div class="row">
+      <div>
+        <div><strong>${item.channel_name || ''}</strong></div>
+        <div class="muted" style="font-size:.8rem;">${item.channel_id || ''}${item.channel_handle ? ' · @' + item.channel_handle : ''}</div>
+        <div class="muted" style="font-size:.76rem;">aliases: ${item.alias_count ?? 0}</div>
+      </div>
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap;justify-content:flex-end;">
+        <a class="btn btn-muted btn-sm" href="/admin/data/channel/${encodeURIComponent(item.channel_id)}/aliases">Aliases</a>
+        <a class="btn btn-primary btn-sm" href="/channel/${encodeURIComponent(item.channel_id)}">View</a>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function runSearch() {
+  const q = (searchInput.value || '').trim();
+  if (!q) {
+    searchStatus.textContent = 'Masukkan kata kunci pencarian.';
+    searchResults.innerHTML = '';
+    return;
+  }
+  searchStatus.textContent = 'Mencari...';
+  searchResults.innerHTML = '';
+  try {
+    const resp = await fetch(`/api/channels/search?q=${encodeURIComponent(q)}&limit=20`);
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      throw new Error(data.error || `HTTP ${resp.status}`);
+    }
+    searchStatus.textContent = `${data.count || 0} hasil untuk "${q}"`;
+    renderResults(data.results || []);
+  } catch (err) {
+    searchStatus.textContent = `Gagal mencari: ${err.message}`;
+  }
+}
+
+searchBtn.addEventListener('click', runSearch);
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    runSearch();
+  }
+});
+</script>
+</body>
+</html>
