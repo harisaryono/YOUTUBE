@@ -519,6 +519,24 @@ def chat_once(account: ProviderAccount, prompt: str, timeout: int, *, max_tokens
     }
     if str(account.provider or "").strip().lower() == "z.ai":
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    if str(account.provider or "").strip().lower() == "nvidia":
+        kwargs["stream"] = True
+        content_parts: list[str] = []
+        finish_reason = ""
+        stream = client.chat.completions.create(**kwargs)
+        for chunk in stream:
+            if not getattr(chunk, "choices", None):
+                continue
+            choice = chunk.choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta is not None:
+                content = getattr(delta, "content", None)
+                if isinstance(content, str) and content:
+                    content_parts.append(content)
+            reason = str(getattr(choice, "finish_reason", "") or "").strip()
+            if reason:
+                finish_reason = reason
+        return "".join(content_parts).strip(), finish_reason
     resp = client.chat.completions.create(**kwargs)
     choice = resp.choices[0]
     return extract_message_content(choice.message), str(choice.finish_reason or "").strip()

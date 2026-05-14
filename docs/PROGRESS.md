@@ -309,4 +309,5 @@
 - **2026-05-14 (Local)**: Resume NVIDIA dibuat fail-fast.
   - Jalur `fill_missing_resumes_youtube_db.py` sekarang memberi timeout khusus yang lebih pendek untuk NVIDIA daripada timeout generasi default.
   - Retry internal OpenAI client untuk NVIDIA dimatikan agar request tidak macet terlalu lama di `chat.completions.create()`.
+  - Jalur NVIDIA sekarang memakai streaming chat completion ala contoh resmi, lalu mengumpulkan `delta.content` menjadi hasil final.
   - Kalau NVIDIA kena timeout-like error, provider itu ditandai disabled untuk sisa run supaya worker pindah ke backlog lain alih-alih mengulang macet yang sama.
