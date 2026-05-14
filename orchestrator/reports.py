@@ -41,6 +41,10 @@ def generate_report(
     blocked_providers = cd.get_blocked_providers(state)
     blocked_channels = cd.get_blocked_channels(state)
     next_wakeup = cd.get_next_wakeup(state)
+    active_locks = state.list_active_locks()
+
+    # Build suggestions
+    suggestions = _build_suggestions(config, state, active_cooldowns, cycle_result)
 
     # Build report
     report: dict[str, Any] = {
@@ -57,9 +61,14 @@ def generate_report(
             "blocked_channels": blocked_channels,
             "details": active_cooldowns,
         },
+        "locks": {
+            "active_count": len(active_locks),
+            "details": active_locks,
+        },
         "pending_work": counts,
         "recent_events": recent_events[:10],
         "cycle_result": cycle_result,
+        "suggestions": suggestions,
     }
 
     # Write files
@@ -79,6 +88,63 @@ def generate_report(
     json_archive.write_text(json.dumps(report, indent=2, default=str))
 
     return report
+
+
+def _build_suggestions(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    active_cooldowns: list[dict[str, Any]],
+    cycle_result: dict[str, Any] | None,
+) -> list[str]:
+    """Build actionable suggestions based on current state."""
+    suggestions: list[str] = []
+
+    # Check YouTube cooldowns
+    for cd_entry in active_cooldowns:
+        scope = cd_entry["scope"]
+        reason = cd_entry["reason"]
+        if scope == "youtube":
+            if "429" in reason or "rate" in reason.lower():
+                suggestions.append("Reduce transcript workers to 1-2, enable --rate-limit-safe")
+            elif "bot" in reason.lower() or "captcha" in reason.lower():
+                suggestions.append("Stop all YouTube activity for 12-24h, use different IP/proxy")
+            elif "403" in reason or "forbidden" in reason.lower():
+                suggestions.append("Check cookies/proxy/IP, wait before retry")
+        elif scope.startswith("provider:"):
+            provider = scope.replace("provider:", "")
+            if "quota" in reason.lower():
+                suggestions.append(f"Provider {provider} quota exceeded — wait for reset or switch provider")
+            elif "auth" in reason.lower():
+                suggestions.append(f"Provider {provider} auth error — check API key")
+        elif scope == "coordinator":
+            suggestions.append("Check coordinator service, restart if needed")
+
+    # Check memory
+    if cycle_result:
+        mem_mb = cycle_result.get("mem_available_mb", 0)
+        if mem_mb < 2000:
+            suggestions.append("Memory low — reduce workers or wait for other jobs to finish")
+
+    # Check disk
+    if cycle_result:
+        disk_gb = cycle_result.get("disk_free_gb", 0)
+        if disk_gb < 10:
+            suggestions.append("Disk space low — clean up runs/uploads/logs/cache")
+
+    # Check idle hours for format
+    if config.get("format", {}).get("prefer_idle_hours", False):
+        from .safety import _is_idle_hours
+        if not _is_idle_hours(config):
+            suggestions.append("Schedule format jobs during night hours (22:00-05:00)")
+
+    # Check if format/resume are deferred due to lease
+    if cycle_result and cycle_result.get("jobs_deferred", 0) > 0:
+        suggestions.append("Check orchestrator events for deferred job reasons")
+
+    if not suggestions:
+        suggestions.append("System healthy — no action needed")
+
+    return suggestions
 
 
 def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
@@ -105,7 +171,8 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
     lines.append(f"- Active cooldowns: {cd_info.get('active_count', 0)}")
     if cd_info.get("next_wakeup_seconds", 0) > 0:
         next_min = cd_info["next_wakeup_seconds"] // 60
-        lines.append(f"- Next wakeup: ~{next_min} minutes")
+        next_sec = cd_info["next_wakeup_seconds"] % 60
+        lines.append(f"- Next wakeup: ~{next_min}m {next_sec}s")
     lines.append("")
 
     if cd_info.get("blocked_providers"):
@@ -129,6 +196,19 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
             lines.append(
                 f"| {cd_entry['scope']} | {cd_entry['reason']} "
                 f"| {cd_entry['cooldown_until']} | {cd_entry['severity']} |"
+            )
+        lines.append("")
+
+    # Active locks
+    lock_info = report.get("locks", {})
+    if lock_info.get("active_count", 0) > 0:
+        lines.append("## Active Stage Locks")
+        lines.append("")
+        lines.append("| Lock Key | Owner | Expires At |")
+        lines.append("|----------|-------|------------|")
+        for lock in lock_info.get("details", []):
+            lines.append(
+                f"| {lock['lock_key']} | {lock['owner']} | {lock['expires_at']} |"
             )
         lines.append("")
 
@@ -167,6 +247,14 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
             lines.append(f"- **{stage}**: ready")
     lines.append("")
 
+    # Suggestions
+    suggestions = report.get("suggestions", [])
+    if suggestions:
+        lines.append("## Suggestions")
+        lines.append("")
+        for s in suggestions:
+            lines.append(f"- {s}")
+        lines.append("")
 
     # Recent events
     events = report.get("recent_events", [])
@@ -191,7 +279,10 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
         lines.append(f"- Jobs dispatched: {cycle.get('jobs_dispatched', 0)}")
         lines.append(f"- Jobs succeeded: {cycle.get('jobs_succeeded', 0)}")
         lines.append(f"- Jobs failed: {cycle.get('jobs_failed', 0)}")
+        lines.append(f"- Jobs deferred: {cycle.get('jobs_deferred', 0)}")
         lines.append(f"- Duration: {cycle.get('duration_seconds', 0)}s")
+        if cycle.get("dry_run"):
+            lines.append("- **⚠️ Dry-run mode** — no jobs actually ran")
         lines.append("")
 
     return "\n".join(lines)

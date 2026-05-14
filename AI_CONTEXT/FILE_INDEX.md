@@ -27,6 +27,9 @@
 ## db
 - `db/README.md` (493 bytes)
 
+## diet_db.py
+- `diet_db.py` (4116 bytes)
+
 ## docs
 - `docs/DB_DIET_AUDIT.md` (3532 bytes)
 - `docs/FTS_MIGRATION_PLAN.md` (2450 bytes)
@@ -82,17 +85,17 @@
 - `orchestrator/__init__.py` (0 bytes)
 - `orchestrator/config.py` (4567 bytes)
 - `orchestrator/cooldown.py` (3747 bytes)
-- `orchestrator/daemon.py` (10908 bytes)
-- `orchestrator/db_queries.py` (9280 bytes)
+- `orchestrator/daemon.py` (13123 bytes)
+- `orchestrator/db_queries.py` (12486 bytes)
 - `orchestrator/dispatcher.py` (10361 bytes)
-- `orchestrator/error_analyzer.py` (8781 bytes)
-- `orchestrator/planner.py` (3169 bytes)
-- `orchestrator/reports.py` (7087 bytes)
-- `orchestrator/safety.py` (8661 bytes)
-- `orchestrator/state.py` (8627 bytes)
+- `orchestrator/error_analyzer.py` (9749 bytes)
+- `orchestrator/planner.py` (4406 bytes)
+- `orchestrator/reports.py` (10805 bytes)
+- `orchestrator/safety.py` (12378 bytes)
+- `orchestrator/state.py` (11134 bytes)
 
 ## orchestrator.yaml
-- `orchestrator.yaml` (1692 bytes)
+- `orchestrator.yaml` (1681 bytes)
 
 ## partial_docs
 - `partial_docs/API_METADATA_RESULTS.md` (2504 bytes)
@@ -250,7 +253,7 @@
 - `recover_transcripts_from_csv.py` (24514 bytes)
 
 ## requirements.txt
-- `requirements.txt` (460 bytes)
+- `requirements.txt` (491 bytes)
 
 ## robots.txt
 - `robots.txt` (622 bytes)
@@ -328,7 +331,7 @@
 - `youtube_cache.db` (0 bytes)
 
 ## youtube_transcripts.db
-- `youtube_transcripts.db` (1259417600 bytes)
+- `youtube_transcripts.db` (1054535680 bytes)
 
 ## youtube_transcripts_blobs.db
-- `youtube_transcripts_blobs.db` (467906560 bytes)
+- `youtube_transcripts_blobs.db` (468344832 bytes)

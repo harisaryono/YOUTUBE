@@ -1,6 +1,6 @@
 # Project State
 
-- generated_at: `2026-05-14T09:35:58.342292+00:00`
+- generated_at: `2026-05-14T10:50:36.009398+00:00`
 - repo_type: YouTube transcript / resume / format / ASR pipeline
 - active web app: Flask under `flask_app/app.py`
 - database layout: active DBs are under `db/` with root symlinks for compat
@@ -12,7 +12,7 @@
 
 ## Directory Snapshot
 - `docs`: 18 files
-- `scripts`: 55 files
+- `scripts`: 56 files
 - `flask_app`: 20 files
 - `partial_py`: 114 files
 - `partial_docs`: 14 files
@@ -23,7 +23,7 @@
 ## Root Files
 - `README.md` (11404 bytes)
 - `AGENTS.md` (11558 bytes)
-- `orchestrator.yaml` (1692 bytes)
+- `orchestrator.yaml` (1681 bytes)
 - `database_optimized.py` (106480 bytes)
 - `database_blobs.py` (4244 bytes)
 - `recover_transcripts.py` (59861 bytes)

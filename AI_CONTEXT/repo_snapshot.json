@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-05-14T09:35:53.382837+00:00",
+  "generated_at": "2026-05-14T10:50:33.314778+00:00",
   "repo_root": "/media/harry/DATA120B/GIT/YOUTUBE",
-  "file_count": 272,
+  "file_count": 274,
   "root_files": [
     "README.md",
     "AGENTS.md",
@@ -96,6 +96,13 @@
       "mtime": "2026-05-14T02:16:27.826692+00:00",
       "is_symlink": false,
       "sha256": "76ddf97753427a8ae55be221473deadfefd751b47fd9e7d38107803e3f173393"
+    },
+    {
+      "path": "diet_db.py",
+      "size": 4116,
+      "mtime": "2026-05-14T09:59:25.972302+00:00",
+      "is_symlink": false,
+      "sha256": "e5f749d1ad7b171fdafa30aefbc9966bdbaf06bd6b08fe25ca2300ababe5fae1"
     },
     {
       "path": "docs/CHANNEL_SOURCE_REPAIR.md",
@@ -407,10 +414,10 @@
     },
     {
       "path": "orchestrator.yaml",
-      "size": 1692,
-      "mtime": "2026-05-14T09:23:23.231529+00:00",
+      "size": 1681,
+      "mtime": "2026-05-14T09:44:59.892303+00:00",
       "is_symlink": false,
-      "sha256": "bcd72e4b8e0e229a2a72d63c2d7c421679f4f9680ac491113e413806b93f221a"
+      "sha256": "a3d9fa6cee238a6dba33f3af757e418e1cb661601236f7794be3fa8bf1ef0f58"
     },
     {
       "path": "orchestrator/__init__.py",
@@ -435,17 +442,17 @@
     },
     {
       "path": "orchestrator/daemon.py",
-      "size": 10908,
-      "mtime": "2026-05-14T09:23:12.058394+00:00",
+      "size": 13123,
+      "mtime": "2026-05-14T10:09:20.928446+00:00",
       "is_symlink": false,
-      "sha256": "b191c5e053dcbd5a69f6e7af2ced84eae2407088d3a57db9c59bad4971fc6241"
+      "sha256": "23deecb628e1c455c9af8811518b604f4996f9d5d0f7bf54f80b6e133b9c5b23"
     },
     {
       "path": "orchestrator/db_queries.py",
-      "size": 9280,
-      "mtime": "2026-05-14T09:21:01.216154+00:00",
+      "size": 12486,
+      "mtime": "2026-05-14T10:08:28.671706+00:00",
       "is_symlink": false,
-      "sha256": "847ef33a19efa17515e1506bc018f6e585f91ffc378de6e77f3092adf258b360"
+      "sha256": "a9c3c5b86444f7247831a21ec1aa892394fbc9f90c2901467682d93ad7802992"
     },
     {
       "path": "orchestrator/dispatcher.py",
@@ -456,38 +463,38 @@
     },
     {
       "path": "orchestrator/error_analyzer.py",
-      "size": 8781,
-      "mtime": "2026-05-14T09:21:42.422472+00:00",
+      "size": 9749,
+      "mtime": "2026-05-14T09:43:06.141062+00:00",
       "is_symlink": false,
-      "sha256": "32080058cb05b227f56a678b7ef8a7675c3e195bdcda2746245aef6a6f476515"
+      "sha256": "af7a0527374e6dbf31c054c16d046a39f3a29e9b89bd5315aed4a3c26c506a24"
     },
     {
       "path": "orchestrator/planner.py",
-      "size": 3169,
-      "mtime": "2026-05-14T09:21:15.458256+00:00",
+      "size": 4406,
+      "mtime": "2026-05-14T10:08:14.765512+00:00",
       "is_symlink": false,
-      "sha256": "f3b4fa67591ec0da40867b5914f5383a1d5aff8291655a78a9695c19a24714c8"
+      "sha256": "e729c53ef32f45de7204e091a25c07136711f72a007c904d36923deb4d675f14"
     },
     {
       "path": "orchestrator/reports.py",
-      "size": 7087,
-      "mtime": "2026-05-14T09:24:26.163364+00:00",
+      "size": 10805,
+      "mtime": "2026-05-14T10:09:44.649786+00:00",
       "is_symlink": false,
-      "sha256": "b487a65256867d120794a6bcbca1e6cf6dfdd88c7932e78b44a11527f34550d8"
+      "sha256": "80dc696fb86fc5d3a82431c36095954ba4d0ab1016c4846e49063d9fa74030f6"
     },
     {
       "path": "orchestrator/safety.py",
-      "size": 8661,
-      "mtime": "2026-05-14T09:20:36.740000+00:00",
+      "size": 12378,
+      "mtime": "2026-05-14T10:28:21.750405+00:00",
       "is_symlink": false,
-      "sha256": "2734c960332e2f8c50e99ebab20fa4b7c52fbd4c20f0cdae477eebc8eb5acc17"
+      "sha256": "a600caf977c034afb76888e8ce6feff5c0783ba593370f5dc72b6bc7f0520bd7"
     },
     {
       "path": "orchestrator/state.py",
-      "size": 8627,
-      "mtime": "2026-05-14T09:20:11.976871+00:00",
+      "size": 11134,
+      "mtime": "2026-05-14T10:08:00.951320+00:00",
       "is_symlink": false,
-      "sha256": "d2ff2284592d744d50e07b4c66dab04bfb5da8c4ab19e33f7cc4f664705a12ff"
+      "sha256": "95a2b09763e48f53b3f510a7afed5c2a94f66c90788c6cc89e9ec139dcfd419a"
     },
     {
       "path": "partial_docs/API_METADATA_RESULTS.md",
@@ -1450,10 +1457,10 @@
     },
     {
       "path": "requirements.txt",
-      "size": 460,
-      "mtime": "2026-05-14T08:54:55.378186+00:00",
+      "size": 491,
+      "mtime": "2026-05-14T09:43:36.928918+00:00",
       "is_symlink": false,
-      "sha256": "e078839f22214137100882e9deef1e6288030d601f17f5656c62da20dad47635"
+      "sha256": "9a5b940b513598ef66789465afc316f5e241280405072d9252cb52a5a30469d9"
     },
     {
       "path": "robots.txt",
@@ -1632,10 +1639,10 @@
     },
     {
       "path": "scripts/orchestrator.sh",
-      "size": 4472,
-      "mtime": "2026-05-14T09:25:55.979754+00:00",
+      "size": 4592,
+      "mtime": "2026-05-14T10:09:57.543972+00:00",
       "is_symlink": false,
-      "sha256": "6462cd28866f971cb7846a58ca446a180bd6ee7bce340120e028224a628c3257"
+      "sha256": "c2bb24495c4cebe36e47e2b5df71c2bc334ecab37c28896d63034c19a2b2a1d0"
     },
     {
       "path": "scripts/refresh_stats.py",
@@ -1706,6 +1713,13 @@
       "mtime": "2026-05-14T08:55:41.063851+00:00",
       "is_symlink": false,
       "sha256": "4f0ded1a4fa27afdbe2f06fec712946666623ee440b042925a848fe6fc22e7c0"
+    },
+    {
+      "path": "scripts/smoke_orchestrator.sh",
+      "size": 2850,
+      "mtime": "2026-05-14T10:10:11.585176+00:00",
+      "is_symlink": false,
+      "sha256": "3f053f545a9c532923b7e3e527cdf9206ca1a1814290371b44a24c44e3a691ef"
     },
     {
       "path": "scripts/supervisor.sh",
@@ -1942,17 +1956,17 @@
   "db_files": [
     {
       "path": "db/youtube_transcripts.db",
-      "size": 1259417600,
-      "mtime": "2026-05-14T09:35:37.367370+00:00",
+      "size": 1054535680,
+      "mtime": "2026-05-14T10:30:18.014241+00:00",
       "is_symlink": false,
-      "sha256": "e75a561f05bd95a41e397a6874d33a39133f4fd223e83d0d86d5f2dac7efe026"
+      "sha256": "143fcad09b44729ca9e31f16890d1edd406f4a1e7fda1c0731ce7be784e296c1"
     },
     {
       "path": "db/youtube_transcripts_blobs.db",
-      "size": 467906560,
-      "mtime": "2026-05-14T08:28:34.465857+00:00",
+      "size": 468344832,
+      "mtime": "2026-05-14T10:32:34.431415+00:00",
       "is_symlink": false,
-      "sha256": "c9594d6bcf967e0f12b94b4ec1972fc8077b17c42f727db2bfe80e292721422f"
+      "sha256": "c53a833742fb500d297ea448d507d9c556df0a8f7f8d92b5fb1cd04c2575098a"
     },
     {
       "path": "db/youtube_cache.db",

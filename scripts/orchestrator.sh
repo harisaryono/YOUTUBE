@@ -59,7 +59,12 @@ case "$MODE" in
 
         # Write PID file
         echo $$ > "$PID_FILE"
-        trap 'rm -f "$PID_FILE"; echo "Orchestrator stopped."' EXIT
+        # Clean up PID file on exit, even if killed
+        cleanup() {
+            rm -f "$PID_FILE"
+            echo "Orchestrator stopped."
+        }
+        trap cleanup EXIT INT TERM HUP
 
         "$VENV_PYTHON" -m orchestrator.daemon run "$@"
 

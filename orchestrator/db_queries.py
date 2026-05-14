@@ -32,6 +32,101 @@ def count_pending_imports(state: OrchestratorState) -> int:
     return len(list(pending_dir.glob("*.csv"))) + len(list(pending_dir.glob("*.json")))
 
 
+def count_channels_need_discovery(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count channels that need discovery."""
+    conn = _connect(db_path)
+    interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM channels c
+           LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
+           WHERE COALESCE(crs.scan_enabled, 1) = 1
+             AND (crs.skip_reason IS NULL OR crs.skip_reason = '')
+             AND (
+                 c.updated_at IS NULL
+                 OR c.updated_at < datetime('now', '-' || ? || ' hours')
+             )""",
+        (interval_hours,),
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def count_videos_need_transcript(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count videos that need transcript download."""
+    conn = _connect(db_path)
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos v
+           WHERE v.transcript_downloaded = 0
+             AND (v.transcript_language IS NULL OR v.transcript_language != 'no_subtitle')
+             AND COALESCE(v.is_member_only, 0) = 0
+             AND COALESCE(v.is_short, 0) = 0
+             AND (v.transcript_retry_after IS NULL OR v.transcript_retry_after <= datetime('now'))"""
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def count_videos_need_resume(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count videos that have transcript but no resume."""
+    conn = _connect(db_path)
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_downloaded = 1
+             AND (summary_file_path IS NULL OR summary_file_path = '')
+             AND (summary_text IS NULL OR summary_text = '')"""
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def count_videos_need_format(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count videos that have transcript but no formatted version."""
+    conn = _connect(db_path)
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_downloaded = 1
+             AND (transcript_formatted_path IS NULL OR transcript_formatted_path = '')"""
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def count_videos_need_asr(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count videos with no_subtitle that could use ASR."""
+    max_duration = config.get("asr", {}).get("max_duration_minutes", 60) * 60
+    conn = _connect(db_path)
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt FROM videos
+           WHERE transcript_language = 'no_subtitle'
+             AND COALESCE(is_member_only, 0) = 0
+             AND COALESCE(is_short, 0) = 0
+             AND (duration IS NULL OR duration <= ?)""",
+        (max_duration,),
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
 def find_channels_need_discovery(
     config: dict[str, Any],
     state: OrchestratorState,

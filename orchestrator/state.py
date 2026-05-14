@@ -6,6 +6,7 @@ SQLite-based persistent state for cooldowns, events, and key-value store.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -72,6 +73,14 @@ class OrchestratorState:
 
             CREATE INDEX IF NOT EXISTS idx_cooldowns_until
                 ON orchestrator_cooldowns(cooldown_until);
+
+            CREATE TABLE IF NOT EXISTS orchestrator_locks (
+                lock_key TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
         conn.commit()
 
@@ -240,6 +249,64 @@ class OrchestratorState:
         )
         conn.commit()
         return cursor.rowcount
+
+    # --- Locks ---
+
+    def acquire_lock(self, lock_key: str, owner: str = "", ttl_seconds: int = 7200) -> bool:
+        """
+        Acquire a named lock. Returns True if acquired, False if already locked.
+        Locks auto-expire after ttl_seconds.
+        """
+        conn = self._connect()
+        # Clear expired locks first
+        conn.execute(
+            "DELETE FROM orchestrator_locks WHERE expires_at <= datetime('now')"
+        )
+        try:
+            conn.execute(
+                """INSERT INTO orchestrator_locks (lock_key, owner, expires_at)
+                   VALUES (?, ?, datetime('now', '+' || ? || ' seconds'))""",
+                (lock_key, owner or f"pid:{os.getpid()}", int(ttl_seconds)),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def release_lock(self, lock_key: str) -> None:
+        """Release a named lock."""
+        conn = self._connect()
+        conn.execute("DELETE FROM orchestrator_locks WHERE lock_key = ?", (lock_key,))
+        conn.commit()
+
+    def is_locked(self, lock_key: str) -> bool:
+        """Check if a lock is currently held (not expired)."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT 1 FROM orchestrator_locks WHERE lock_key = ? AND expires_at > datetime('now')",
+            (lock_key,),
+        ).fetchone()
+        return row is not None
+
+    def clear_expired_locks(self) -> int:
+        """Remove expired locks. Returns count removed."""
+        conn = self._connect()
+        cursor = conn.execute(
+            "DELETE FROM orchestrator_locks WHERE expires_at <= datetime('now')"
+        )
+        conn.commit()
+        return cursor.rowcount
+
+    def list_active_locks(self) -> list[dict[str, Any]]:
+        """List all currently active (non-expired) locks."""
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT lock_key, owner, expires_at, created_at
+               FROM orchestrator_locks
+               WHERE expires_at > datetime('now')
+               ORDER BY created_at ASC""",
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         if self._conn is not None:

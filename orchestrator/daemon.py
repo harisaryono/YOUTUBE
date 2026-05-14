@@ -37,15 +37,17 @@ def run_once(
     config: dict[str, Any],
     state: OrchestratorState,
     max_jobs: int = 5,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """
     Run one orchestrator cycle:
-    1. Clear expired cooldowns
+    1. Clear expired cooldowns and locks
     2. Check system health
-    3. Plan jobs
+    3. Plan jobs (batch model: 1 job = 1 stage)
     4. Safety gate each job
-    5. Dispatch safe jobs
-    6. Generate report
+    5. Acquire stage lock before dispatch
+    6. Dispatch safe jobs
+    7. Generate report
     """
     start_time = time.time()
     cycle_result: dict[str, Any] = {
@@ -53,17 +55,26 @@ def run_once(
         "jobs_dispatched": 0,
         "jobs_succeeded": 0,
         "jobs_failed": 0,
+        "jobs_deferred": 0,
         "duration_seconds": 0,
         "disk_free_gb": 0,
         "mem_available_mb": 0,
+        "dry_run": dry_run,
     }
 
-    # 1. Clear expired cooldowns
-    cleared = clear_all_cooldowns(state)
-    if cleared > 0:
+    # 1. Clear expired cooldowns and locks
+    cleared_cd = clear_all_cooldowns(state)
+    if cleared_cd > 0:
         state.add_event(
             event_type="cleanup",
-            message=f"Cleared {cleared} expired cooldown(s)",
+            message=f"Cleared {cleared_cd} expired cooldown(s)",
+            severity="info",
+        )
+    cleared_locks = state.clear_expired_locks()
+    if cleared_locks > 0:
+        state.add_event(
+            event_type="cleanup",
+            message=f"Cleared {cleared_locks} expired lock(s)",
             severity="info",
         )
 
@@ -98,7 +109,7 @@ def run_once(
                 severity="blocking",
             )
 
-    # 3. Plan jobs
+    # 3. Plan jobs (batch model)
     jobs = plan_jobs(config, state, max_jobs=max_jobs)
     cycle_result["jobs_planned"] = len(jobs)
 
@@ -112,15 +123,41 @@ def run_once(
         generate_report(config, state, cycle_result)
         return cycle_result
 
-    # 4. Safety gate + dispatch
+    # 4. Safety gate + lock + dispatch
     for job in jobs:
         decision = safety_gate_for_job(
             job, config, sys_health, provider_health, youtube_health, state
         )
 
         if decision.verdict == "RUN":
+            stage = job.get("stage", "")
+            lock_key = f"stage:{stage}"
+
+            # Check stage lock — prevent duplicate stage runs
+            if state.is_locked(lock_key):
+                state.add_event(
+                    event_type="deferred",
+                    message=f"{stage} already running (lock held), deferring",
+                    stage=stage,
+                    scope=job.get("scope", ""),
+                    severity="info",
+                )
+                cycle_result["jobs_deferred"] += 1
+                continue
+
+            if dry_run:
+                print(f"  [DRY-RUN] Would dispatch: {job.get('description', stage)}")
+                cycle_result["jobs_dispatched"] += 1
+                continue
+
+            # Acquire stage lock
+            state.acquire_lock(lock_key, ttl_seconds=7200)
+
             cycle_result["jobs_dispatched"] += 1
             result = dispatch_job(job, config, state)
+
+            # Release stage lock
+            state.release_lock(lock_key)
 
             if result.get("success"):
                 cycle_result["jobs_succeeded"] += 1
@@ -142,8 +179,8 @@ def run_once(
                             recommendation=classification.recommendation,
                         )
 
-
         elif decision.verdict == "WAIT":
+            cycle_result["jobs_deferred"] += 1
             state.add_event(
                 event_type="deferred",
                 message=f"Job deferred ({job.get('stage', '?')}): {decision.reason}",
@@ -191,6 +228,7 @@ def run_loop(
     config: dict[str, Any],
     state: OrchestratorState,
     max_jobs: int = 5,
+    dry_run: bool = False,
 ) -> None:
     """
     Run orchestrator continuously with adaptive sleep.
@@ -205,7 +243,7 @@ def run_loop(
         cycle_start = time.time()
 
         try:
-            result = run_once(config, state, max_jobs=max_jobs)
+            result = run_once(config, state, max_jobs=max_jobs, dry_run=dry_run)
         except KeyboardInterrupt:
             state.add_event(
                 event_type="shutdown",
@@ -226,8 +264,12 @@ def run_loop(
         jobs_dispatched = result.get("jobs_dispatched", 0)
         jobs_failed = result.get("jobs_failed", 0)
         jobs_planned = result.get("jobs_planned", 0)
+        jobs_deferred = result.get("jobs_deferred", 0)
 
-        if jobs_dispatched > 0:
+        if dry_run:
+            # Dry-run: check again soon
+            sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
+        elif jobs_dispatched > 0:
             # Work was done — check again soon
             sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
         elif jobs_failed > 0:
@@ -253,7 +295,8 @@ def run_loop(
         state.add_event(
             event_type="sleep",
             message=f"Sleeping {int(actual_sleep)}s (cycle took {cycle_duration:.1f}s, "
-                    f"planned={jobs_planned}, dispatched={jobs_dispatched}, failed={jobs_failed})",
+                    f"planned={jobs_planned}, dispatched={jobs_dispatched}, "
+                    f"deferred={jobs_deferred}, failed={jobs_failed})",
             severity="info",
         )
 
@@ -289,6 +332,11 @@ def main() -> None:
         choices=["safe", "normal", "fast"],
         help="Override profile from config",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would run without dispatching anything",
+    )
 
     args = parser.parse_args()
 
@@ -301,16 +349,19 @@ def main() -> None:
     state = OrchestratorState()
 
     if args.mode == "once":
-        result = run_once(config, state, max_jobs=args.max_jobs)
+        result = run_once(config, state, max_jobs=args.max_jobs, dry_run=args.dry_run)
         print(f"Cycle complete: {result.get('jobs_dispatched', 0)} dispatched, "
               f"{result.get('jobs_succeeded', 0)} succeeded, "
-              f"{result.get('jobs_failed', 0)} failed "
+              f"{result.get('jobs_failed', 0)} failed, "
+              f"{result.get('jobs_deferred', 0)} deferred "
               f"({result.get('duration_seconds', 0):.1f}s)")
 
     elif args.mode == "run":
         print(f"Orchestrator starting (profile: {config.get('profile', 'safe')})")
+        if args.dry_run:
+            print("⚠️  DRY-RUN MODE — no jobs will actually run")
         print("Press Ctrl+C to stop.")
-        run_loop(config, state, max_jobs=args.max_jobs)
+        run_loop(config, state, max_jobs=args.max_jobs, dry_run=args.dry_run)
 
     elif args.mode == "status":
         from .reports import get_latest_report

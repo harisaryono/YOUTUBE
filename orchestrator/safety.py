@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,41 @@ class SafetyDecision:
         return cls("REPORT", reason, recommendation=recommendation)
 
 
+# --- Helpers ---
+
+def _is_idle_hours(config: dict[str, Any]) -> bool:
+    """Check if current time (Asia/Jakarta) falls within idle hours."""
+    idle = config.get("format", {}).get("idle_hours", {})
+    start_str = idle.get("start", "22:00")
+    end_str = idle.get("end", "05:00")
+
+    try:
+        # Current time in Asia/Jakarta (UTC+7)
+        now = datetime.now(timezone.utc)
+        jakarta_hour = (now.hour + 7) % 24
+        jakarta_min = now.minute
+
+        start_parts = start_str.split(":")
+        end_parts = end_str.split(":")
+        start_h = int(start_parts[0])
+        start_m = int(start_parts[1]) if len(start_parts) > 1 else 0
+        end_h = int(end_parts[0])
+        end_m = int(end_parts[1]) if len(end_parts) > 1 else 0
+
+        current_minutes = jakarta_hour * 60 + jakarta_min
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m
+
+        if start_minutes <= end_minutes:
+            # e.g. 05:00 - 22:00
+            return start_minutes <= current_minutes <= end_minutes
+        else:
+            # e.g. 22:00 - 05:00 (overnight)
+            return current_minutes >= start_minutes or current_minutes <= end_minutes
+    except (ValueError, IndexError):
+        return True  # If config is malformed, allow
+
+
 # --- Health Checkers ---
 
 def check_system_health(config: dict[str, Any]) -> SystemHealth:
@@ -155,12 +191,34 @@ def check_provider_health(config: dict[str, Any], state: OrchestratorState) -> P
         accounts = coordinator_status_accounts(include_inactive=False)
         health.coordinator_available = True
         health.total_leases = len(accounts)
-        health.available_leases = sum(1 for a in accounts if a.get("leaseable"))
+        # leaseable=None means account exists but status unknown — treat as available
+        health.available_leases = sum(
+            1 for a in accounts
+            if a.get("leaseable") is None or a.get("leaseable") is True
+        )
         state.set("coordinator_last_ok", "1")
     except ImportError:
-        # Fallback: check via state
-        coordinator_ok = state.get("coordinator_last_ok", "0")
-        health.coordinator_available = coordinator_ok == "1"
+        # Fallback: try direct HTTP health check
+        try:
+            import urllib.request
+            import json as _json
+            req = urllib.request.Request(
+                "http://8.215.77.132:8788/health",
+                method="GET",
+                headers={"Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = _json.loads(resp.read().decode())
+                health.coordinator_available = True
+                health.total_leases = data.get("total_accounts", 0)
+                health.available_leases = data.get("available_accounts", 0)
+                state.set("coordinator_last_ok", "1")
+        except Exception as e:
+            # Fallback: check via state
+            coordinator_ok = state.get("coordinator_last_ok", "0")
+            health.coordinator_available = coordinator_ok == "1"
+            if not health.coordinator_available:
+                health.errors.append(f"Coordinator unavailable: {e}")
     except Exception as e:
         health.coordinator_available = False
         state.set("coordinator_last_ok", "0")
@@ -177,7 +235,6 @@ def check_provider_health(config: dict[str, Any], state: OrchestratorState) -> P
     return health
 
 
-
 def check_youtube_health(config: dict[str, Any], state: OrchestratorState) -> YouTubeHealth:
     """Check YouTube cooldown status."""
     health = YouTubeHealth()
@@ -188,11 +245,6 @@ def check_youtube_health(config: dict[str, Any], state: OrchestratorState) -> Yo
         health.cooldown_reason = cd["reason"]
         health.cooldown_until = cd["cooldown_until"]
         health.errors.append(f"YouTube cooldown: {cd['reason']} until {cd['cooldown_until']}")
-
-    # Check channel-specific cooldowns
-    for cd in state.list_active_cooldowns():
-        if cd["scope"].startswith("channel:"):
-            pass  # Channel cooldowns are checked per-job, not globally
 
     health.consecutive_hard_blocks = state.get_int("youtube_consecutive_hard_blocks", 0)
 
@@ -238,8 +290,8 @@ def safety_gate_for_job(
                 recommendation="Wait for YouTube cooldown to expire",
             )
 
-        # Channel-specific cooldown
-        if scope and state.is_cooldown_active(scope):
+        # Channel-specific cooldown (only if scope is a channel)
+        if scope and scope.startswith("channel:") and state.is_cooldown_active(scope):
             cd = state.get_cooldown(scope)
             return SafetyDecision.wait(
                 f"Channel cooldown: {cd['reason']}",
@@ -258,13 +310,30 @@ def safety_gate_for_job(
                 recommendation="Reduce workers or wait for other jobs to finish",
             )
 
-        # Provider check
+        # Provider check — only warn, don't block.
+        # Lease acquisition is handled by the worker script itself (launch_resume_queue.py etc).
+        # Blocking here based on coordinator_status_accounts is unreliable because
+        # leaseable=None means "status unknown" not "unavailable".
         if config.get(stage, {}).get("require_lease", True):
             if not provider_health.coordinator_available:
                 return SafetyDecision.wait(
                     "Coordinator unavailable, cannot get provider lease",
                     cooldown_seconds=300,
                     recommendation="Check coordinator service",
+                )
+            if provider_health.available_leases == 0:
+                # Don't block — let the worker script try to acquire.
+                # Just log a warning via the report.
+                pass
+
+    if stage == "format":
+        # Idle hours check for format
+        if config.get("format", {}).get("prefer_idle_hours", False):
+            if not _is_idle_hours(config):
+                return SafetyDecision.wait(
+                    "Format only runs during idle hours (22:00-05:00 Asia/Jakarta)",
+                    cooldown_seconds=1800,
+                    recommendation="Schedule format jobs during night hours",
                 )
 
     if stage == "asr":

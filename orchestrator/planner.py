@@ -1,5 +1,6 @@
 """
-Planner — Find and prioritize jobs that need to be done.
+Planner — Find and prioritize batch jobs across all stages.
+1 job = 1 batch per stage per cycle (not 1 job per video).
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from .state import OrchestratorState
 from . import db_queries
 
 
-# Priority order for job types
+# Priority order for job types (lower = higher priority)
 JOB_PRIORITY = [
     "import_pending",   # 0 — highest
     "discovery",        # 1
@@ -27,8 +28,9 @@ def plan_jobs(
     max_jobs: int = 10,
 ) -> list[dict[str, Any]]:
     """
-    Find and prioritize jobs across all stages.
-    Returns a list of job dicts sorted by priority.
+    Find and prioritize batch jobs across all stages.
+    Returns at most `max_jobs` batch jobs, sorted by priority.
+    Each job represents one batch of work for one stage.
     """
     jobs: list[dict[str, Any]] = []
 
@@ -39,64 +41,82 @@ def plan_jobs(
             "stage": "import_pending",
             "scope": "global",
             "priority": 0,
+            "limit": 100,
             "description": f"Import {pending_count} pending update(s)",
             "count": pending_count,
         })
 
-    # 2. Discovery
-    discovery_jobs = db_queries.find_channels_need_discovery(
-        config, state, limit=20
-    )
+    # 2. Discovery — max 1 batch per cycle
+    discovery_count = db_queries.count_channels_need_discovery(config, state)
+    if discovery_count > 0:
+        jobs.append({
+            "stage": "discovery",
+            "scope": "youtube",
+            "priority": 1,
+            "limit": 1,
+            "description": f"Discover {discovery_count} channel(s) needing refresh",
+            "count": discovery_count,
+        })
 
-    for j in discovery_jobs:
-        j["priority"] = 1
-        j["description"] = f"Discover channel {j.get('channel_name', j.get('channel_id', '?'))}"
-    jobs.extend(discovery_jobs)
+    # 3. Transcript — max 1 batch per cycle
+    transcript_count = db_queries.count_videos_need_transcript(config, state)
+    if transcript_count > 0:
+        batch_limit = config.get("youtube", {}).get("batch_limit", 20)
+        jobs.append({
+            "stage": "transcript",
+            "scope": "youtube",
+            "priority": 2,
+            "limit": batch_limit,
+            "description": f"Transcript up to {batch_limit} pending videos ({transcript_count} total pending)",
+            "count": transcript_count,
+        })
 
-    # 3. Transcript
-    transcript_jobs = db_queries.find_videos_need_transcript(
-        config, state, limit=20
-    )
-    for j in transcript_jobs:
-        j["priority"] = 2
-        j["description"] = f"Transcript {j.get('video_id', '?')} — {j.get('title', '')[:60]}"
-    jobs.extend(transcript_jobs)
-
-    # 4. Resume
+    # 4. Resume — max 1 batch per cycle
     if config.get("resume", {}).get("enabled", True):
-        resume_jobs = db_queries.find_videos_need_resume(
-            config, state, limit=30
-        )
-        for j in resume_jobs:
-            j["priority"] = 3
-            j["description"] = f"Resume {j.get('video_id', '?')} — {j.get('title', '')[:60]}"
-        jobs.extend(resume_jobs)
+        resume_count = db_queries.count_videos_need_resume(config, state)
+        if resume_count > 0:
+            batch_limit = config.get("resume", {}).get("batch_limit", 20)
+            jobs.append({
+                "stage": "resume",
+                "scope": "provider",
+                "priority": 3,
+                "limit": batch_limit,
+                "description": f"Resume up to {batch_limit} videos ({resume_count} total pending)",
+                "count": resume_count,
+            })
 
-    # 5. Format
+    # 5. Format — max 1 batch per cycle
     if config.get("format", {}).get("enabled", True):
-        format_jobs = db_queries.find_videos_need_format(
-            config, state, limit=30
-        )
-        for j in format_jobs:
-            j["priority"] = 4
-            j["description"] = f"Format {j.get('video_id', '?')} — {j.get('title', '')[:60]}"
-        jobs.extend(format_jobs)
+        format_count = db_queries.count_videos_need_format(config, state)
+        if format_count > 0:
+            batch_limit = config.get("format", {}).get("batch_limit", 20)
+            jobs.append({
+                "stage": "format",
+                "scope": "global",
+                "priority": 4,
+                "limit": batch_limit,
+                "description": f"Format up to {batch_limit} videos ({format_count} total pending)",
+                "count": format_count,
+            })
 
-    # 6. ASR — untuk video no_subtitle
+    # 6. ASR — max 1 batch per cycle
     if config.get("asr", {}).get("enabled", False):
-        asr_jobs = db_queries.find_videos_need_asr(
-            config, state, limit=3
-        )
-
-        for j in asr_jobs:
-            j["priority"] = 5
-            j["description"] = f"ASR {j.get('video_id', '?')} — {j.get('title', '')[:60]}"
-        jobs.extend(asr_jobs)
+        asr_count = db_queries.count_videos_need_asr(config, state)
+        if asr_count > 0:
+            batch_limit = config.get("asr", {}).get("batch_limit", 3)
+            jobs.append({
+                "stage": "asr",
+                "scope": "global",
+                "priority": 5,
+                "limit": batch_limit,
+                "description": f"ASR up to {batch_limit} videos ({asr_count} total pending)",
+                "count": asr_count,
+            })
 
     # Sort by priority (lower = higher priority)
-    jobs.sort(key=lambda j: (j.get("priority", 99), j.get("id", 0)))
+    jobs.sort(key=lambda j: (j.get("priority", 99), j.get("stage", "")))
 
-    # Limit
+    # Limit to max_jobs
     return jobs[:max_jobs]
 
 
