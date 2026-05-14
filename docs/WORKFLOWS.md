@@ -189,10 +189,15 @@ Lease/provider:
 - ASR memakai lease coordinator.
 - Provider aktif saat ini bisa Groq Whisper atau NVIDIA Whisper sesuai lease yang tersedia.
 - Groq tetap lewat HTTP OpenAI-compatible, sedangkan NVIDIA sekarang memakai Riva gRPC offline recognition sesuai tutorial NVIDIA.
+- NVIDIA ASR memakai model Riva terpisah dari Groq:
+  - `ASR_MODEL_NVIDIA_RIVA=whisper-large-v3-multi-asr-offline`
+  - `ASR_NVIDIA_FORCE_MODEL=0` kecuali ingin memaksa `RecognitionConfig.model`
 - Variabel penting untuk NVIDIA:
   - `NVIDIA_RIVA_SERVER` default `grpc.nvcf.nvidia.com:443`
   - `NVIDIA_RIVA_FUNCTION_ID` default `b702f636-f60c-4a3d-a6f4-f3568c13bd7d`
   - `NVIDIA_RIVA_USE_SSL=1`
+- Saat Groq kena `429`, worker boleh fallback ke NVIDIA untuk sisa run, lalu mengirim provider event dengan `reset_at` supaya coordinator mem-block Groq lintas run sampai cooldown habis.
+- `audio_download` dan `ASR` tetap dipisah: download audio menyentuh YouTube, ASR hanya membaca audio lokal.
 
 Chunking:
 - audio panjang dipecah per chunk.

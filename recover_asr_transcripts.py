@@ -32,6 +32,7 @@ import threading
 import wave
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -133,6 +134,11 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off", "n"}:
         return False
     return default
+
+
+def _utc_iso_after_seconds(seconds: int) -> str:
+    seconds = max(1, int(seconds or 0))
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 
 def _slug(value: str) -> str:
@@ -504,7 +510,12 @@ class ASRPipeline:
     def _build_provider_configs(self) -> dict[str, ProviderConfig]:
         configs: dict[str, ProviderConfig] = {}
         groq_model = str(os.getenv("ASR_MODEL_GROQ") or self.args.model or "whisper-large-v3").strip()
-        nvidia_model = str(os.getenv("ASR_MODEL_NVIDIA") or self.args.model or "whisper-large-v3").strip()
+        nvidia_model = str(
+            os.getenv("ASR_MODEL_NVIDIA_RIVA")
+            or os.getenv("ASR_MODEL_NVIDIA")
+            or getattr(self.args, "nvidia_model", "")
+            or "whisper-large-v3-multi-asr-offline"
+        ).strip()
         groq_base = str(os.getenv("GROQ_ASR_BASE_URL") or DEFAULT_GROQ_BASE_URL).strip()
         nvidia_base = str(os.getenv("NVIDIA_ASR_BASE_URL") or DEFAULT_NVIDIA_BASE_URL).strip()
         configs["groq"] = ProviderConfig(name="groq", base_url=groq_base, model=groq_model)
@@ -558,22 +569,25 @@ class ASRPipeline:
 
     def _acquire_provider_lease(self, provider_name: str, provider_cfg: ProviderConfig) -> ProviderLease:
         rows = self._refresh_coordinator_status()
-        matching_ids: list[int] = []
-        fallback_ids: list[int] = []
+        idle_matching_ids: list[int] = []
+        idle_fallback_ids: list[int] = []
+        busy_matching_ids: list[int] = []
+        busy_fallback_ids: list[int] = []
         for row in rows:
             if str(row.get("provider") or "").strip().lower() != provider_name:
                 continue
             model_name = str(row.get("runtime_model_name") or row.get("default_model_name") or row.get("model_name") or "").strip()
-            if row.get("leaseable") is False:
-                continue
             try:
                 account_id = int(row.get("provider_account_id") or 0)
             except Exception:
                 continue
-            fallback_ids.append(account_id)
+            state = str(row.get("state") or "").strip().lower()
+            is_idle = state == "idle" or row.get("leaseable") is True
             if model_name and model_name == provider_cfg.model:
-                matching_ids.append(account_id)
-        eligible = matching_ids or fallback_ids or None
+                (idle_matching_ids if is_idle else busy_matching_ids).append(account_id)
+            else:
+                (idle_fallback_ids if is_idle else busy_fallback_ids).append(account_id)
+        eligible = idle_matching_ids or idle_fallback_ids or busy_matching_ids or busy_fallback_ids or None
         leases = coordinator_acquire_accounts(
             provider=provider_name,
             model_name=provider_cfg.model,
@@ -704,17 +718,18 @@ class ASRPipeline:
         error_text = str(attempt.error_text or "").strip()
         lower = error_text.lower()
         if provider_name == "groq":
-            if (
-                attempt.status_code == 429
-                and (
-                    "asph" in lower
-                    or "seconds of audio per hour" in lower
-                    or "rate limit" in lower
-                    or "too many requests" in lower
-                )
-            ):
+            if attempt.status_code == 429:
                 return True, self.groq_asph_cooldown_seconds, "Groq ASPH/rate limit"
         if provider_name == "nvidia":
+            if (
+                "model" in lower
+                and (
+                    "not available on server" in lower
+                    or "invalid argument" in lower
+                    or "unavailable" in lower
+                )
+            ):
+                return True, None, "NVIDIA ASR model unavailable"
             if (
                 "ssleoferror" in lower
                 or "ssl" in lower
@@ -724,6 +739,14 @@ class ASRPipeline:
             ):
                 return True, None, "NVIDIA SSL/TLS transport error"
         return False, None, ""
+
+    def _provider_event_reason(self, provider_name: str, attempt: TranscriptionAttempt) -> str:
+        provider_name = str(provider_name or "").strip().lower()
+        error_text = str(attempt.error_text or "").strip()
+        if provider_name == "groq" and attempt.status_code == 429:
+            base_reason = error_text or "Groq 429 rate limit"
+            return f"reset_at={_utc_iso_after_seconds(self.groq_asph_cooldown_seconds)}; {base_reason}"
+        return error_text
 
     def _acquire_postprocess_lease(self) -> ProviderLease:
         provider_name = self.postprocess_provider
@@ -848,14 +871,47 @@ class ASRPipeline:
             recent_texts.append((int(entry.start_ms), int(entry.end_ms), norm))
         return deduped
 
+    def _trim_overlap_with_previous(self, previous_text: str, current_text: str) -> str:
+        previous_words = [word for word in _clean_text(previous_text).split() if word]
+        current_words = [word for word in _clean_text(current_text).split() if word]
+        if not previous_words or not current_words:
+            return _clean_text(current_text)
+
+        def norm_token(token: str) -> str:
+            return re.sub(r"^\W+|\W+$", "", token).lower()
+
+        prev_norm = [norm_token(word) for word in previous_words]
+        curr_norm = [norm_token(word) for word in current_words]
+        max_overlap = min(len(prev_norm), len(curr_norm), 24)
+        overlap = 0
+        for size in range(max_overlap, 2, -1):
+            if prev_norm[-size:] == curr_norm[:size]:
+                overlap = size
+                break
+        if overlap <= 0:
+            return _clean_text(current_text)
+
+        trimmed = " ".join(current_words[overlap:]).strip()
+        return _clean_text(trimmed)
+
     def _render_timestamp_entries(self, entries: list[TranscriptEntry]) -> str:
         lines: list[str] = []
+        previous_text = ""
+        previous_end_ms = -1
+        overlap_window_ms = max(2_000, self.overlap_seconds * 1000 + 1_500)
         for entry in entries:
             ts = _format_youtube_timestamp(int(entry.start_ms))
             text = _clean_text(entry.text)
             if not text:
                 continue
+            if previous_text and previous_end_ms >= 0:
+                if int(entry.start_ms) <= previous_end_ms + overlap_window_ms:
+                    text = self._trim_overlap_with_previous(previous_text, text)
+            if not text:
+                continue
             lines.append(f"{ts}  {text}")
+            previous_text = text
+            previous_end_ms = int(entry.end_ms)
         return "\n".join(lines).strip()
 
     def _build_postprocess_prompt(self, transcript_text: str, *, video_id: str, title: str, language: str) -> str:
@@ -971,6 +1027,9 @@ class ASRPipeline:
             "--video-workers",
             "1",
         ]
+        nvidia_model = str(getattr(self.args, "nvidia_model", "") or "").strip()
+        if nvidia_model:
+            cmd.extend(["--nvidia-model", nvidia_model])
         if self.enable_postprocess:
             cmd.append("--postprocess")
         return cmd
@@ -1037,6 +1096,9 @@ class ASRPipeline:
 
         self._combine_worker_reports(report_paths)
         return 0 if all(code == 0 for code in exit_codes) else 1
+
+    def _is_success_status(self, status: str) -> bool:
+        return str(status or "").strip().lower() in {"done", "audio_cached", "audio_downloaded"}
 
     def _split_timestamped_transcript(self, transcript_text: str, *, max_chars: int | None = None, max_lines: int | None = None) -> list[str]:
         max_chars = max_chars or self.postprocess_max_chars
@@ -1593,6 +1655,9 @@ class ASRPipeline:
             return "multi"
         return language
 
+    def _nvidia_force_model(self) -> bool:
+        return _env_bool("ASR_NVIDIA_FORCE_MODEL", False)
+
     def _transcribe_chunk_nvidia_grpc(self, lease: ProviderLease, audio_path: Path) -> TranscriptionAttempt:
         if RivaASRService is None or Auth is None or RecognitionConfig is None or AudioEncoding is None:
             raise RuntimeError(
@@ -1620,7 +1685,8 @@ class ASRPipeline:
         config.audio_channel_count = channels
         config.max_alternatives = 1
         config.enable_automatic_punctuation = True
-        config.model = lease.model_name
+        if self._nvidia_force_model() and lease.model_name:
+            config.model = lease.model_name
         config.language_code = self._nvidia_riva_language_code()
         if add_audio_file_specs_to_config is not None:
             try:
@@ -1669,6 +1735,7 @@ class ASRPipeline:
         if lease.provider == "nvidia" and RivaASRService is not None and Auth is not None and RecognitionConfig is not None:
             return self._transcribe_chunk_nvidia_grpc(lease, audio_path)
 
+        provider_name = str(lease.provider or "").strip().lower()
         data = self._build_request_data(lease)
         headers = self._provider_headers(lease)
 
@@ -1726,7 +1793,11 @@ class ASRPipeline:
                 )
 
             last_attempt_error = _parse_provider_error(response.status_code, payload, raw_text)
-            if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries:
+            if (
+                response.status_code in {429, 500, 502, 503, 504}
+                and attempt < self.max_retries
+                and not (provider_name == "groq" and response.status_code == 429)
+            ):
                 time.sleep(self.retry_delay * attempt)
                 continue
 
@@ -1736,7 +1807,11 @@ class ASRPipeline:
                     provider_account_id=lease.provider_account_id,
                     provider=lease.provider,
                     model_name=lease.model_name,
-                    reason=last_attempt_error,
+                    reason=self._provider_event_reason(provider_name, TranscriptionAttempt(
+                        ok=False,
+                        error_text=last_attempt_error,
+                        status_code=response.status_code,
+                    )),
                     source="recover_asr_transcripts",
                     http_status=response.status_code,
                     payload=payload,
@@ -2216,7 +2291,7 @@ class ASRPipeline:
             for idx, row in enumerate(rows, start=1):
                 try:
                     result = self.process_video(row)
-                    if result.get("status") != "done":
+                    if not self._is_success_status(result.get("status", "")):
                         failures += 1
                     writer.writerow(
                         {
@@ -2284,6 +2359,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio-dir", default="", help="Directory local untuk audio cache")
     parser.add_argument("--providers", default="groq,nvidia", help="Urutan provider fallback, contoh: groq,nvidia")
     parser.add_argument("--model", default="whisper-large-v3", help="Model default untuk Groq")
+    parser.add_argument("--nvidia-model", default="", help="Model NVIDIA Riva untuk ASR; default: whisper-large-v3-multi-asr-offline")
     parser.add_argument("--language", default="multi", help="Bahasa target: multi, auto, id, en, ar, ...")
     parser.add_argument("--chunk-seconds", type=int, default=45, help="Durasi chunk audio dalam detik")
     parser.add_argument("--overlap-seconds", type=int, default=2, help="Overlap antar chunk dalam detik")

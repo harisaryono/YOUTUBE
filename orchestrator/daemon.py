@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,14 @@ def _effective_max_jobs(config: dict[str, Any], requested: int) -> int:
     if requested and requested > 0:
         return requested
     return int(config.get("orchestrator", {}).get("max_jobs_per_cycle", 7) or 7)
+
+
+def _effective_parallel_jobs(config: dict[str, Any]) -> int:
+    value = config.get("orchestrator", {}).get("max_parallel_jobs", 2)
+    try:
+        return max(1, int(value or 2))
+    except (TypeError, ValueError):
+        return 2
 
 
 def _short_sleep_seconds(config: dict[str, Any]) -> int:
@@ -164,6 +173,7 @@ def run_once(
         "mem_available_mb": 0,
         "dry_run": dry_run,
     }
+    runnable_jobs: list[dict[str, Any]] = []
 
     # 1. Clear expired cooldowns and locks
     cleared_cd = clear_all_cooldowns(state)
@@ -233,89 +243,14 @@ def run_once(
         generate_report(config, state, cycle_result)
         return cycle_result
 
-    # 4. Safety gate + lock + dispatch
+    # 4. Safety gate + collect runnable jobs, then dispatch them in parallel
     for job in jobs:
         decision = safety_gate_for_job(
             job, config, sys_health, provider_health, youtube_health, state
         )
 
         if decision.verdict == "RUN":
-            stage = job.get("stage", "")
-            lock_key = f"stage:{stage}"
-
-            if dry_run:
-                print(f"  [DRY-RUN] Would dispatch: {job.get('description', stage)}")
-                cycle_result["jobs_dispatched"] += 1
-                continue
-
-            # Acquire stage lock and always release it, even if dispatch fails.
-            if not state.acquire_lock(lock_key, ttl_seconds=7200):
-                state.add_event(
-                    event_type="deferred",
-                    message=f"{stage} lock could not be acquired, deferring",
-                    stage=stage,
-                    scope=job.get("scope", ""),
-                    severity="info",
-                    reason_code="DEFER_STAGE_LOCKED",
-                )
-                cycle_result["jobs_deferred"] += 1
-                continue
-
-            cycle_result["jobs_dispatched"] += 1
-            result: dict[str, Any] = {
-                "success": False,
-                "error": "dispatch did not run",
-                "returncode": 1,
-            }
-            try:
-                result = dispatch_job(job, config, state)
-            except Exception as e:
-                result = {
-                    "success": False,
-                    "error": f"dispatch exception: {e}",
-                    "returncode": 1,
-                }
-            finally:
-                state.release_lock(lock_key)
-
-            if result.get("success"):
-                cycle_result["jobs_succeeded"] += 1
-                _maybe_update_adaptive_batch(config, state, stage, success=True, blocked=False)
-            else:
-                cycle_result["jobs_failed"] += 1
-                # Apply cooldown based on error
-                error_msg = result.get("error", result.get("stderr", ""))
-                blocked_failure = False
-                if error_msg:
-                    from .error_analyzer import classify_error
-
-                    classification = classify_error(error_msg, result.get("returncode", 0))
-                    blocked_failure = classification.cooldown_seconds > 0
-                    if classification.cooldown_seconds > 0:
-                        # Use suggested_scope from classification, fallback to job scope
-                        scope = classification.suggested_scope or job.get("scope", "global")
-                        state.set_cooldown(
-                            scope=scope,
-                            reason=classification.description,
-                            duration_seconds=classification.cooldown_seconds,
-                            severity=classification.severity,
-                            recommendation=classification.recommendation,
-                        )
-                    state.add_event(
-                        event_type="error",
-                        message=f"[{classification.error_type}] {classification.description}: {error_msg[:200]}",
-                        stage=stage,
-                        scope=job.get("scope", ""),
-                        severity=classification.severity,
-                        recommendation=classification.recommendation,
-                        reason_code=classification.error_type,
-                        payload={
-                            "returncode": result.get("returncode", 0),
-                            "error_type": classification.error_type,
-                            "cooldown_seconds": classification.cooldown_seconds,
-                        },
-                    )
-                _maybe_update_adaptive_batch(config, state, stage, success=False, blocked=blocked_failure)
+            runnable_jobs.append(job)
 
         elif decision.verdict == "WAIT":
             cycle_result["jobs_deferred"] += 1
@@ -355,6 +290,96 @@ def run_once(
                 severity="warning",
                 recommendation=decision.recommendation,
             )
+
+    def _execute_job(job: dict[str, Any]) -> dict[str, Any]:
+        stage = job.get("stage", "")
+        lock_key = f"stage:{stage}"
+        if not state.acquire_lock(lock_key, ttl_seconds=7200):
+            state.add_event(
+                event_type="deferred",
+                message=f"{stage} lock could not be acquired, deferring",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="info",
+                reason_code="DEFER_STAGE_LOCKED",
+            )
+            return {
+                "success": False,
+                "deferred": True,
+                "error": "stage lock could not be acquired",
+                "returncode": 1,
+            }
+        try:
+            return dispatch_job(job, config, state)
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"dispatch exception: {e}",
+                "returncode": 1,
+            }
+        finally:
+            state.release_lock(lock_key)
+
+    if dry_run:
+        for job in runnable_jobs:
+            stage = job.get("stage", "")
+            print(f"  [DRY-RUN] Would dispatch: {job.get('description', stage)}")
+        cycle_result["jobs_dispatched"] += len(runnable_jobs)
+    elif runnable_jobs:
+        parallel_jobs = min(len(runnable_jobs), _effective_parallel_jobs(config))
+        cycle_result["jobs_dispatched"] += len(runnable_jobs)
+        with ThreadPoolExecutor(max_workers=parallel_jobs) as executor:
+            future_map = {executor.submit(_execute_job, job): job for job in runnable_jobs}
+            for future in as_completed(future_map):
+                job = future_map[future]
+                stage = job.get("stage", "")
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = {
+                        "success": False,
+                        "error": f"dispatch exception: {e}",
+                        "returncode": 1,
+                    }
+                if result.get("deferred"):
+                    cycle_result["jobs_deferred"] += 1
+                    continue
+                if result.get("success"):
+                    cycle_result["jobs_succeeded"] += 1
+                    _maybe_update_adaptive_batch(config, state, stage, success=True, blocked=False)
+                    continue
+                cycle_result["jobs_failed"] += 1
+                error_msg = result.get("error", result.get("stderr", ""))
+                blocked_failure = False
+                if error_msg:
+                    from .error_analyzer import classify_error
+
+                    classification = classify_error(error_msg, result.get("returncode", 0))
+                    blocked_failure = classification.cooldown_seconds > 0
+                    if classification.cooldown_seconds > 0:
+                        scope = classification.suggested_scope or job.get("scope", "global")
+                        state.set_cooldown(
+                            scope=scope,
+                            reason=classification.description,
+                            duration_seconds=classification.cooldown_seconds,
+                            severity=classification.severity,
+                            recommendation=classification.recommendation,
+                        )
+                    state.add_event(
+                        event_type="error",
+                        message=f"[{classification.error_type}] {classification.description}: {error_msg[:200]}",
+                        stage=stage,
+                        scope=job.get("scope", ""),
+                        severity=classification.severity,
+                        recommendation=classification.recommendation,
+                        reason_code=classification.error_type,
+                        payload={
+                            "returncode": result.get("returncode", 0),
+                            "error_type": classification.error_type,
+                            "cooldown_seconds": classification.cooldown_seconds,
+                        },
+                    )
+                _maybe_update_adaptive_batch(config, state, stage, success=False, blocked=blocked_failure)
 
     # 5. Generate report
     cycle_result["duration_seconds"] = time.time() - start_time

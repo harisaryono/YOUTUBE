@@ -168,6 +168,9 @@ def run_audio_download(
     rate_limit_safe = config.get("audio_download", {}).get("yt_dlp_rate_limit_safe", True)
     env = os.environ.copy()
     env["ASR_AUDIO_DIR"] = _config_audio_dir(config)
+    nvidia_model = str(config.get("asr", {}).get("nvidia_model", "") or "").strip()
+    if nvidia_model:
+        env["ASR_MODEL_NVIDIA_RIVA"] = nvidia_model
 
     cmd = [
         "bash", str(script),
@@ -353,6 +356,12 @@ def run_asr(
     limit = job.get("limit", config.get("asr", {}).get("batch_limit", 20))
     env = os.environ.copy()
     env["ASR_AUDIO_DIR"] = _config_audio_dir(config)
+    groq_model = str(config.get("asr", {}).get("groq_model", "") or "").strip()
+    nvidia_model = str(config.get("asr", {}).get("nvidia_model", "") or "").strip()
+    if groq_model:
+        env["ASR_MODEL_GROQ"] = groq_model
+    if nvidia_model:
+        env["ASR_MODEL_NVIDIA_RIVA"] = nvidia_model
 
     cmd = ["bash", str(script), "--local-audio-only"]
     if video_id:

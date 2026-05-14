@@ -15,6 +15,8 @@ orchestrator:
   mode: work_conserving
   # Maximum stage batches per cycle when caller does not override.
   max_jobs_per_cycle: 7
+  # Maximum jobs that may run concurrently in one cycle.
+  max_parallel_jobs: 3
   # Sleep when there is still runnable work.
   short_sleep_seconds: 5
   # Sleep when all work is currently blocked or exhausted.
@@ -63,7 +65,7 @@ audio_download:
 resume:
   enabled: true
   max_workers: 4
-  batch_limit: 0
+  batch_limit: 100
   require_lease: true
   # Provider priority: nvidia_first | groq_first | auto
   provider_plan: nvidia_first
@@ -81,6 +83,8 @@ format:
 asr:
   # ASR untuk video no_subtitle — aktif
   enabled: true
+  groq_model: "whisper-large-v3"
+  nvidia_model: "whisper-large-v3-multi-asr-offline"
   max_video_workers: 2
   batch_limit: 20
   max_duration_minutes: 60

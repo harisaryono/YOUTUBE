@@ -72,6 +72,12 @@ def _merge_env(config: dict[str, Any], dotenv: dict[str, str]) -> dict[str, Any]
         config.setdefault("format", {})["max_workers"] = int(dotenv["FORMAT_MAX_WORKERS"])
 
     # ASR
+    if "ASR_MODEL_GROQ" in dotenv:
+        config.setdefault("asr", {})["groq_model"] = dotenv["ASR_MODEL_GROQ"]
+    if "ASR_MODEL_NVIDIA_RIVA" in dotenv:
+        config.setdefault("asr", {})["nvidia_model"] = dotenv["ASR_MODEL_NVIDIA_RIVA"]
+    elif "ASR_MODEL_NVIDIA" in dotenv:
+        config.setdefault("asr", {})["nvidia_model"] = dotenv["ASR_MODEL_NVIDIA"]
     if "ASR_REQUIRE_LOCAL_AUDIO" in dotenv:
         config.setdefault("asr", {})["require_local_audio"] = dotenv["ASR_REQUIRE_LOCAL_AUDIO"].strip().lower() in {"1", "true", "yes", "on"}
     if "ASR_DELETE_AUDIO_AFTER_SUCCESS" in dotenv:
@@ -94,6 +100,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
         "orchestrator": {
             "mode": "work_conserving",
             "max_jobs_per_cycle": 7,
+            "max_parallel_jobs": 3,
             "short_sleep_seconds": 5,
             "idle_sleep_seconds": 900,
             "youtube_backlog_boost_threshold": 500,
@@ -127,7 +134,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
         "resume": {
             "enabled": True,
             "max_workers": 4,
-            "batch_limit": 0,
+            "batch_limit": 100,
             "require_lease": True,
             "provider_plan": "nvidia_first",
         },
@@ -140,6 +147,8 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
         },
         "asr": {
             "enabled": True,
+            "groq_model": "whisper-large-v3",
+            "nvidia_model": "whisper-large-v3-multi-asr-offline",
             "max_video_workers": 2,
             "batch_limit": 20,
             "max_duration_minutes": 60,

@@ -32,6 +32,7 @@ TARGET_VIDEO_ID=""
 TARGET_CHANNEL_ID=""
 PROVIDERS_VALUE="groq,nvidia"
 MODEL_VALUE="whisper-large-v3"
+NVIDIA_MODEL_VALUE=""
 LANGUAGE_VALUE="multi"
 CHUNK_SECONDS_VALUE="45"
 OVERLAP_SECONDS_VALUE="2"
@@ -68,6 +69,10 @@ while [[ $# -gt 0 ]]; do
             MODEL_VALUE="$2"
             shift 2
             ;;
+        --nvidia-model)
+            NVIDIA_MODEL_VALUE="$2"
+            shift 2
+            ;;
         --language)
             LANGUAGE_VALUE="$2"
             shift 2
@@ -99,6 +104,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --channel-id ID       Warm cache for one channel"
             echo "  --providers LIST      Provider order, default: groq,nvidia"
             echo "  --model NAME          Default Whisper model for Groq, default: whisper-large-v3"
+            echo "  --nvidia-model NAME   NVIDIA Riva model, default: whisper-large-v3-multi-asr-offline"
             echo "  --language CODE       Language hint, default: multi"
             echo "  --chunk-seconds N     Chunk duration in seconds, default: 45"
             echo "  --overlap-seconds N   Chunk overlap in seconds, default: 2"
@@ -167,6 +173,9 @@ CMD_ARGS=(
     "--overlap-seconds" "$OVERLAP_SECONDS_VALUE"
     "--video-workers" "$VIDEO_WORKERS_VALUE"
 )
+if [ -n "$NVIDIA_MODEL_VALUE" ]; then
+    CMD_ARGS+=("--nvidia-model" "$NVIDIA_MODEL_VALUE")
+fi
 if [ -n "$CSV_FILE" ]; then
     CMD_ARGS+=("--csv" "$CSV_FILE")
 fi

@@ -32,6 +32,8 @@
 - GPT OSS 120B dipakai sebagai post-process hanya untuk transcript yang masih kecil; transcript panjang otomatis dilewati dan langsung memakai output timestamp mentah agar lebih cepat.
 - Default ASR sekarang tidak memakai post-process; GPT OSS hanya aktif kalau `--postprocess` dipilih eksplisit.
 - Mode `--video-workers 2` sudah lolos smoke parallel untuk 2 video nyata, dan report gabungan tetap menulis `postprocess_status=disabled` serta transcript raw timestamped ke DB + disk.
+- `recover_asr_transcripts.py --download-only` sekarang menghitung `audio_cached` / `audio_downloaded` sebagai sukses, jadi stage `audio_download` tidak lagi keluar 1 hanya karena audio sudah berhasil masuk cache.
+- NVIDIA ASR sekarang memakai model Riva terpisah dari model Groq; default pipeline name diset ke `whisper-large-v3-multi-asr-offline`, diekspos lewat `asr.nvidia_model` / `ASR_MODEL_NVIDIA_RIVA`, dan model NVIDIA yang tidak tersedia di server akan dinonaktifkan untuk sisa run agar fallback tidak macet berulang.
 
 ## Operational Notes
 - Dokumentasi utama sekarang dipusatkan di `DOCS_INDEX.md`; gunakan itu sebagai pintu masuk cepat sebelum membuka file lain.
@@ -46,6 +48,8 @@
   - stage sensitif YouTube hanya `discovery`, `transcript`, dan `audio_download`
   - stage lokal/provider tetap boleh jalan selama resource aman dan lease tersedia
   - `batch_limit` adalah ukuran potongan kerja, bukan batas total kerja harian
+  - `resume.batch_limit` sekarang finite (`100`) supaya satu batch tidak memonopoli satu cycle daemon terlalu lama
+  - daemon sekarang bisa menjalankan beberapa stage aman secara paralel dalam satu cycle, dengan pool parallel default `3`, supaya `transcript`, `audio_download`, dan `resume` bisa overlap
   - kalau batch habis dan masih ada backlog, orchestrator harus re-plan dan membuat batch baru
   - loop aggressiveness sekarang diturunkan ke `min_sleep_seconds: 5` agar re-plan cepat saat masih ada kerja yang aman
   - command `./scripts/orchestrator.sh explain` sekarang menampilkan inventori kerja, blocker, dan reason code defer aktif
@@ -219,6 +223,10 @@
   - Groq yang kena `ASPH 429` sekarang masuk cooldown lebih lama untuk sisa run, bukan diulang cepat pada chunk/video berikutnya.
   - NVIDIA yang memunculkan error TLS/SSL sekarang dimatikan untuk sisa run supaya tidak mengulang request yang pasti gagal.
   - Jika semua provider sedang cooldown/disabled, target langsung ditandai `retry_later` tanpa download audio lagi.
+
+- **2026-05-15 (Local)**: Groq `429` sekarang dipersist ke coordinator sebagai block lintas run.
+  - Saat Groq kena `429`, worker ASR tetap fallback ke NVIDIA untuk sisa run, lalu mengirim provider event dengan `reset_at` sehingga coordinator mem-block semua akun/model Groq yang aktif sampai cooldown habis.
+  - Ini mencegah run berikutnya kembali memilih Groq terlalu cepat setelah rate limit.
 
 - **2026-05-14 (Local)**: Menambahkan preflight lease untuk ASR supaya batch tidak download audio kalau lease kosong.
   - `recover_asr_transcripts.py` sekarang mencoba acquire lease sebelum `yt-dlp` download audio.

@@ -277,6 +277,24 @@ def parse_provider_quota_block(provider: str, reason: str) -> dict[str, Any] | N
     if provider_key in {"groq", "cerebras", "openrouter"}:
         match = TPD_RE.search(text)
         if not match:
+            low = text.lower()
+            if provider_key == "groq" and (
+                "429" in low
+                or "too many requests" in low
+                or "rate limit" in low
+                or "asph" in low
+                or "seconds of audio per hour" in low
+            ):
+                blocked_until = _extract_reset_time_iso(text)
+                if not blocked_until:
+                    blocked_until = (datetime.now().astimezone() + timedelta(hours=6)).isoformat()
+                return {
+                    "blocked_until": blocked_until,
+                    "limit": 0,
+                    "used": 0,
+                    "requested": 0,
+                    "code": "",
+                }
             return None
         limit, used, requested = (int(v) for v in match.groups())
         threshold = int(limit * 0.95)
