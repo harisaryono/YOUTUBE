@@ -19,8 +19,8 @@ Dokumen acuan utama sekarang dipusatkan di `docs/`:
 ```
 
 ## `docs/WORKFLOWS.md`
-- size: 8598 bytes
-- sha256: `65bc324a922e020c`
+- size: 9088 bytes
+- sha256: `6d6b3113de4a6bd5`
 ```text
 # Workflows
 
@@ -37,8 +37,8 @@ Dokumen ini adalah ringkasan operasional cepat untuk alur kerja repo `YOUTUBE`. 
 ```
 
 ## `docs/PROGRESS.md`
-- size: 31476 bytes
-- sha256: `ae57ed0e3c6d343f`
+- size: 36677 bytes
+- sha256: `73d81d22ec7b022d`
 ```text
 # RECOVERY PROGRESS
 
@@ -71,8 +71,8 @@ Current state:
 ```
 
 ## `scripts/README.md`
-- size: 5626 bytes
-- sha256: `56d3b6f603d9ff28`
+- size: 6207 bytes
+- sha256: `bed3978d95870103`
 ```text
 # Scripts Index
 
@@ -178,8 +178,8 @@ import time
 ```
 
 ## `flask_app/templates/video_detail.html`
-- size: 33242 bytes
-- sha256: `a3ab91fcf419ff94`
+- size: 33954 bytes
+- sha256: `f0516c3a4bd61f81`
 ```text
 {% extends "base.html" %}
 
@@ -187,17 +187,17 @@ import time
 
 {% block content %}
 <div class="container">
-    {% if previous_video %}
-    <a href="{{ url_for('video_detail', video_id=previous_video.video_id) }}"
-       class="channel-nav-button channel-nav-prev"
-       title="Prev: {{ previous_video.title }}">
-        <span class="channel-nav-label">Prev</span>
-        <span class="channel-nav-arrow"><i class="bi bi-chevron-right"></i></span>
+    {% if next_video %}
+    <a href="{{ url_for('video_detail', video_id=next_video.video_id) }}"
+       class="channel-nav-button channel-nav-next"
+       title="Next: {{ next_video.title }}">
+        <span class="channel-nav-arrow"><i class="bi bi-chevron-left"></i></span>
+        <span class="channel-nav-label">Next</span>
 ```
 
 ## `database_optimized.py`
-- size: 106503 bytes
-- sha256: `f61939d594378cd1`
+- size: 106459 bytes
+- sha256: `30f40659a1808ffc`
 ```text
 #!/usr/bin/env python3
 """
