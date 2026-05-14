@@ -4,6 +4,12 @@
 #   ./scripts/orchestrator.sh once          # Run one cycle
 #   ./scripts/orchestrator.sh run           # Run continuously
 #   ./scripts/orchestrator.sh status        # Show latest status
+#   ./scripts/orchestrator.sh active        # Show active jobs
+#   ./scripts/orchestrator.sh logs --job-id X --tail 100
+#   ./scripts/orchestrator.sh cancel --job-id X [--force]
+#   ./scripts/orchestrator.sh cancel-stage transcript
+#   ./scripts/orchestrator.sh cancel-group youtube
+#   ./scripts/orchestrator.sh reconcile     # Reconcile stale running jobs
 #   ./scripts/orchestrator.sh explain       # Explain why jobs are/aren't running
 #   ./scripts/orchestrator.sh report        # Show latest report JSON
 #   ./scripts/orchestrator.sh stop          # Stop running daemon (via PID file)
@@ -90,6 +96,42 @@ case "$MODE" in
         exec "$VENV_PYTHON" -m orchestrator.daemon status "$@"
         ;;
 
+    active)
+        exec "$VENV_PYTHON" -m orchestrator.daemon active "$@"
+        ;;
+
+    logs)
+        exec "$VENV_PYTHON" -m orchestrator.daemon logs "$@"
+        ;;
+
+    cancel)
+        exec "$VENV_PYTHON" -m orchestrator.daemon cancel "$@"
+        ;;
+
+    cancel-stage)
+        STAGE_NAME="${1:-}"
+        if [ -z "$STAGE_NAME" ]; then
+            echo "Usage: $0 cancel-stage <stage> [--force] [--grace-seconds N]" >&2
+            exit 1
+        fi
+        shift
+        exec "$VENV_PYTHON" -m orchestrator.daemon cancel --stage "$STAGE_NAME" "$@"
+        ;;
+
+    cancel-group)
+        GROUP_NAME="${1:-}"
+        if [ -z "$GROUP_NAME" ]; then
+            echo "Usage: $0 cancel-group <group> [--force] [--grace-seconds N]" >&2
+            exit 1
+        fi
+        shift
+        exec "$VENV_PYTHON" -m orchestrator.daemon cancel --group "$GROUP_NAME" "$@"
+        ;;
+
+    reconcile)
+        exec "$VENV_PYTHON" -m orchestrator.daemon reconcile "$@"
+        ;;
+
     explain)
         exec "$VENV_PYTHON" -m orchestrator.daemon explain "$@"
         ;;
@@ -125,12 +167,18 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {once|run|status|explain|report|stop} [options]"
+        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|explain|report|stop} [options]"
         echo ""
         echo "Commands:"
         echo "  once              Run one orchestrator cycle and exit"
         echo "  run               Run orchestrator continuously"
         echo "  status            Show daemon status and latest report"
+        echo "  active            Show active jobs"
+        echo "  logs              Tail a job log by job id"
+        echo "  cancel            Cancel one or more running jobs"
+        echo "  cancel-stage      Cancel all running jobs in a stage"
+        echo "  cancel-group      Cancel all running jobs in a group"
+        echo "  reconcile         Reconcile stale running jobs"
         echo "  explain           Explain current work inventory and blockers"
         echo "  report            Show latest report as JSON"
         echo "  stop              Stop running daemon"

@@ -520,6 +520,43 @@ class OrchestratorState:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        conn = self._connect()
+        row = conn.execute(
+            """
+            SELECT *
+            FROM orchestrator_active_jobs
+            WHERE job_id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_jobs(
+        self,
+        *,
+        status: str | None = None,
+        stage: str | None = None,
+        group_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        query = "SELECT * FROM orchestrator_active_jobs WHERE 1=1"
+        params: list[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if stage:
+            query += " AND stage = ?"
+            params.append(stage)
+        if group_name:
+            query += " AND group_name = ?"
+            params.append(group_name)
+        query += " ORDER BY started_at ASC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
     def count_running_total(self) -> int:
         conn = self._connect()
         row = conn.execute(

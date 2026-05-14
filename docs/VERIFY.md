@@ -78,6 +78,11 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] Resume worker tidak gagal cepat saat semua akun sementara sibuk; acquisition harus menunggu sampai lease tersedia lagi atau timeout yang dikonfigurasi.
 - [ ] Admin job tracking persisten di tabel `admin_jobs`, dan `/admin/data` menampilkan job terbaru walau `_bg_jobs` sudah kosong.
 - [ ] Job wrapper harus menulis `log_path` nyata ke `logs/<job_id>.log`, dan `/admin/data/jobs/<job_id>/log` harus bisa menampilkan isi log yang sama.
+- [ ] `./scripts/orchestrator.sh active` menampilkan job running beserta umur, slot, group, dan status hidup/stale.
+- [ ] `./scripts/orchestrator.sh logs --job-id <JOB_ID> --tail 100` menampilkan tail `stdout_stderr.log` dari job yang dipilih.
+- [ ] `./scripts/orchestrator.sh cancel --job-id <JOB_ID>` bisa menandai job running sebagai `cancelled` dan melepaskan lock.
+- [ ] `./scripts/orchestrator.sh cancel-stage <stage>` dan `cancel-group <group>` hanya menarget job running yang cocok.
+- [ ] `./scripts/orchestrator.sh reconcile` menandai job yang PID-nya sudah mati berdasarkan `exit_code.txt` atau log yang tersedia.
 - [ ] `recover_asr_transcripts.py --help` dan `scripts/asr.sh --help` berjalan tanpa error sintaks.
 - [ ] `iyo9VuY5dpg` smoke ASR selesai via lease coordinator dan menulis transcript final ke DB + disk.
 - [ ] Transcript panjang yang melewati threshold post-process harus tercatat `postprocess_status=skipped_long` dan tidak memanggil GPT OSS 120B.

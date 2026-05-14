@@ -240,6 +240,20 @@ Prinsip:
 - transcript, audio, resume, dan format dipilih dari backlog DB.
 - ASR memakai `--require-cached-audio` agar tidak diam-diam download ulang.
 
+## Orchestrator Control
+
+Tujuan:
+- memberi kontrol operasional atas job background yang sedang berjalan.
+
+Command utama:
+- `./scripts/orchestrator.sh active` untuk melihat job aktif.
+- `./scripts/orchestrator.sh logs --job-id <JOB_ID> --tail 100` untuk tail log job.
+- `./scripts/orchestrator.sh cancel --job-id <JOB_ID> [--force]` untuk cancel job tertentu.
+- `./scripts/orchestrator.sh cancel-stage <stage>` untuk cancel seluruh job running di satu stage.
+- `./scripts/orchestrator.sh cancel-group <group>` untuk cancel seluruh job running di satu group.
+- `./scripts/orchestrator.sh reconcile` untuk menutup job running yang PID-nya sudah mati.
+- Job cancel/reconcile menggunakan `orchestrator_active_jobs`, `exit_code.txt`, dan `stdout_stderr.log` sebagai source of truth.
+
 ## Urutan Praktis
 
 Kalau tujuan Anda tidak spesifik, pakai urutan ini:

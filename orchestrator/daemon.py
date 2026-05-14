@@ -7,10 +7,13 @@ Modes:
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import os
+import signal
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -169,6 +172,294 @@ def _read_exit_code(run_dir: str | Path) -> int | None:
         return int(path.read_text().strip())
     except Exception:
         return None
+
+
+def _parse_sqlite_datetime(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _job_age_seconds(row: dict[str, Any]) -> int:
+    started = _parse_sqlite_datetime(str(row.get("started_at") or ""))
+    updated = _parse_sqlite_datetime(str(row.get("updated_at") or ""))
+    stamp = started or updated
+    if stamp is None:
+        return 0
+    now = datetime.now(timezone.utc)
+    delta = now - stamp.astimezone(timezone.utc)
+    return max(0, int(delta.total_seconds()))
+
+
+def _format_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h{minutes:02d}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d{hours:02d}h"
+
+
+def _shorten_text(value: str, width: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= width:
+        return text
+    if width <= 3:
+        return text[:width]
+    return text[: width - 3] + "..."
+
+
+def _job_runtime_state(row: dict[str, Any]) -> str:
+    pid = int(row.get("pid") or 0)
+    if _pid_is_alive(pid):
+        return "alive"
+    return "stale"
+
+
+def _tail_file(path: Path, tail_lines: int) -> list[str]:
+    if tail_lines <= 0:
+        tail_lines = 100
+    lines: deque[str] = deque(maxlen=tail_lines)
+    with path.open("r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            lines.append(line.rstrip("\n"))
+    return list(lines)
+
+
+def _job_matches_filters(
+    row: dict[str, Any],
+    *,
+    job_id: str | None = None,
+    stage: str | None = None,
+    group_name: str | None = None,
+) -> bool:
+    if job_id and str(row.get("job_id") or "") != job_id:
+        return False
+    if stage and str(row.get("stage") or "") != stage:
+        return False
+    if group_name and str(row.get("group_name") or "") != group_name:
+        return False
+    return True
+
+
+def _select_running_jobs(
+    state: OrchestratorState,
+    *,
+    job_id: str | None = None,
+    stage: str | None = None,
+    group_name: str | None = None,
+) -> list[dict[str, Any]]:
+    jobs = state.list_running_jobs()
+    return [job for job in jobs if _job_matches_filters(job, job_id=job_id, stage=stage, group_name=group_name)]
+
+
+def _select_jobs_for_logs(
+    state: OrchestratorState,
+    *,
+    job_id: str,
+) -> dict[str, Any] | None:
+    return state.get_job(job_id)
+
+
+def _print_active_jobs(jobs: list[dict[str, Any]]) -> None:
+    headers = ["JOB ID", "STAGE", "GROUP", "SLOT", "PID", "AGE", "STATUS", "STATE", "RUN DIR"]
+    rows: list[list[str]] = []
+    for job in jobs:
+        rows.append(
+            [
+                _shorten_text(str(job.get("job_id") or ""), 24),
+                _shorten_text(str(job.get("stage") or ""), 12),
+                _shorten_text(str(job.get("group_name") or ""), 10),
+                str(job.get("slot_index") or 0),
+                str(job.get("pid") or 0),
+                _format_duration(_job_age_seconds(job)),
+                _shorten_text(str(job.get("status") or ""), 10),
+                _shorten_text(_job_runtime_state(job), 8),
+                _shorten_text(str(job.get("run_dir") or ""), 42),
+            ]
+        )
+
+    widths = [24, 12, 10, 4, 7, 8, 10, 8, 42]
+    header_line = (
+        f"{headers[0]:<{widths[0]}} "
+        f"{headers[1]:<{widths[1]}} "
+        f"{headers[2]:<{widths[2]}} "
+        f"{headers[3]:>{widths[3]}} "
+        f"{headers[4]:>{widths[4]}} "
+        f"{headers[5]:>{widths[5]}} "
+        f"{headers[6]:<{widths[6]}} "
+        f"{headers[7]:<{widths[7]}} "
+        f"{headers[8]:<{widths[8]}}"
+    )
+    print(header_line)
+    print("-" * len(header_line))
+    for row in rows:
+        print(
+            f"{row[0]:<{widths[0]}} "
+            f"{row[1]:<{widths[1]}} "
+            f"{row[2]:<{widths[2]}} "
+            f"{row[3]:>{widths[3]}} "
+            f"{row[4]:>{widths[4]}} "
+            f"{row[5]:>{widths[5]}} "
+            f"{row[6]:<{widths[6]}} "
+            f"{row[7]:<{widths[7]}} "
+            f"{row[8]:<{widths[8]}}"
+        )
+
+
+def _kill_process_group(pid: int, sig: signal.Signals) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.killpg(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        try:
+            os.kill(pid, sig)
+            return True
+        except Exception:
+            return False
+    except OSError:
+        try:
+            os.kill(pid, sig)
+            return True
+        except Exception:
+            return False
+
+
+def _cancel_job_row(
+    state: OrchestratorState,
+    row: dict[str, Any],
+    *,
+    force: bool = False,
+    grace_seconds: int = 10,
+) -> dict[str, Any]:
+    job_id = str(row.get("job_id") or "")
+    pid = int(row.get("pid") or 0)
+    lock_key = str(row.get("lock_key") or "").strip()
+    stage = str(row.get("stage") or "")
+    scope = str(row.get("scope") or "")
+
+    if pid <= 0:
+        return {"job_id": job_id, "status": "skipped", "reason": "invalid pid"}
+    if not _pid_is_alive(pid):
+        return {"job_id": job_id, "status": "stale", "reason": "process already exited"}
+
+    sent_term = _kill_process_group(pid, signal.SIGTERM)
+    if not sent_term:
+        return {"job_id": job_id, "status": "failed", "reason": "unable to send SIGTERM"}
+
+    deadline = time.time() + max(1, int(grace_seconds))
+    while time.time() < deadline:
+        if not _pid_is_alive(pid):
+            break
+        time.sleep(1)
+
+    if _pid_is_alive(pid):
+        if force:
+            _kill_process_group(pid, signal.SIGKILL)
+            deadline = time.time() + 5
+            while time.time() < deadline and _pid_is_alive(pid):
+                time.sleep(1)
+        else:
+            return {
+                "job_id": job_id,
+                "status": "pending",
+                "reason": "process still alive after SIGTERM",
+            }
+
+    if _pid_is_alive(pid):
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "reason": "process still alive after SIGKILL",
+        }
+
+    state.mark_active_job_finished(
+        job_id=job_id,
+        returncode=143 if not force else 137,
+        status="cancelled",
+        error_text="cancelled via orchestrator",
+    )
+    if lock_key:
+        state.release_lock(lock_key)
+    state.add_event(
+        event_type="control",
+        stage=stage,
+        scope=scope,
+        message=f"Cancelled job {job_id} (pid={pid})",
+        severity="info",
+        payload={"action": "cancel", "job_id": job_id, "pid": pid, "force": force},
+    )
+    return {"job_id": job_id, "status": "cancelled", "reason": "terminated"}
+
+
+def _reconcile_running_job(state: OrchestratorState, row: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(row.get("job_id") or "")
+    pid = int(row.get("pid") or 0)
+    lock_key = str(row.get("lock_key") or "").strip()
+    stage = str(row.get("stage") or "")
+    scope = str(row.get("scope") or "")
+    run_dir = str(row.get("run_dir") or "")
+    log_path = str(row.get("log_path") or "")
+
+    if pid > 0 and _pid_is_alive(pid):
+        return {"job_id": job_id, "status": "alive"}
+
+    exit_code = _read_exit_code(run_dir)
+    if exit_code is None:
+        exit_code = 1
+    status = "completed" if exit_code == 0 else "failed"
+    error_text = ""
+    if exit_code != 0 and log_path:
+        try:
+            error_text = Path(log_path).read_text(errors="ignore")[-4000:]
+        except Exception:
+            error_text = "failed to read log"
+
+    state.mark_active_job_finished(
+        job_id=job_id,
+        returncode=exit_code,
+        status=status,
+        error_text=error_text,
+    )
+    if lock_key:
+        state.release_lock(lock_key)
+    state.add_event(
+        event_type="reconcile",
+        stage=stage,
+        scope=scope,
+        message=f"Reconciled job {job_id} as {status} (exit={exit_code})",
+        severity="info" if exit_code == 0 else "warning",
+        payload={
+            "job_id": job_id,
+            "pid": pid,
+            "run_dir": run_dir,
+            "log_path": log_path,
+            "returncode": exit_code,
+            "status": status,
+        },
+    )
+    return {"job_id": job_id, "status": status, "returncode": exit_code}
 
 
 def _waitpid_returncode(pid: int) -> tuple[bool, int | None]:
@@ -667,7 +958,21 @@ def main() -> None:
         "mode",
         nargs="?",
         default="once",
-        choices=["once", "run", "status", "explain", "report", "preflight", "pause", "resume", "janitor"],
+        choices=[
+            "once",
+            "run",
+            "status",
+            "active",
+            "logs",
+            "cancel",
+            "reconcile",
+            "explain",
+            "report",
+            "preflight",
+            "pause",
+            "resume",
+            "janitor",
+        ],
         help="Operation mode (default: once)",
     )
     parser.add_argument(
@@ -711,6 +1016,38 @@ def main() -> None:
         "--reason",
         default="",
         help="Pause reason when using pause mode",
+    )
+    parser.add_argument(
+        "--job-id",
+        default="",
+        help="Target job id for logs/cancel",
+    )
+    parser.add_argument(
+        "--stage",
+        default="",
+        help="Filter jobs by stage for cancel",
+    )
+    parser.add_argument(
+        "--group",
+        default="",
+        help="Filter jobs by group for cancel",
+    )
+    parser.add_argument(
+        "--tail",
+        type=int,
+        default=100,
+        help="Number of log lines to show for logs mode",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force cancel with SIGKILL after the grace period",
+    )
+    parser.add_argument(
+        "--grace-seconds",
+        type=int,
+        default=10,
+        help="Grace period before forcing cancellation",
     )
 
     args = parser.parse_args()
@@ -760,6 +1097,113 @@ def main() -> None:
             print("⚠️  DRY-RUN MODE — no jobs will actually run")
         print("Press Ctrl+C to stop.")
         run_loop(config, state, max_jobs=args.max_jobs, dry_run=args.dry_run)
+
+    elif args.mode == "active":
+        jobs = state.list_running_jobs()
+        alive = sum(1 for job in jobs if _job_runtime_state(job) == "alive")
+        stale = len(jobs) - alive
+        print("Active jobs")
+        print(f"Running: {len(jobs)}")
+        print(f"Alive: {alive}")
+        print(f"Stale: {stale}")
+        if jobs:
+            print("")
+            _print_active_jobs(jobs)
+        else:
+            print("No running jobs.")
+
+    elif args.mode == "logs":
+        job_id = args.job_id.strip()
+        if not job_id:
+            print("Missing --job-id for logs mode", file=sys.stderr)
+            raise SystemExit(2)
+        job = _select_jobs_for_logs(state, job_id=job_id)
+        if job is None:
+            print(f"Job not found: {job_id}", file=sys.stderr)
+            raise SystemExit(1)
+        log_path_raw = str(job.get("log_path") or "").strip()
+        if not log_path_raw:
+            print(f"Job {job_id} does not have a log path recorded", file=sys.stderr)
+            raise SystemExit(1)
+        log_path = Path(log_path_raw).expanduser()
+        print(f"Job ID: {job_id}")
+        print(f"Stage: {job.get('stage', '')}")
+        print(f"Status: {job.get('status', '')}")
+        print(f"Log path: {log_path}")
+        print("")
+        if not log_path.exists():
+            print("Log file not found.", file=sys.stderr)
+            raise SystemExit(1)
+        for line in _tail_file(log_path, int(args.tail or 100)):
+            print(line)
+
+    elif args.mode == "cancel":
+        job_id = args.job_id.strip() or None
+        stage = args.stage.strip() or None
+        group_name = args.group.strip() or None
+        jobs = _select_running_jobs(
+            state,
+            job_id=job_id,
+            stage=stage,
+            group_name=group_name,
+        )
+        if not jobs:
+            print("No matching running jobs.")
+            raise SystemExit(1)
+        results = []
+        for job in jobs:
+            results.append(
+                _cancel_job_row(
+                    state,
+                    job,
+                    force=bool(args.force),
+                    grace_seconds=int(args.grace_seconds or 10),
+                )
+            )
+        cancelled = sum(1 for item in results if item.get("status") == "cancelled")
+        pending = sum(1 for item in results if item.get("status") == "pending")
+        stale = sum(1 for item in results if item.get("status") == "stale")
+        failed = sum(1 for item in results if item.get("status") == "failed")
+        print("Cancel summary")
+        print(f"Matched: {len(results)}")
+        print(f"Cancelled: {cancelled}")
+        print(f"Pending: {pending}")
+        print(f"Stale: {stale}")
+        print(f"Failed: {failed}")
+        for item in results:
+            print(
+                f"- {item.get('job_id', '?')}: {item.get('status', '?')}"
+                + (f" ({item.get('reason', '')})" if item.get("reason") else "")
+            )
+        if pending or failed:
+            raise SystemExit(1)
+
+    elif args.mode == "reconcile":
+        cleared_locks = state.clear_expired_locks()
+        cleared_stale_locks = state.clear_stale_pid_locks()
+        jobs = state.list_running_jobs()
+        reconciled = 0
+        completed = 0
+        failed = 0
+        alive = 0
+        for job in jobs:
+            result = _reconcile_running_job(state, job)
+            if result.get("status") == "alive":
+                alive += 1
+                continue
+            reconciled += 1
+            if result.get("status") == "completed":
+                completed += 1
+            else:
+                failed += 1
+        print("Reconcile summary")
+        print(f"Running: {len(jobs)}")
+        print(f"Alive: {alive}")
+        print(f"Reconciled: {reconciled}")
+        print(f"Completed: {completed}")
+        print(f"Failed: {failed}")
+        print(f"Expired locks cleared: {cleared_locks}")
+        print(f"Stale pid locks cleared: {cleared_stale_locks}")
 
     elif args.mode == "pause":
         target = _target_to_pause_key(args.target or "all")

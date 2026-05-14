@@ -256,6 +256,11 @@ echo "============================================="
 
 # Auto-import results to DB
 echo "📥 Importing pending updates to database..."
-"$VENV_PYTHON" "$REPO_DIR/import_pending_updates.py"
+IMPORT_SCRIPT="$REPO_DIR/partial_py/import_pending_updates.py"
+if [ -f "$IMPORT_SCRIPT" ]; then
+    "$VENV_PYTHON" "$IMPORT_SCRIPT"
+else
+    echo "⚠️  import_pending_updates.py not found at $IMPORT_SCRIPT" >&2
+fi
 
 exit $EXIT_CODE
