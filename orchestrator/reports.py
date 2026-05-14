@@ -85,6 +85,7 @@ def build_inventory_snapshot(
 
     return {
         "mode": config.get("orchestrator", {}).get("mode", "work_conserving"),
+        "timeouts": config.get("timeouts", {}),
         "work_remaining": work_remaining,
         "blocked": blocked,
         "system": system,

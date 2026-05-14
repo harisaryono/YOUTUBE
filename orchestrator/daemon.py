@@ -233,6 +233,43 @@ def _job_runtime_state(row: dict[str, Any]) -> str:
     return "stale"
 
 
+def _timeout_key_for_stage(stage: str) -> str:
+    stage = str(stage or "").strip().lower()
+    mapping = {
+        "discovery": "discovery_seconds",
+        "transcript": "transcript_seconds",
+        "audio_download": "audio_download_seconds",
+        "resume": "resume_seconds",
+        "asr": "asr_seconds",
+        "format": "format_seconds",
+    }
+    return mapping.get(stage, "default_seconds")
+
+
+def _stage_timeout_seconds(config: dict[str, Any], stage: str) -> int:
+    timeouts = config.get("timeouts", {}) or {}
+    key = _timeout_key_for_stage(stage)
+    value = timeouts.get(key, timeouts.get("default_seconds", 0))
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _job_timeout_remaining_seconds(config: dict[str, Any], row: dict[str, Any]) -> int:
+    stage = str(row.get("stage") or "")
+    timeout_seconds = _stage_timeout_seconds(config, stage)
+    if timeout_seconds <= 0:
+        return 0
+    age_seconds = _job_age_seconds(row)
+    return max(0, timeout_seconds - age_seconds)
+
+
+def _job_timeout_seconds(config: dict[str, Any], row: dict[str, Any]) -> int:
+    stage = str(row.get("stage") or "")
+    return _stage_timeout_seconds(config, stage)
+
+
 def _tail_file(path: Path, tail_lines: int) -> list[str]:
     if tail_lines <= 0:
         tail_lines = 100
@@ -278,8 +315,8 @@ def _select_jobs_for_logs(
     return state.get_job(job_id)
 
 
-def _print_active_jobs(jobs: list[dict[str, Any]]) -> None:
-    headers = ["JOB ID", "STAGE", "GROUP", "SLOT", "PID", "AGE", "STATUS", "STATE", "RUN DIR"]
+def _print_active_jobs(config: dict[str, Any], jobs: list[dict[str, Any]]) -> None:
+    headers = ["JOB ID", "STAGE", "GROUP", "SLOT", "PID", "AGE", "TIMEOUT", "REMAIN", "STATUS", "STATE", "RUN DIR"]
     rows: list[list[str]] = []
     for job in jobs:
         rows.append(
@@ -290,13 +327,15 @@ def _print_active_jobs(jobs: list[dict[str, Any]]) -> None:
                 str(job.get("slot_index") or 0),
                 str(job.get("pid") or 0),
                 _format_duration(_job_age_seconds(job)),
+                _format_duration(_job_timeout_seconds(config, job)),
+                _format_duration(_job_timeout_remaining_seconds(config, job)),
                 _shorten_text(str(job.get("status") or ""), 10),
                 _shorten_text(_job_runtime_state(job), 8),
                 _shorten_text(str(job.get("run_dir") or ""), 42),
             ]
         )
 
-    widths = [24, 12, 10, 4, 7, 8, 10, 8, 42]
+    widths = [24, 12, 10, 4, 7, 8, 8, 8, 10, 8, 42]
     header_line = (
         f"{headers[0]:<{widths[0]}} "
         f"{headers[1]:<{widths[1]}} "
@@ -306,7 +345,9 @@ def _print_active_jobs(jobs: list[dict[str, Any]]) -> None:
         f"{headers[5]:>{widths[5]}} "
         f"{headers[6]:<{widths[6]}} "
         f"{headers[7]:<{widths[7]}} "
-        f"{headers[8]:<{widths[8]}}"
+        f"{headers[8]:<{widths[8]}} "
+        f"{headers[9]:<{widths[9]}} "
+        f"{headers[10]:<{widths[10]}}"
     )
     print(header_line)
     print("-" * len(header_line))
@@ -320,7 +361,9 @@ def _print_active_jobs(jobs: list[dict[str, Any]]) -> None:
             f"{row[5]:>{widths[5]}} "
             f"{row[6]:<{widths[6]}} "
             f"{row[7]:<{widths[7]}} "
-            f"{row[8]:<{widths[8]}}"
+            f"{row[8]:<{widths[8]}} "
+            f"{row[9]:<{widths[9]}} "
+            f"{row[10]:<{widths[10]}}"
         )
 
 
@@ -362,7 +405,14 @@ def _cancel_job_row(
     if pid <= 0:
         return {"job_id": job_id, "status": "skipped", "reason": "invalid pid"}
     if not _pid_is_alive(pid):
-        return {"job_id": job_id, "status": "stale", "reason": "process already exited"}
+        reconciled = _reconcile_running_job(state, row)
+        if reconciled.get("status") == "alive":
+            return {"job_id": job_id, "status": "pending", "reason": "process still alive"}
+        return {
+            "job_id": job_id,
+            "status": reconciled.get("status", "reconciled"),
+            "reason": f"reconciled as {reconciled.get('status', 'unknown')}",
+        }
 
     sent_term = _kill_process_group(pid, signal.SIGTERM)
     if not sent_term:
@@ -411,6 +461,75 @@ def _cancel_job_row(
         payload={"action": "cancel", "job_id": job_id, "pid": pid, "force": force},
     )
     return {"job_id": job_id, "status": "cancelled", "reason": "terminated"}
+
+
+def _timeout_running_job(
+    state: OrchestratorState,
+    row: dict[str, Any],
+    *,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    job_id = str(row.get("job_id") or "")
+    pid = int(row.get("pid") or 0)
+    lock_key = str(row.get("lock_key") or "").strip()
+    stage = str(row.get("stage") or "")
+    scope = str(row.get("scope") or "")
+    run_dir = str(row.get("run_dir") or "")
+    log_path = str(row.get("log_path") or "")
+
+    if pid <= 0:
+        return {"job_id": job_id, "status": "skipped", "reason": "invalid pid"}
+    if not _pid_is_alive(pid):
+        return _reconcile_running_job(state, row)
+
+    _kill_process_group(pid, signal.SIGTERM)
+    deadline = time.time() + 5
+    while time.time() < deadline and _pid_is_alive(pid):
+        time.sleep(1)
+    if _pid_is_alive(pid):
+        _kill_process_group(pid, signal.SIGKILL)
+        deadline = time.time() + 3
+        while time.time() < deadline and _pid_is_alive(pid):
+            time.sleep(1)
+
+    if _pid_is_alive(pid):
+        return {
+            "job_id": job_id,
+            "status": "pending",
+            "reason": f"process still alive after timeout kill for {stage}",
+        }
+
+    state.mark_active_job_finished(
+        job_id=job_id,
+        returncode=124,
+        status="timeout",
+        error_text=f"timed out after {timeout_seconds}s",
+    )
+    if lock_key:
+        state.release_lock(lock_key)
+    state.add_event(
+        event_type="timeout",
+        stage=stage,
+        scope=scope,
+        message=f"Timed out job {job_id} after {timeout_seconds}s",
+        severity="warning",
+        payload={
+            "job_id": job_id,
+            "pid": pid,
+            "run_dir": run_dir,
+            "log_path": log_path,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+    state.add_event(
+        event_type="control",
+        stage=stage,
+        scope=scope,
+        message=f"Timeout terminated job {job_id} (pid={pid})",
+        severity="info",
+        payload={"action": "timeout", "job_id": job_id, "pid": pid, "timeout_seconds": timeout_seconds},
+    )
+    return {"job_id": job_id, "status": "timeout", "reason": "terminated after timeout"}
 
 
 def _reconcile_running_job(state: OrchestratorState, row: dict[str, Any]) -> dict[str, Any]:
@@ -484,6 +603,8 @@ def _waitpid_returncode(pid: int) -> tuple[bool, int | None]:
 def poll_active_jobs(
     config: dict[str, Any],
     state: OrchestratorState,
+    *,
+    enforce_timeouts: bool = True,
 ) -> dict[str, int]:
     """Poll active jobs and finalize the ones that already exited."""
     result = {"finished": 0, "failed": 0, "still_running": 0}
@@ -498,6 +619,24 @@ def poll_active_jobs(
         run_dir = str(row.get("run_dir") or "")
         log_path = str(row.get("log_path") or "")
         slot_index = int(row.get("slot_index") or 0)
+
+        timeout_seconds = _stage_timeout_seconds(config, stage)
+        if enforce_timeouts and timeout_seconds > 0:
+            age_seconds = _job_age_seconds(row)
+            if age_seconds >= timeout_seconds:
+                result_row = _timeout_running_job(
+                    state,
+                    row,
+                    timeout_seconds=timeout_seconds,
+                )
+                if result_row.get("status") == "pending":
+                    result["still_running"] += 1
+                    continue
+                if result_row.get("status") == "completed":
+                    result["finished"] += 1
+                else:
+                    result["failed"] += 1
+                continue
 
         finished, exit_code = _waitpid_returncode(pid)
         if not finished:
@@ -698,7 +837,7 @@ def run_once(
     if cleared_stale_locks > 0:
         state.add_event(event_type="cleanup", message=f"Cleared {cleared_stale_locks} stale pid lock(s)", severity="info")
 
-    poll_result = poll_active_jobs(config, state)
+    poll_result = poll_active_jobs(config, state, enforce_timeouts=not dry_run)
     cycle_result["jobs_succeeded"] += poll_result["finished"]
     cycle_result["jobs_failed"] += poll_result["failed"]
     cycle_result["active_jobs"] = state.count_running_total()
@@ -1108,7 +1247,7 @@ def main() -> None:
         print(f"Stale: {stale}")
         if jobs:
             print("")
-            _print_active_jobs(jobs)
+            _print_active_jobs(config, jobs)
         else:
             print("No running jobs.")
 
@@ -1261,6 +1400,7 @@ def main() -> None:
         print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
         print(f"Active jobs: {inventory.get('active_jobs', {}).get('active_count', 0)}")
         print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
+        print(f"Timeouts: {config.get('timeouts', {})}")
         system_info = inventory.get("system", {})
         print(f"Disk free: {system_info.get('disk_free_gb', 0):.1f} GB")
         print(f"Memory available: {system_info.get('mem_available_mb', 0):.0f} MB")

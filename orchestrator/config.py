@@ -83,6 +83,23 @@ def _merge_env(config: dict[str, Any], dotenv: dict[str, str]) -> dict[str, Any]
     if "ASR_DELETE_AUDIO_AFTER_SUCCESS" in dotenv:
         config.setdefault("asr", {})["delete_audio_after_success"] = dotenv["ASR_DELETE_AUDIO_AFTER_SUCCESS"].strip().lower() in {"1", "true", "yes", "on"}
 
+    # Timeouts
+    timeout_map = {
+        "ORCH_TIMEOUT_DEFAULT_SECONDS": "default_seconds",
+        "ORCH_TIMEOUT_DISCOVERY_SECONDS": "discovery_seconds",
+        "ORCH_TIMEOUT_TRANSCRIPT_SECONDS": "transcript_seconds",
+        "ORCH_TIMEOUT_AUDIO_DOWNLOAD_SECONDS": "audio_download_seconds",
+        "ORCH_TIMEOUT_RESUME_SECONDS": "resume_seconds",
+        "ORCH_TIMEOUT_ASR_SECONDS": "asr_seconds",
+        "ORCH_TIMEOUT_FORMAT_SECONDS": "format_seconds",
+    }
+    for env_name, timeout_key in timeout_map.items():
+        if env_name in dotenv:
+            try:
+                config.setdefault("timeouts", {})[timeout_key] = int(dotenv[env_name])
+            except (TypeError, ValueError):
+                continue
+
     return config
 
 
@@ -142,6 +159,15 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "min_memory_mb_resume": 1500,
             "min_memory_mb_format": 1200,
             "min_memory_mb_asr": 2500,
+        },
+        "timeouts": {
+            "default_seconds": 7200,
+            "discovery_seconds": 1800,
+            "transcript_seconds": 3600,
+            "audio_download_seconds": 3600,
+            "resume_seconds": 7200,
+            "asr_seconds": 7200,
+            "format_seconds": 7200,
         },
         "youtube": {
             "discovery_interval_hours": 24,

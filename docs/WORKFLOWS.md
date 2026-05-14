@@ -253,6 +253,9 @@ Command utama:
 - `./scripts/orchestrator.sh cancel-group <group>` untuk cancel seluruh job running di satu group.
 - `./scripts/orchestrator.sh reconcile` untuk menutup job running yang PID-nya sudah mati.
 - Job cancel/reconcile menggunakan `orchestrator_active_jobs`, `exit_code.txt`, dan `stdout_stderr.log` sebagai source of truth.
+- Timeout stage dikendalikan lewat `timeouts:` di [orchestrator.yaml](/media/harry/DATA120B/GIT/YOUTUBE/orchestrator.yaml); `poll_active_jobs()` akan menandai job yang lewat batas sebagai `timeout`, menutup lock, lalu mencatat event.
+- `timeouts:` juga bisa dioverride lewat `.env` dengan `ORCH_TIMEOUT_DEFAULT_SECONDS`, `ORCH_TIMEOUT_DISCOVERY_SECONDS`, `ORCH_TIMEOUT_TRANSCRIPT_SECONDS`, `ORCH_TIMEOUT_AUDIO_DOWNLOAD_SECONDS`, `ORCH_TIMEOUT_RESUME_SECONDS`, `ORCH_TIMEOUT_ASR_SECONDS`, dan `ORCH_TIMEOUT_FORMAT_SECONDS`.
+- Output `active` menampilkan `TIMEOUT` dan `REMAIN` supaya job yang hampir habis bisa dipantau lebih cepat.
 
 ## Urutan Praktis
 

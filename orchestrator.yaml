@@ -78,6 +78,16 @@ system:
   # Minimum available memory for ASR jobs (MB)
   min_memory_mb_asr: 2500
 
+timeouts:
+  # Default timeout for stages that do not define a custom limit.
+  default_seconds: 7200
+  discovery_seconds: 1800
+  transcript_seconds: 3600
+  audio_download_seconds: 3600
+  resume_seconds: 7200
+  asr_seconds: 7200
+  format_seconds: 7200
+
 youtube:
   # How often to re-discover channels (hours)
   discovery_interval_hours: 24
