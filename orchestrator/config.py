@@ -87,11 +87,15 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "profile": "safe",
         "loop": {
-            "min_sleep_seconds": 10,
+            "min_sleep_seconds": 5,
             "idle_sleep_seconds": 60,
             "error_sleep_seconds": 300,
         },
         "orchestrator": {
+            "mode": "work_conserving",
+            "max_jobs_per_cycle": 7,
+            "short_sleep_seconds": 5,
+            "idle_sleep_seconds": 900,
             "youtube_backlog_boost_threshold": 500,
         },
         "system": {

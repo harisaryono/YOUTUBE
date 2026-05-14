@@ -12,19 +12,9 @@ from . import db_queries
 
 
 # Priority order for job types (lower = higher priority).
-# Base mode favors safe/local stages first. When YouTube backlog grows, the
-# planner promotes transcript/audio_download so the pipeline keeps feeding.
-JOB_PRIORITY_LOCAL_FIRST = {
-    "import_pending": 0,
-    "resume": 1,
-    "format": 2,
-    "asr": 3,
-    "transcript": 4,
-    "audio_download": 5,
-    "discovery": 6,
-}
-
-JOB_PRIORITY_YOUTUBE_FIRST = {
+# Base mode is work-conserving: run any available safe work first.
+# When YouTube backlog grows, discovery is promoted so the pipeline keeps feeding.
+JOB_PRIORITY_AVAILABLE_WORK_FIRST = {
     "import_pending": 0,
     "transcript": 1,
     "audio_download": 2,
@@ -32,6 +22,16 @@ JOB_PRIORITY_YOUTUBE_FIRST = {
     "resume": 4,
     "format": 5,
     "discovery": 6,
+}
+
+JOB_PRIORITY_YOUTUBE_HEAVY = {
+    "import_pending": 0,
+    "transcript": 1,
+    "audio_download": 2,
+    "discovery": 3,
+    "asr": 4,
+    "resume": 5,
+    "format": 6,
 }
 
 
@@ -51,8 +51,8 @@ def _batch_description(stage: str, limit: int, noun: str) -> str:
 
 def _adaptive_priority(stage: str, youtube_pressure: int, boost_threshold: int) -> int:
     if youtube_pressure >= boost_threshold:
-        return int(JOB_PRIORITY_YOUTUBE_FIRST.get(stage, 99))
-    return int(JOB_PRIORITY_LOCAL_FIRST.get(stage, 99))
+        return int(JOB_PRIORITY_YOUTUBE_HEAVY.get(stage, 99))
+    return int(JOB_PRIORITY_AVAILABLE_WORK_FIRST.get(stage, 99))
 
 
 def plan_jobs(
@@ -174,8 +174,9 @@ def plan_jobs(
     return jobs[:max_jobs]
 
 
-def get_summary_counts(state: OrchestratorState) -> dict[str, int]:
+def get_summary_counts(config: dict[str, Any], state: OrchestratorState) -> dict[str, int]:
     """Get summary counts of pending work."""
     counts = db_queries.get_job_counts()
     counts["pending_imports"] = db_queries.count_pending_imports(state)
+    counts["channels_need_discovery"] = db_queries.count_channels_need_discovery(config, state)
     return counts

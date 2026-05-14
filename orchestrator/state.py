@@ -189,10 +189,14 @@ class OrchestratorState:
         scope: str = "",
         severity: str = "info",
         recommendation: str = "",
+        reason_code: str = "",
         payload: dict[str, Any] | None = None,
     ) -> int:
         """Add an event. Returns event ID."""
         conn = self._connect()
+        payload_obj = dict(payload or {})
+        if reason_code:
+            payload_obj.setdefault("reason_code", reason_code)
         cursor = conn.execute(
             """INSERT INTO orchestrator_events
                (event_type, stage, scope, severity, message, recommendation, payload_json)
@@ -204,7 +208,7 @@ class OrchestratorState:
                 severity,
                 message,
                 recommendation,
-                json.dumps(payload or {}),
+                json.dumps(payload_obj),
             ),
         )
         conn.commit()

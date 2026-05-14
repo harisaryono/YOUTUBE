@@ -12,6 +12,7 @@ from typing import Any
 from .state import OrchestratorState
 from . import cooldown as cd
 from . import planner
+from . import db_queries
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +22,66 @@ REPORTS_DIR = PROJECT_ROOT / "runs" / "orchestrator" / "reports"
 def _ensure_reports_dir() -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     return REPORTS_DIR
+
+
+def build_inventory_snapshot(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    cycle_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a compact work inventory snapshot for status/explain/reporting."""
+    counts = planner.get_summary_counts(config, state)
+    active_cooldowns = state.list_active_cooldowns()
+    active_locks = state.list_active_locks()
+    recent_events = state.get_recent_events(limit=50)
+
+    blocked = {
+        "youtube": any(cd_entry["scope"] == "youtube" for cd_entry in active_cooldowns),
+        "provider": any(cd_entry["scope"].startswith("provider:") for cd_entry in active_cooldowns),
+        "channel": any(cd_entry["scope"].startswith("channel:") for cd_entry in active_cooldowns),
+    }
+
+    work_remaining = {
+        "import_pending": counts.get("pending_imports", 0),
+        "transcript": counts.get("videos_need_transcript", 0),
+        "audio_download": counts.get("videos_need_audio_download", 0),
+        "asr": counts.get("videos_need_asr", 0),
+        "resume": counts.get("videos_need_resume", 0),
+        "format": counts.get("videos_need_format", 0),
+        "discovery": db_queries.count_channels_need_discovery(config, state),
+    }
+
+    defer_reasons: dict[str, int] = {}
+    for event in recent_events:
+        if (event.get("event_type") or "") != "deferred":
+            continue
+        try:
+            payload = json.loads(event.get("payload_json") or "{}")
+        except Exception:
+            payload = {}
+        reason_code = str(payload.get("reason_code") or "").strip()
+        if not reason_code:
+            msg = str(event.get("message") or "")
+            if ":" in msg:
+                reason_code = msg.split(":", 1)[0].strip()
+        if reason_code:
+            defer_reasons[reason_code] = defer_reasons.get(reason_code, 0) + 1
+
+    return {
+        "mode": config.get("orchestrator", {}).get("mode", "work_conserving"),
+        "work_remaining": work_remaining,
+        "blocked": blocked,
+        "cooldowns": {
+            "active_count": len(active_cooldowns),
+            "details": active_cooldowns,
+        },
+        "locks": {
+            "active_count": len(active_locks),
+            "details": active_locks,
+        },
+        "defer_reasons": defer_reasons,
+        "cycle_result": cycle_result or {},
+    }
 
 
 def generate_report(
@@ -35,13 +96,14 @@ def generate_report(
     now = datetime.now(timezone.utc)
 
     # Gather data
-    counts = planner.get_summary_counts(state)
+    counts = planner.get_summary_counts(config, state)
     active_cooldowns = state.list_active_cooldowns()
     recent_events = state.get_recent_events(limit=20)
     blocked_providers = cd.get_blocked_providers(state)
     blocked_channels = cd.get_blocked_channels(state)
     next_wakeup = cd.get_next_wakeup(state)
     active_locks = state.list_active_locks()
+    inventory = build_inventory_snapshot(config, state, cycle_result)
 
     # Build suggestions
     suggestions = _build_suggestions(config, state, active_cooldowns, cycle_result)
@@ -65,6 +127,7 @@ def generate_report(
             "active_count": len(active_locks),
             "details": active_locks,
         },
+        "inventory": inventory,
         "pending_work": counts,
         "recent_events": recent_events[:10],
         "cycle_result": cycle_result,
@@ -219,6 +282,26 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
     for key, val in sorted(counts.items()):
         lines.append(f"| {key} | {val} |")
     lines.append("")
+
+    # Inventory
+    inv = report.get("inventory", {})
+    if inv:
+        lines.append("## Work Inventory")
+        lines.append("")
+        lines.append(f"- Mode: `{inv.get('mode', '?')}`")
+        lines.append(f"- Blocked: {inv.get('blocked', {})}")
+        lines.append(f"- Active cooldowns: {inv.get('cooldowns', {}).get('active_count', 0)}")
+        lines.append(f"- Active locks: {inv.get('locks', {}).get('active_count', 0)}")
+        lines.append("")
+        lines.append("### Remaining Work")
+        for key, val in sorted(inv.get("work_remaining", {}).items()):
+            lines.append(f"- {key}: {val}")
+        lines.append("")
+        if inv.get("defer_reasons"):
+            lines.append("### Deferred Reasons")
+            for code, val in sorted(inv["defer_reasons"].items(), key=lambda kv: (-kv[1], kv[0])):
+                lines.append(f"- {code}: {val}")
+            lines.append("")
 
     # Stage status
     lines.append("## Stage Status")

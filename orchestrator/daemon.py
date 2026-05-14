@@ -28,9 +28,45 @@ from .planner import plan_jobs
 from .dispatcher import dispatch_job
 from .cooldown import clear_all_cooldowns, get_next_wakeup
 from .reports import generate_report
+from .reports import build_inventory_snapshot
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _effective_max_jobs(config: dict[str, Any], requested: int) -> int:
+    if requested and requested > 0:
+        return requested
+    return int(config.get("orchestrator", {}).get("max_jobs_per_cycle", 7) or 7)
+
+
+def _short_sleep_seconds(config: dict[str, Any]) -> int:
+    orchestrator_cfg = config.get("orchestrator", {})
+    loop_cfg = config.get("loop", {})
+    return int(
+        orchestrator_cfg.get(
+            "short_sleep_seconds",
+            loop_cfg.get("min_sleep_seconds", 5),
+        )
+        or 5
+    )
+
+
+def _idle_sleep_seconds(config: dict[str, Any]) -> int:
+    orchestrator_cfg = config.get("orchestrator", {})
+    loop_cfg = config.get("loop", {})
+    return int(
+        orchestrator_cfg.get(
+            "idle_sleep_seconds",
+            loop_cfg.get("idle_sleep_seconds", 900),
+        )
+        or 900
+    )
+
+
+def _error_sleep_seconds(config: dict[str, Any]) -> int:
+    loop_cfg = config.get("loop", {})
+    return int(loop_cfg.get("error_sleep_seconds", 1800) or 1800)
 
 
 def run_once(
@@ -50,6 +86,7 @@ def run_once(
     7. Generate report
     """
     start_time = time.time()
+    max_jobs = _effective_max_jobs(config, max_jobs)
     cycle_result: dict[str, Any] = {
         "jobs_planned": 0,
         "jobs_dispatched": 0,
@@ -146,16 +183,17 @@ def run_once(
                 continue
 
             # Acquire stage lock and always release it, even if dispatch fails.
-            if not state.acquire_lock(lock_key, ttl_seconds=7200):
-                state.add_event(
-                    event_type="deferred",
-                    message=f"{stage} lock could not be acquired, deferring",
-                    stage=stage,
-                    scope=job.get("scope", ""),
-                    severity="info",
-                )
-                cycle_result["jobs_deferred"] += 1
-                continue
+        if not state.acquire_lock(lock_key, ttl_seconds=7200):
+            state.add_event(
+                event_type="deferred",
+                message=f"{stage} lock could not be acquired, deferring",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="info",
+                reason_code="DEFER_STAGE_LOCKED",
+            )
+            cycle_result["jobs_deferred"] += 1
+            continue
 
             cycle_result["jobs_dispatched"] += 1
             try:
@@ -182,16 +220,31 @@ def run_once(
                             severity=classification.severity,
                             recommendation=classification.recommendation,
                         )
+                    state.add_event(
+                        event_type="error",
+                        message=f"[{classification.error_type}] {classification.description}: {error_msg[:200]}",
+                        stage=stage,
+                        scope=job.get("scope", ""),
+                        severity=classification.severity,
+                        recommendation=classification.recommendation,
+                        reason_code=classification.error_type,
+                        payload={
+                            "returncode": result.get("returncode", 0),
+                            "error_type": classification.error_type,
+                            "cooldown_seconds": classification.cooldown_seconds,
+                        },
+                    )
 
         elif decision.verdict == "WAIT":
             cycle_result["jobs_deferred"] += 1
             state.add_event(
                 event_type="deferred",
-                message=f"Job deferred ({job.get('stage', '?')}): {decision.reason}",
+                message=f"{decision.reason_code or 'DEFER'}: {job.get('stage', '?')} - {decision.reason}",
                 stage=job.get("stage", ""),
                 scope=job.get("scope", ""),
                 severity="info",
                 recommendation=decision.recommendation,
+                reason_code=decision.reason_code,
             )
             if decision.cooldown_seconds > 0 and job.get("scope"):
                 state.set_cooldown(
@@ -245,6 +298,7 @@ def run_loop(
 
     while True:
         cycle_start = time.time()
+        max_jobs = _effective_max_jobs(config, max_jobs)
 
         try:
             result = run_once(config, state, max_jobs=max_jobs, dry_run=dry_run)
@@ -261,7 +315,7 @@ def run_loop(
                 message=f"Cycle failed: {e}",
                 severity="blocking",
             )
-            time.sleep(60)
+            time.sleep(_error_sleep_seconds(config))
             continue
 
         # Adaptive sleep
@@ -272,29 +326,29 @@ def run_loop(
 
         if dry_run:
             # Dry-run: check again soon.
-            sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
+            sleep_seconds = _short_sleep_seconds(config)
         elif jobs_dispatched > 0 or jobs_failed > 0:
             # Keep moving while there is still runnable work.
             # Hard blocks are handled through cooldown state, not by long sleeps here.
-            sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
+            sleep_seconds = _short_sleep_seconds(config)
         elif jobs_planned == 0:
             # No work — wait for next cooldown or idle
             next_wakeup = get_next_wakeup(state)
             if next_wakeup > 0:
-                sleep_seconds = min(next_wakeup, config.get("loop", {}).get("idle_sleep_seconds", 900))
+                sleep_seconds = min(next_wakeup, _idle_sleep_seconds(config))
             else:
-                sleep_seconds = config.get("loop", {}).get("idle_sleep_seconds", 900)
+                sleep_seconds = _idle_sleep_seconds(config)
         else:
             # Jobs were planned but mostly/fully deferred.
             # In aggressive mode, check again soon unless a real cooldown says otherwise.
             next_wakeup = get_next_wakeup(state)
             if next_wakeup > 0:
-                sleep_seconds = min(next_wakeup, config.get("loop", {}).get("idle_sleep_seconds", 900))
+                sleep_seconds = min(next_wakeup, _idle_sleep_seconds(config))
             else:
-                sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
+                sleep_seconds = _short_sleep_seconds(config)
 
         # Ensure minimum sleep
-        sleep_seconds = max(sleep_seconds, config.get("loop", {}).get("min_sleep_seconds", 60))
+        sleep_seconds = max(sleep_seconds, _short_sleep_seconds(config))
 
         cycle_duration = time.time() - cycle_start
         actual_sleep = max(1, sleep_seconds - cycle_duration)
@@ -319,7 +373,7 @@ def main() -> None:
         "mode",
         nargs="?",
         default="once",
-        choices=["once", "run", "status", "report"],
+        choices=["once", "run", "status", "explain", "report"],
         help="Operation mode (default: once)",
     )
     parser.add_argument(
@@ -330,8 +384,8 @@ def main() -> None:
     parser.add_argument(
         "--max-jobs",
         type=int,
-        default=5,
-        help="Maximum jobs per cycle (default: 5)",
+        default=0,
+        help="Maximum jobs per cycle (0 = use config orchestrator.max_jobs_per_cycle)",
     )
     parser.add_argument(
         "--profile",
@@ -380,6 +434,39 @@ def main() -> None:
             print(f"Cooldowns: {report.get('cooldowns', {}).get('active_count', 0)} active")
         else:
             print("No report yet. Run 'orchestrator once' first.")
+
+    elif args.mode == "explain":
+        report = generate_report(config, state, None)
+        inventory = report.get("inventory", {})
+        print("Orchestrator explain")
+        print(f"Mode: {inventory.get('mode', config.get('orchestrator', {}).get('mode', 'work_conserving'))}")
+        print(f"Work remaining: {inventory.get('work_remaining', {})}")
+        print(f"Blocked: {inventory.get('blocked', {})}")
+        print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
+        print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
+        reasons = inventory.get("defer_reasons", {})
+        if reasons:
+            print("Defer reasons:")
+            for code, count in sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])):
+                print(f"  - {code}: {count}")
+        else:
+            print("Defer reasons: none")
+
+    elif args.mode == "explain":
+        inventory = build_inventory_snapshot(config, state, None)
+        print("Orchestrator explain")
+        print(f"Mode: {inventory.get('mode', config.get('orchestrator', {}).get('mode', 'work_conserving'))}")
+        print(f"Work remaining: {inventory.get('work_remaining', {})}")
+        print(f"Blocked: {inventory.get('blocked', {})}")
+        print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
+        print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
+        reasons = inventory.get("defer_reasons", {})
+        if reasons:
+            print("Defer reasons:")
+            for code, count in sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])):
+                print(f"  - {code}: {count}")
+        else:
+            print("Defer reasons: none")
 
     elif args.mode == "report":
         from .reports import get_latest_report

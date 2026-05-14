@@ -73,19 +73,27 @@ class SafetyDecision:
         reason: str = "",
         cooldown_seconds: int = 0,
         recommendation: str = "",
+        reason_code: str = "",
     ):
         self.verdict = verdict  # RUN | WAIT | SKIP_PERMANENT | REPORT
         self.reason = reason
         self.cooldown_seconds = cooldown_seconds
         self.recommendation = recommendation
+        self.reason_code = reason_code
 
     @classmethod
     def run(cls) -> "SafetyDecision":
         return cls("RUN")
 
     @classmethod
-    def wait(cls, reason: str, cooldown_seconds: int = 300, recommendation: str = "") -> "SafetyDecision":
-        return cls("WAIT", reason, cooldown_seconds, recommendation)
+    def wait(
+        cls,
+        reason: str,
+        cooldown_seconds: int = 300,
+        recommendation: str = "",
+        reason_code: str = "",
+    ) -> "SafetyDecision":
+        return cls("WAIT", reason, cooldown_seconds, recommendation, reason_code)
 
     @classmethod
     def skip_permanent(cls, reason: str, recommendation: str = "") -> "SafetyDecision":
@@ -289,6 +297,7 @@ def safety_gate_for_job(
                 f"YouTube cooldown active: {youtube_health.cooldown_reason}",
                 cooldown_seconds=3600,
                 recommendation="Wait for YouTube cooldown to expire",
+                reason_code="DEFER_YOUTUBE_COOLDOWN",
             )
 
         # Channel-specific cooldown (only if scope is a channel)
@@ -297,6 +306,7 @@ def safety_gate_for_job(
             return SafetyDecision.wait(
                 f"Channel cooldown: {cd['reason']}",
                 recommendation=cd.get("recommendation", ""),
+                reason_code="DEFER_CHANNEL_COOLDOWN",
             )
 
     if stage == "asr":
@@ -306,6 +316,7 @@ def safety_gate_for_job(
                 return SafetyDecision.wait(
                     f"Local audio missing: {audio_path}",
                     recommendation="Requeue audio_download for the video",
+                    reason_code="DEFER_NO_LOCAL_AUDIO",
                 )
 
     if stage in ("asr", "resume", "format"):
@@ -320,6 +331,7 @@ def safety_gate_for_job(
                 f"Memory low for {stage}: {sys_health.mem_available_mb:.0f} MB available (need {min_mem} MB)",
                 cooldown_seconds=900,
                 recommendation="Reduce workers or wait for other jobs to finish",
+                reason_code="DEFER_MEMORY_LOW",
             )
 
         # Provider check — only warn, don't block.
@@ -332,6 +344,7 @@ def safety_gate_for_job(
                     "Coordinator unavailable, cannot get provider lease",
                     cooldown_seconds=300,
                     recommendation="Check coordinator service",
+                    reason_code="DEFER_PROVIDER_UNAVAILABLE",
                 )
             if provider_health.available_leases == 0:
                 # Don't block — let the worker script try to acquire.

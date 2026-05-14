@@ -429,7 +429,7 @@ def get_job_counts(db_path: str | Path | None = None) -> dict[str, int]:
     conn = _connect(db_path)
     counts: dict[str, int] = {}
 
-    # Channels needing discovery
+    # Channels total
     row = conn.execute(
         """SELECT COUNT(*) as cnt FROM channels c
            LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id

@@ -4,15 +4,6 @@
 
 {% block content %}
 <div class="container">
-    {% if previous_video %}
-    <a href="{{ url_for('video_detail', video_id=previous_video.video_id) }}"
-       class="channel-nav-button channel-nav-prev"
-       title="Prev: {{ previous_video.title }}">
-        <span class="channel-nav-label">Prev</span>
-        <span class="channel-nav-arrow"><i class="bi bi-chevron-right"></i></span>
-    </a>
-    {% endif %}
-
     {% if next_video %}
     <a href="{{ url_for('video_detail', video_id=next_video.video_id) }}"
        class="channel-nav-button channel-nav-next"
@@ -20,6 +11,29 @@
         <span class="channel-nav-arrow"><i class="bi bi-chevron-left"></i></span>
         <span class="channel-nav-label">Next</span>
     </a>
+    {% else %}
+    <span class="channel-nav-button channel-nav-next is-disabled"
+          aria-disabled="true"
+          title="No next video">
+        <span class="channel-nav-arrow"><i class="bi bi-chevron-left"></i></span>
+        <span class="channel-nav-label">Next</span>
+    </span>
+    {% endif %}
+
+    {% if previous_video %}
+    <a href="{{ url_for('video_detail', video_id=previous_video.video_id) }}"
+       class="channel-nav-button channel-nav-prev"
+       title="Prev: {{ previous_video.title }}">
+        <span class="channel-nav-label">Prev</span>
+        <span class="channel-nav-arrow"><i class="bi bi-chevron-right"></i></span>
+    </a>
+    {% else %}
+    <span class="channel-nav-button channel-nav-prev is-disabled"
+          aria-disabled="true"
+          title="No previous video">
+        <span class="channel-nav-label">Prev</span>
+        <span class="channel-nav-arrow"><i class="bi bi-chevron-right"></i></span>
+    </span>
     {% endif %}
 
     <!-- Breadcrumb -->
@@ -381,6 +395,12 @@
         background: rgba(11, 94, 215, 0.98);
         transform: translateY(-50%) scale(1.03);
         box-shadow: 0 12px 28px rgba(13, 110, 253, 0.34);
+    }
+
+    .channel-nav-button.is-disabled {
+        opacity: 0.45;
+        pointer-events: none;
+        user-select: none;
     }
 
     .channel-nav-prev {

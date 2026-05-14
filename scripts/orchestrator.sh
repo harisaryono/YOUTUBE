@@ -4,6 +4,7 @@
 #   ./scripts/orchestrator.sh once          # Run one cycle
 #   ./scripts/orchestrator.sh run           # Run continuously
 #   ./scripts/orchestrator.sh status        # Show latest status
+#   ./scripts/orchestrator.sh explain       # Explain why jobs are/aren't running
 #   ./scripts/orchestrator.sh report        # Show latest report JSON
 #   ./scripts/orchestrator.sh stop          # Stop running daemon (via PID file)
 
@@ -89,6 +90,10 @@ case "$MODE" in
         exec "$VENV_PYTHON" -m orchestrator.daemon status "$@"
         ;;
 
+    explain)
+        exec "$VENV_PYTHON" -m orchestrator.daemon explain "$@"
+        ;;
+
     report)
         exec "$VENV_PYTHON" -m orchestrator.daemon report "$@"
         ;;
@@ -120,17 +125,18 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {once|run|status|report|stop} [options]"
+        echo "Usage: $0 {once|run|status|explain|report|stop} [options]"
         echo ""
         echo "Commands:"
         echo "  once              Run one orchestrator cycle and exit"
         echo "  run               Run orchestrator continuously"
         echo "  status            Show daemon status and latest report"
+        echo "  explain           Explain current work inventory and blockers"
         echo "  report            Show latest report as JSON"
         echo "  stop              Stop running daemon"
         echo ""
         echo "Options:"
-        echo "  --max-jobs N      Maximum jobs per cycle (default: 5)"
+        echo "  --max-jobs N      Maximum jobs per cycle (0 uses config default)"
         echo "  --profile MODE    Override profile: safe|normal|fast"
         echo "  --config PATH     Path to orchestrator.yaml"
         exit 1
