@@ -51,6 +51,16 @@ def _merge_env(config: dict[str, Any], dotenv: dict[str, str]) -> dict[str, Any]
     if "YT_TRANSCRIPT_MAX_CONSECUTIVE_HARD_BLOCKS" in dotenv:
         config.setdefault("youtube", {})["max_consecutive_hard_blocks"] = int(dotenv["YT_TRANSCRIPT_MAX_CONSECUTIVE_HARD_BLOCKS"])
 
+    # Audio download
+    if "AUDIO_DOWNLOAD_WORKERS" in dotenv:
+        config.setdefault("audio_download", {})["workers"] = int(dotenv["AUDIO_DOWNLOAD_WORKERS"])
+    if "AUDIO_DOWNLOAD_BATCH_LIMIT" in dotenv:
+        config.setdefault("audio_download", {})["batch_limit"] = int(dotenv["AUDIO_DOWNLOAD_BATCH_LIMIT"])
+    if "AUDIO_DOWNLOAD_RATE_LIMIT_SAFE" in dotenv:
+        config.setdefault("audio_download", {})["yt_dlp_rate_limit_safe"] = dotenv["AUDIO_DOWNLOAD_RATE_LIMIT_SAFE"].strip().lower() in {"1", "true", "yes", "on"}
+    if "AUDIO_DOWNLOAD_AUDIO_DIR" in dotenv:
+        config.setdefault("audio_download", {})["audio_dir"] = dotenv["AUDIO_DOWNLOAD_AUDIO_DIR"]
+
     # Resume
     if "RESUME_MAX_WORKERS" in dotenv:
         config.setdefault("resume", {})["max_workers"] = int(dotenv["RESUME_MAX_WORKERS"])
@@ -60,6 +70,12 @@ def _merge_env(config: dict[str, Any], dotenv: dict[str, str]) -> dict[str, Any]
     # Format
     if "FORMAT_MAX_WORKERS" in dotenv:
         config.setdefault("format", {})["max_workers"] = int(dotenv["FORMAT_MAX_WORKERS"])
+
+    # ASR
+    if "ASR_REQUIRE_LOCAL_AUDIO" in dotenv:
+        config.setdefault("asr", {})["require_local_audio"] = dotenv["ASR_REQUIRE_LOCAL_AUDIO"].strip().lower() in {"1", "true", "yes", "on"}
+    if "ASR_DELETE_AUDIO_AFTER_SUCCESS" in dotenv:
+        config.setdefault("asr", {})["delete_audio_after_success"] = dotenv["ASR_DELETE_AUDIO_AFTER_SUCCESS"].strip().lower() in {"1", "true", "yes", "on"}
 
     return config
 
@@ -92,6 +108,15 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "inter_video_delay_min": 8,
             "inter_video_delay_max": 15,
         },
+        "audio_download": {
+            "enabled": True,
+            "batch_limit": 50,
+            "workers": 1,
+            "max_duration_minutes": 60,
+            "yt_dlp_rate_limit_safe": True,
+            "keep_audio_after_asr": False,
+            "audio_dir": "uploads/audio",
+        },
         "resume": {
             "enabled": True,
             "max_workers": 4,
@@ -111,6 +136,8 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "max_video_workers": 2,
             "batch_limit": 20,
             "max_duration_minutes": 60,
+            "require_local_audio": True,
+            "delete_audio_after_success": True,
             "require_cached_audio": False,
         },
         "report": {

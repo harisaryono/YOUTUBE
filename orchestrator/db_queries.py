@@ -74,6 +74,39 @@ def count_videos_need_transcript(
     return row["cnt"] if row else 0
 
 
+def count_videos_need_audio_download(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    db_path: str | Path | None = None,
+) -> int:
+    """Count videos that need local audio download for ASR."""
+    max_duration = config.get("audio_download", {}).get("max_duration_minutes", 60) * 60
+    conn = _connect(db_path)
+    row = conn.execute(
+        """
+        SELECT COUNT(*) as cnt
+        FROM videos v
+        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+        WHERE COALESCE(v.transcript_downloaded, 0) = 0
+          AND v.transcript_language = 'no_subtitle'
+          AND COALESCE(v.is_member_only, 0) = 0
+          AND COALESCE(v.is_short, 0) = 0
+          AND (v.duration IS NULL OR v.duration <= ?)
+          AND (
+              a.video_id IS NULL
+              OR COALESCE(a.status, '') IN ('pending', 'failed')
+          )
+          AND (
+              a.retry_after IS NULL
+              OR a.retry_after <= datetime('now')
+          )
+        """,
+        (max_duration,),
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
 def count_videos_need_resume(
     config: dict[str, Any],
     state: OrchestratorState,
@@ -253,6 +286,60 @@ def find_videos_need_resume(
     return result
 
 
+def find_videos_need_audio_download(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    limit: int = 20,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Find videos that need local audio download for ASR."""
+    max_duration = config.get("audio_download", {}).get("max_duration_minutes", 60) * 60
+    conn = _connect(db_path)
+
+    rows = conn.execute(
+        """
+        SELECT v.id, v.video_id, v.title, v.channel_id,
+               c.channel_id as channel_identifier,
+               c.channel_name,
+               COALESCE(v.duration, 0) as duration,
+               COALESCE(a.status, 'pending') as audio_status,
+               COALESCE(a.audio_file_path, '') as audio_file_path
+        FROM videos v
+        JOIN channels c ON v.channel_id = c.id
+        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+        WHERE COALESCE(v.transcript_downloaded, 0) = 0
+          AND v.transcript_language = 'no_subtitle'
+          AND COALESCE(v.is_member_only, 0) = 0
+          AND COALESCE(v.is_short, 0) = 0
+          AND (v.duration IS NULL OR v.duration <= ?)
+          AND (
+              a.video_id IS NULL
+              OR COALESCE(a.status, '') IN ('pending', 'failed')
+          )
+          AND (
+              a.retry_after IS NULL
+              OR a.retry_after <= datetime('now')
+          )
+        ORDER BY
+            COALESCE(a.retry_count, 0) ASC,
+            COALESCE(v.duration, 0) ASC,
+            v.id DESC
+        LIMIT ?
+        """,
+        (max_duration, limit),
+    ).fetchall()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["stage"] = "audio_download"
+        d["scope"] = "youtube"
+        result.append(d)
+
+    conn.close()
+    return result
+
+
 def find_videos_need_format(
     config: dict[str, Any],
     state: OrchestratorState,
@@ -307,14 +394,21 @@ def find_videos_need_asr(
         """SELECT v.id, v.video_id, v.title, v.channel_id,
                   c.channel_id as channel_identifier,
                   c.channel_name,
-                  COALESCE(v.duration, 0) as duration
+                  COALESCE(v.duration, 0) as duration,
+                  COALESCE(a.audio_file_path, '') as audio_file_path,
+                  COALESCE(a.audio_format, '') as audio_format,
+                  COALESCE(a.status, '') as audio_status
            FROM videos v
            JOIN channels c ON v.channel_id = c.id
-           WHERE v.transcript_language = 'no_subtitle'
+           JOIN video_audio_assets a ON a.video_id = v.video_id
+           WHERE v.transcript_downloaded = 0
+             AND v.transcript_language = 'no_subtitle'
              AND COALESCE(v.is_member_only, 0) = 0
              AND COALESCE(v.is_short, 0) = 0
              AND (v.duration IS NULL OR v.duration <= ?)
-           ORDER BY v.duration ASC NULLS LAST, v.id DESC
+             AND COALESCE(a.status, '') = 'downloaded'
+             AND COALESCE(a.audio_file_path, '') != ''
+           ORDER BY COALESCE(a.updated_at, v.created_at) ASC, v.id DESC
            LIMIT ?""",
         (max_duration, limit),
     ).fetchall()
@@ -354,6 +448,28 @@ def get_job_counts(db_path: str | Path | None = None) -> dict[str, int]:
     ).fetchone()
     counts["videos_need_transcript"] = row["cnt"] if row else 0
 
+    # Videos needing audio download for ASR
+    row = conn.execute(
+        """
+        SELECT COUNT(*) as cnt
+        FROM videos v
+        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+        WHERE COALESCE(v.transcript_downloaded, 0) = 0
+          AND v.transcript_language = 'no_subtitle'
+          AND COALESCE(v.is_member_only, 0) = 0
+          AND COALESCE(v.is_short, 0) = 0
+          AND (
+              a.video_id IS NULL
+              OR COALESCE(a.status, '') IN ('pending', 'failed')
+          )
+          AND (
+              a.retry_after IS NULL
+              OR a.retry_after <= datetime('now')
+          )
+        """
+    ).fetchone()
+    counts["videos_need_audio_download"] = row["cnt"] if row else 0
+
     # Videos needing resume
     row = conn.execute(
         """SELECT COUNT(*) as cnt FROM videos
@@ -373,10 +489,14 @@ def get_job_counts(db_path: str | Path | None = None) -> dict[str, int]:
 
     # Videos needing ASR
     row = conn.execute(
-        """SELECT COUNT(*) as cnt FROM videos
-           WHERE transcript_language = 'no_subtitle'
-             AND COALESCE(is_member_only, 0) = 0
-             AND COALESCE(is_short, 0) = 0"""
+        """SELECT COUNT(*) as cnt FROM videos v
+           JOIN video_audio_assets a ON a.video_id = v.video_id
+           WHERE v.transcript_downloaded = 0
+             AND v.transcript_language = 'no_subtitle'
+             AND COALESCE(v.is_member_only, 0) = 0
+             AND COALESCE(v.is_short, 0) = 0
+             AND COALESCE(a.status, '') = 'downloaded'
+             AND COALESCE(a.audio_file_path, '') != ''"""
     ).fetchone()
     counts["videos_need_asr"] = row["cnt"] if row else 0
 

@@ -68,6 +68,16 @@ def _append_limit(cmd: list[str], limit: Any) -> None:
         cmd.extend(["--limit", str(limit_value)])
 
 
+def _config_audio_dir(config: dict[str, Any]) -> str:
+    audio_dir = str(config.get("audio_download", {}).get("audio_dir", "uploads/audio") or "uploads/audio").strip()
+    if not audio_dir:
+        audio_dir = "uploads/audio"
+    path = Path(audio_dir)
+    if path.is_absolute():
+        return str(path)
+    return str((PROJECT_ROOT / path).resolve())
+
+
 def run_import_pending(
     job: dict[str, Any],
     config: dict[str, Any],
@@ -134,6 +144,58 @@ def run_discovery(
         }
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Discovery timed out (1800s)"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def run_audio_download(
+    job: dict[str, Any],
+    config: dict[str, Any],
+    state: OrchestratorState,
+) -> dict[str, Any]:
+    """Run local audio download for no_subtitle videos."""
+    python = _get_venv_python()
+    script = SCRIPTS_DIR / "audio_download.sh"
+
+    if not script.exists():
+        script = SCRIPTS_DIR / "audio.sh"
+    if not script.exists():
+        return {"success": False, "error": f"Script not found: {script}"}
+
+    workers = config.get("audio_download", {}).get("workers", 1)
+    run_dir = _make_run_dir("audio_download")
+    limit = job.get("limit", config.get("audio_download", {}).get("batch_limit", 50))
+    rate_limit_safe = config.get("audio_download", {}).get("yt_dlp_rate_limit_safe", True)
+    env = os.environ.copy()
+    env["ASR_AUDIO_DIR"] = _config_audio_dir(config)
+
+    cmd = [
+        "bash", str(script),
+        "--workers", str(workers),
+        "--run-dir", str(run_dir),
+    ]
+    if rate_limit_safe:
+        cmd.append("--rate-limit-safe")
+    _append_limit(cmd, limit)
+
+    channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
+    if channel_id:
+        cmd.extend(["--channel-id", channel_id])
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=3600, env=env
+        )
+        success = result.returncode == 0
+        return {
+            "success": success,
+            "returncode": result.returncode,
+            "run_dir": str(run_dir),
+            "stdout": result.stdout[-1000:],
+            "stderr": result.stderr[-1000:],
+        }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Audio download timed out (3600s)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -289,14 +351,19 @@ def run_asr(
         return {"success": False, "error": f"Script not found: {script}"}
 
     limit = job.get("limit", config.get("asr", {}).get("batch_limit", 20))
-    cmd = ["bash", str(script)]
+    env = os.environ.copy()
+    env["ASR_AUDIO_DIR"] = _config_audio_dir(config)
+
+    cmd = ["bash", str(script), "--local-audio-only"]
     if video_id:
         cmd.extend(["--video-id", video_id])
     _append_limit(cmd, limit)
+    if config.get("asr", {}).get("delete_audio_after_success", True):
+        cmd.append("--delete-audio-after-success")
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=3600
+            cmd, capture_output=True, text=True, timeout=3600, env=env
         )
         success = result.returncode == 0
         return {
@@ -316,6 +383,7 @@ DISPATCH_TABLE: dict[str, Any] = {
     "import_pending": run_import_pending,
     "discovery": run_discovery,
     "transcript": run_transcript,
+    "audio_download": run_audio_download,
     "resume": run_resume,
     "format": run_format,
     "asr": run_asr,

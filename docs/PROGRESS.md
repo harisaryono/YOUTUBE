@@ -13,7 +13,11 @@
   - `recover_asr_transcripts.py`
   - `scripts/asr.sh`
   - tabel `video_asr_chunks` untuk resume per chunk/provider
-- ASR sekarang punya mode `--download-only` untuk warm audio cache background, dan mode `--require-cached-audio` untuk memaksa consumer tidak download audio ulang.
+- ASR sekarang dipisah jadi dua stage:
+  - `audio_download` untuk fetch audio lokal ke `video_audio_assets`
+  - `asr` untuk membaca file audio lokal saja, tanpa YouTube download
+- `scripts/audio.sh` / `scripts/audio_download.sh` sekarang jadi stage `audio_download`, sedangkan `scripts/asr.sh` hanya menjalankan ASR lokal.
+- `recover_asr_transcripts.py` sekarang menyimpan `video_audio_assets.audio_file_path`, mendukung `--local-audio-only`, dan bisa menghapus audio lokal setelah ASR sukses.
 - Supervisor sadar-state baru sudah disiapkan:
   - `scripts/audio.sh`
   - `scripts/supervisor.sh`
@@ -33,6 +37,7 @@
 - Setiap mode baru di `run_pipeline.sh` dan setiap repair utility baru wajib punya jejak di `README.md`, `PROGRESS.md`, atau dokumen khusus seperti `CHANNEL_SOURCE_REPAIR.md`.
 - `scripts/clear_shadow_text_columns.py` sudah dipakai untuk mengosongkan `videos.transcript_text` dan `videos.summary_text` pada row yang punya blob pasangan.
 - `scripts/migrate_search_cache.py` sekarang memindahkan `videos_search_cache` + `videos_search_fts` ke `db/youtube_transcripts_search.db`; corpus search sudah diperkecil dengan menghapus `summary_search`. Hasil akhirnya: `youtube_transcripts.db` sekitar `51.6 MB`, `db/youtube_transcripts_search.db` sekitar `368.9 MB`, dan `idx_videos_upload_date` juga sudah dibuang.
+- Orchestrator Stage 2 sekarang memisahkan `audio_download -> asr`; batch `audio_download` mencari `no_subtitle` yang belum punya aset audio lokal, sedangkan `asr` hanya memproses row yang sudah punya `video_audio_assets.status = downloaded`.
 - Audit lanjutan menunjukkan `description` di search corpus tidak layak dibuang: simulasi title+transcript-only hanya menghemat sekitar `0.8 MB`, tapi sample query dari description kehilangan sekitar `1.42%` hit.
 - Ingest metadata-only terbaru: `@MentalCuann`, `@JurnalInvestasiku`, `@SiPalingLogis`, `@nalarlambat`, `@ilmulidi`, dan video `rn9-P466MWw` dari `@SeniMengaturGaji` dicatat di `runs/manual_channel_ingest_20260514_062000/report.json`.
 - Ingest metadata-only berikutnya: `@KendatiDemikianStudio`, `@kayaalaceo`, `@FinansialMedia`, `@Jejolok`, `@RuangKaya`, serta normalisasi `@OasisCeritaUsaha` dicatat di `runs/manual_channel_ingest_20260514_062350/report.json`.

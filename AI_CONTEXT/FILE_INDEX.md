@@ -22,7 +22,7 @@
 - `database_blobs.py` (4244 bytes)
 
 ## database_optimized.py
-- `database_optimized.py` (100325 bytes)
+- `database_optimized.py` (106503 bytes)
 
 ## database_search.py
 - `database_search.py` (9351 bytes)
@@ -37,10 +37,10 @@
 - `docs/DB_DIET_AUDIT.md` (4757 bytes)
 - `docs/FTS_MIGRATION_PLAN.md` (2724 bytes)
 - `docs/LOCAL_SETUP_GUIDE.md` (9176 bytes)
-- `docs/PROGRESS.md` (30903 bytes)
+- `docs/PROGRESS.md` (31476 bytes)
 - `docs/README.md` (3379 bytes)
 - `docs/STATE_MACHINE.md` (2351 bytes)
-- `docs/VERIFY.md` (13598 bytes)
+- `docs/VERIFY.md` (13867 bytes)
 - `docs/WORKFLOWS.md` (8598 bytes)
 
 ## fill_missing_resumes_youtube_db.py
@@ -86,19 +86,19 @@
 
 ## orchestrator
 - `orchestrator/__init__.py` (0 bytes)
-- `orchestrator/config.py` (4691 bytes)
+- `orchestrator/config.py` (6153 bytes)
 - `orchestrator/cooldown.py` (3747 bytes)
 - `orchestrator/daemon.py` (13082 bytes)
-- `orchestrator/db_queries.py` (12486 bytes)
-- `orchestrator/dispatcher.py` (11036 bytes)
+- `orchestrator/db_queries.py` (16692 bytes)
+- `orchestrator/dispatcher.py` (13431 bytes)
 - `orchestrator/error_analyzer.py` (9749 bytes)
-- `orchestrator/planner.py` (5149 bytes)
+- `orchestrator/planner.py` (5881 bytes)
 - `orchestrator/reports.py` (10805 bytes)
-- `orchestrator/safety.py` (12492 bytes)
+- `orchestrator/safety.py` (12728 bytes)
 - `orchestrator/state.py` (11134 bytes)
 
 ## orchestrator.yaml
-- `orchestrator.yaml` (1797 bytes)
+- `orchestrator.yaml` (2041 bytes)
 
 ## partial_docs
 - `partial_docs/API_METADATA_RESULTS.md` (2504 bytes)
@@ -247,7 +247,7 @@
 - `provider_encryption.py` (5831 bytes)
 
 ## recover_asr_transcripts.py
-- `recover_asr_transcripts.py` (90658 bytes)
+- `recover_asr_transcripts.py` (99773 bytes)
 
 ## recover_transcripts.py
 - `recover_transcripts.py` (59861 bytes)
@@ -267,8 +267,8 @@
 ## scripts
 - `scripts/README.md` (5626 bytes)
 - `scripts/archive_channels.sh` (891 bytes)
-- `scripts/asr.sh` (7693 bytes)
-- `scripts/audio.sh` (6879 bytes)
+- `scripts/asr.sh` (8384 bytes)
+- `scripts/audio.sh` (7244 bytes)
 - `scripts/audit_no_subtitle_webshare.py` (9839 bytes)
 - `scripts/backfill_text_blobs.py` (2429 bytes)
 - `scripts/backfill_transcript_files_to_blob.py` (6967 bytes)

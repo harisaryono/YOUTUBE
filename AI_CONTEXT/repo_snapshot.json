@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-05-14T12:18:07.553373+00:00",
+  "generated_at": "2026-05-14T12:27:16.774696+00:00",
   "repo_root": "/media/harry/DATA120B/GIT/YOUTUBE",
-  "file_count": 276,
+  "file_count": 277,
   "root_files": [
     "README.md",
     "AGENTS.md",
@@ -85,10 +85,10 @@
     },
     {
       "path": "database_optimized.py",
-      "size": 100325,
-      "mtime": "2026-05-14T11:40:26.597461+00:00",
+      "size": 106503,
+      "mtime": "2026-05-14T12:22:00.433025+00:00",
       "is_symlink": false,
-      "sha256": "48b84b1fac893eede7d9e738c73ae75dc2408886302addb92d840014f0701d5e"
+      "sha256": "f61939d594378cd1811fbdbf0431d26b03b94e01f1d628af4a3b15eae87edc99"
     },
     {
       "path": "database_search.py",
@@ -169,17 +169,17 @@
     },
     {
       "path": "docs/PLAN.md",
-      "size": 7833,
-      "mtime": "2026-05-14T02:11:50.853238+00:00",
+      "size": 7983,
+      "mtime": "2026-05-14T12:27:13.139733+00:00",
       "is_symlink": false,
-      "sha256": "6260f501346cd0530bf73479fc78bdcbb6e941da4cd6ecf55ef54494775dab4e"
+      "sha256": "53c52d50c4237471e9a1ca4be228d354f3af43d1a043e0b2e18fe98a3b498c8c"
     },
     {
       "path": "docs/PROGRESS.md",
-      "size": 30903,
-      "mtime": "2026-05-14T11:44:48.916072+00:00",
+      "size": 31476,
+      "mtime": "2026-05-14T12:27:13.140733+00:00",
       "is_symlink": false,
-      "sha256": "98b07764731dbb8abbb522fe748fac0e5097770fc38d3f7c1aba3f7cd05430bf"
+      "sha256": "ae57ed0e3c6d343fc18dd15f309022acde8c61fe0c37160393cd74e4c135b7e1"
     },
     {
       "path": "docs/README.md",
@@ -211,10 +211,10 @@
     },
     {
       "path": "docs/VERIFY.md",
-      "size": 13598,
-      "mtime": "2026-05-14T02:42:10.789589+00:00",
+      "size": 13867,
+      "mtime": "2026-05-14T12:27:13.140733+00:00",
       "is_symlink": false,
-      "sha256": "f0b1edabc73e3d1bfb71608c021b57c045b349a1bdf00a23b5e0c559cc92fdc2"
+      "sha256": "f67ec7e68b3a03da8aec297454ac7500560507c7da1c34815199d3ec2482a99a"
     },
     {
       "path": "docs/WEBAPP.md",
@@ -421,10 +421,10 @@
     },
     {
       "path": "orchestrator.yaml",
-      "size": 1797,
-      "mtime": "2026-05-14T12:16:53.522625+00:00",
+      "size": 2041,
+      "mtime": "2026-05-14T12:22:47.497682+00:00",
       "is_symlink": false,
-      "sha256": "6f4cb23da8e0d9b9cd752d3532eb18c55ba88b60e6837be69109231a4735bcf3"
+      "sha256": "4604f642b75e512bceab2e1b693f440283d01eff3ccbbbf5782bf8e7327239e8"
     },
     {
       "path": "orchestrator/__init__.py",
@@ -435,10 +435,10 @@
     },
     {
       "path": "orchestrator/config.py",
-      "size": 4691,
-      "mtime": "2026-05-14T12:16:53.521626+00:00",
+      "size": 6153,
+      "mtime": "2026-05-14T12:25:20.058935+00:00",
       "is_symlink": false,
-      "sha256": "e7b5138dbf6939e4b515f789879bfd1750686e504b20c65de0ba3730ba7a5281"
+      "sha256": "e34cf69fb48e0dc2c8bd1d251818f47befae38e98153762a8f028b1a748055e8"
     },
     {
       "path": "orchestrator/cooldown.py",
@@ -456,17 +456,17 @@
     },
     {
       "path": "orchestrator/db_queries.py",
-      "size": 12486,
-      "mtime": "2026-05-14T10:08:28.671706+00:00",
+      "size": 16692,
+      "mtime": "2026-05-14T12:22:15.743566+00:00",
       "is_symlink": false,
-      "sha256": "a9c3c5b86444f7247831a21ec1aa892394fbc9f90c2901467682d93ad7802992"
+      "sha256": "52588bac8f96e9bf59e139ad037dcd9599c27d1ed65a5b4640ed3ce292312ba9"
     },
     {
       "path": "orchestrator/dispatcher.py",
-      "size": 11036,
-      "mtime": "2026-05-14T12:17:08.051194+00:00",
+      "size": 13431,
+      "mtime": "2026-05-14T12:22:42.127494+00:00",
       "is_symlink": false,
-      "sha256": "603996fc7ab7366a93cb26440c329f1f2fbc9245fa071c812bfb7c724f3f36a1"
+      "sha256": "05f9901edf68e159f9b173b9529cf2fe69ea8cfb2e8a0c9f468e8f4e1954dc96"
     },
     {
       "path": "orchestrator/error_analyzer.py",
@@ -477,10 +477,10 @@
     },
     {
       "path": "orchestrator/planner.py",
-      "size": 5149,
-      "mtime": "2026-05-14T12:17:00.763909+00:00",
+      "size": 5881,
+      "mtime": "2026-05-14T12:22:24.951890+00:00",
       "is_symlink": false,
-      "sha256": "00af1c4c822d33ae7f8226b8eea13d4a01079c93f803c2a6bdbedd5005c0bcfd"
+      "sha256": "c3cbfd20de3182d4cacb5bac6cdd0ee4545cb6bd21f4569e0ffd95f742d8e1a5"
     },
     {
       "path": "orchestrator/reports.py",
@@ -491,10 +491,10 @@
     },
     {
       "path": "orchestrator/safety.py",
-      "size": 12492,
-      "mtime": "2026-05-14T10:59:42.102540+00:00",
+      "size": 12728,
+      "mtime": "2026-05-14T12:26:55.526146+00:00",
       "is_symlink": false,
-      "sha256": "1720b74db275dc513f8439f5644253c3a9cfdfbeb0aa118a89e8ae0a441ca803"
+      "sha256": "85ede90d8e99fb68e8b74669676dcab98b78bd2dcfa0f31100f60d3ad0f32d2c"
     },
     {
       "path": "orchestrator/state.py",
@@ -1443,10 +1443,10 @@
     },
     {
       "path": "recover_asr_transcripts.py",
-      "size": 90658,
-      "mtime": "2026-05-14T07:03:33.451486+00:00",
+      "size": 99773,
+      "mtime": "2026-05-14T12:25:41.119648+00:00",
       "is_symlink": false,
-      "sha256": "3a4428fcccb2e3949066b9ef8d6f2f8ce87845aaa87d26c8ea464853fe262708"
+      "sha256": "9a9747d12a9a854e170589073c5538eec9ad1acfda95ef9055c671bb23a6f11a"
     },
     {
       "path": "recover_transcripts.py",
@@ -1506,17 +1506,24 @@
     },
     {
       "path": "scripts/asr.sh",
-      "size": 7693,
-      "mtime": "2026-05-14T09:02:50.793484+00:00",
+      "size": 8384,
+      "mtime": "2026-05-14T12:23:08.259407+00:00",
       "is_symlink": false,
-      "sha256": "bd0a6e796ff8200ccb4e37537469f687970970f7b9046926a445942d19008f96"
+      "sha256": "2fe6b59ad51cccb9ce73106a47d58e575c004de3ca485718f8b1d176e70fa7f8"
     },
     {
       "path": "scripts/audio.sh",
-      "size": 6879,
-      "mtime": "2026-05-14T12:17:17.944579+00:00",
+      "size": 7244,
+      "mtime": "2026-05-14T12:25:50.615968+00:00",
       "is_symlink": false,
-      "sha256": "1562c31bc3ca3e5be27ef6547203ad08fa60c0b79daa8ed2d90e1ec177e9f0d6"
+      "sha256": "7e628933cac73be715f75e4109a0f2e8bffae7cdbbcff41914845c48e52ea269"
+    },
+    {
+      "path": "scripts/audio_download.sh",
+      "size": 189,
+      "mtime": "2026-05-14T12:23:18.049747+00:00",
+      "is_symlink": false,
+      "sha256": "013047ee7185fb9a66e7f643606ed28d54f80c52787d0667ece0f5e02aca2cc5"
     },
     {
       "path": "scripts/audit_no_subtitle_webshare.py",

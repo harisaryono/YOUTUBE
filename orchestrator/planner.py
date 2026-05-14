@@ -16,9 +16,10 @@ JOB_PRIORITY = [
     "import_pending",   # 0 — highest
     "discovery",        # 1
     "transcript",       # 2
-    "resume",           # 3
-    "format",           # 4
-    "asr",              # 5 — lowest
+    "audio_download",   # 3
+    "asr",              # 4
+    "resume",           # 5
+    "format",           # 6
 ]
 
 
@@ -88,7 +89,35 @@ def plan_jobs(
             "count": transcript_count,
         })
 
-    # 4. Resume — max 1 batch per cycle
+    # 4. Audio download — fetch local audio for no_subtitle videos
+    if config.get("audio_download", {}).get("enabled", True):
+        audio_count = db_queries.count_videos_need_audio_download(config, state)
+        if audio_count > 0:
+            batch_limit = _limit_value(config.get("audio_download", {}).get("batch_limit", 50), 50)
+            jobs.append({
+                "stage": "audio_download",
+                "scope": "youtube",
+                "priority": 3,
+                "limit": batch_limit,
+                "description": f"{_batch_description('audio download', batch_limit, 'videos')} ({audio_count} total pending)",
+                "count": audio_count,
+            })
+
+    # 5. ASR — local-audio processing only
+    if config.get("asr", {}).get("enabled", False):
+        asr_count = db_queries.count_videos_need_asr(config, state)
+        if asr_count > 0:
+            batch_limit = _limit_value(config.get("asr", {}).get("batch_limit", 20), 20)
+            jobs.append({
+                "stage": "asr",
+                "scope": "local:asr",
+                "priority": 4,
+                "limit": batch_limit,
+                "description": f"{_batch_description('asr', batch_limit, 'local audio files')} ({asr_count} total pending)",
+                "count": asr_count,
+            })
+
+    # 6. Resume — max 1 batch per cycle
     if config.get("resume", {}).get("enabled", True):
         resume_count = db_queries.count_videos_need_resume(config, state)
         if resume_count > 0:
@@ -96,13 +125,13 @@ def plan_jobs(
             jobs.append({
                 "stage": "resume",
                 "scope": "provider",
-                "priority": 3,
+                "priority": 5,
                 "limit": batch_limit,
                 "description": f"{_batch_description('resume', batch_limit, 'videos')} ({resume_count} total pending)",
                 "count": resume_count,
             })
 
-    # 5. Format — max 1 batch per cycle
+    # 7. Format — max 1 batch per cycle
     if config.get("format", {}).get("enabled", True):
         format_count = db_queries.count_videos_need_format(config, state)
         if format_count > 0:
@@ -110,24 +139,10 @@ def plan_jobs(
             jobs.append({
                 "stage": "format",
                 "scope": "global",
-                "priority": 4,
+                "priority": 6,
                 "limit": batch_limit,
                 "description": f"{_batch_description('format', batch_limit, 'videos')} ({format_count} total pending)",
                 "count": format_count,
-            })
-
-    # 6. ASR — max 1 batch per cycle
-    if config.get("asr", {}).get("enabled", False):
-        asr_count = db_queries.count_videos_need_asr(config, state)
-        if asr_count > 0:
-            batch_limit = _limit_value(config.get("asr", {}).get("batch_limit", 20), 20)
-            jobs.append({
-                "stage": "asr",
-                "scope": "global",
-                "priority": 5,
-                "limit": batch_limit,
-                "description": f"{_batch_description('asr', batch_limit, 'videos')} ({asr_count} total pending)",
-                "count": asr_count,
             })
 
     # Sort by priority (lower = higher priority)

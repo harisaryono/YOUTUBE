@@ -38,6 +38,8 @@ OVERLAP_SECONDS_VALUE="2"
 VIDEO_WORKERS_VALUE="1"
 POSTPROCESS_FLAG=""
 REQUIRE_CACHED_AUDIO_FLAG="0"
+LOCAL_AUDIO_ONLY_FLAG="0"
+DELETE_AUDIO_AFTER_SUCCESS_FLAG="0"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -93,6 +95,14 @@ while [[ $# -gt 0 ]]; do
             REQUIRE_CACHED_AUDIO_FLAG="1"
             shift 1
             ;;
+        --local-audio-only)
+            LOCAL_AUDIO_ONLY_FLAG="1"
+            shift 1
+            ;;
+        --delete-audio-after-success)
+            DELETE_AUDIO_AFTER_SUCCESS_FLAG="1"
+            shift 1
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -110,6 +120,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --video-workers N     Parallel video workers, default: 1"
             echo "  --postprocess         Enable GPT OSS post-process (default: off)"
             echo "  --require-cached-audio Fail fast if cached audio is missing"
+            echo "  --local-audio-only    Use local audio files only"
+            echo "  --delete-audio-after-success Delete local audio after success"
             echo "  --help                Show this help message"
             echo ""
             echo "Examples:"
@@ -163,6 +175,8 @@ JOB_LOG_PATH="${JOB_LOG_PATH:-$REPO_DIR/logs/${JOB_ID}.log}"
 mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
 
+export ASR_AUDIO_DIR="${ASR_AUDIO_DIR:-$REPO_DIR/uploads/audio}"
+
 CMD_ARGS=(
     "recover_asr_transcripts.py"
     "--run-dir" "$JOB_RUN_DIR"
@@ -178,6 +192,12 @@ if [ -n "$POSTPROCESS_FLAG" ]; then
 fi
 if [ "$REQUIRE_CACHED_AUDIO_FLAG" = "1" ]; then
     CMD_ARGS+=("--require-cached-audio")
+fi
+if [ "$LOCAL_AUDIO_ONLY_FLAG" = "1" ]; then
+    CMD_ARGS+=("--local-audio-only")
+fi
+if [ "$DELETE_AUDIO_AFTER_SUCCESS_FLAG" = "1" ]; then
+    CMD_ARGS+=("--delete-audio-after-success")
 fi
 if [ -n "$CSV_FILE" ]; then
     CMD_ARGS+=("--csv" "$CSV_FILE")

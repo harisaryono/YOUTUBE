@@ -39,6 +39,15 @@ youtube:
   inter_video_delay_min: 8
   inter_video_delay_max: 15
 
+audio_download:
+  enabled: true
+  batch_limit: 50
+  workers: 1
+  max_duration_minutes: 60
+  yt_dlp_rate_limit_safe: true
+  keep_audio_after_asr: false
+  audio_dir: "uploads/audio"
+
 resume:
   enabled: true
   max_workers: 4
@@ -63,6 +72,8 @@ asr:
   max_video_workers: 2
   batch_limit: 20
   max_duration_minutes: 60
+  require_local_audio: true
+  delete_audio_after_success: true
   require_cached_audio: false
 
 

@@ -338,6 +338,27 @@ class OptimizedDatabase:
                 ON video_asr_chunks(provider, model_name, status, chunk_index)
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS video_audio_assets (
+                    video_id TEXT PRIMARY KEY,
+                    audio_file_path TEXT NOT NULL DEFAULT '',
+                    audio_format TEXT NOT NULL DEFAULT '',
+                    duration INTEGER DEFAULT 0,
+                    file_size_bytes INTEGER DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    retry_after TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    error_text TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(video_id) REFERENCES videos(video_id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_video_audio_assets_status_retry
+                ON video_audio_assets(status, retry_after)
+            """)
+
             cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_insert")
             cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_update")
             cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_delete")
@@ -835,6 +856,133 @@ class OptimizedDatabase:
                 """, (formatted_file_path, video_id))
         except Exception as e:
             raise Exception(f"Gagal update video dengan formatted transcript: {str(e)}")
+
+    def get_video_audio_asset(self, video_id: str) -> dict | None:
+        """Return a single audio asset row for a video if present."""
+        cursor = self.conn.cursor()
+        try:
+            row = cursor.execute(
+                "SELECT * FROM video_audio_assets WHERE video_id = ? LIMIT 1",
+                (video_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            cursor.close()
+
+    def upsert_video_audio_asset(
+        self,
+        video_id: str,
+        audio_file_path: str = "",
+        audio_format: str = "",
+        duration: int = 0,
+        file_size_bytes: int = 0,
+        status: str = "pending",
+        retry_after: str | None = None,
+        retry_count: int = 0,
+        error_text: str = "",
+    ) -> None:
+        """Create or update a local audio asset row."""
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO video_audio_assets (
+                        video_id, audio_file_path, audio_format, duration,
+                        file_size_bytes, status, retry_after, retry_count,
+                        error_text, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(video_id) DO UPDATE SET
+                        audio_file_path = excluded.audio_file_path,
+                        audio_format = excluded.audio_format,
+                        duration = excluded.duration,
+                        file_size_bytes = excluded.file_size_bytes,
+                        status = excluded.status,
+                        retry_after = excluded.retry_after,
+                        retry_count = excluded.retry_count,
+                        error_text = excluded.error_text,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        str(video_id or ""),
+                        str(audio_file_path or ""),
+                        str(audio_format or ""),
+                        int(duration or 0),
+                        int(file_size_bytes or 0),
+                        str(status or "pending"),
+                        retry_after,
+                        int(retry_count or 0),
+                        str(error_text or "")[:1000],
+                    ),
+                )
+        except Exception as e:
+            raise Exception(f"Gagal upsert audio asset: {str(e)}")
+
+    def mark_video_audio_downloaded(
+        self,
+        video_id: str,
+        audio_file_path: str,
+        audio_format: str = "",
+        duration: int = 0,
+        file_size_bytes: int = 0,
+    ) -> None:
+        """Mark local audio as downloaded and ready for ASR."""
+        self.upsert_video_audio_asset(
+            video_id=video_id,
+            audio_file_path=audio_file_path,
+            audio_format=audio_format,
+            duration=duration,
+            file_size_bytes=file_size_bytes,
+            status="downloaded",
+            retry_after=None,
+            retry_count=0,
+            error_text="",
+        )
+
+    def mark_video_audio_consumed(
+        self,
+        video_id: str,
+        audio_file_path: str = "",
+        audio_format: str = "",
+        duration: int = 0,
+        file_size_bytes: int = 0,
+    ) -> None:
+        """Mark local audio as consumed after successful ASR."""
+        self.upsert_video_audio_asset(
+            video_id=video_id,
+            audio_file_path=audio_file_path,
+            audio_format=audio_format,
+            duration=duration,
+            file_size_bytes=file_size_bytes,
+            status="consumed",
+            retry_after=None,
+            retry_count=0,
+            error_text="",
+        )
+
+    def mark_video_audio_download_retry_later(self, video_id: str, reason: str, retry_after_hours: int = 24) -> None:
+        """Mark audio download as retryable after a cooldown."""
+        hours = max(1, int(retry_after_hours or 24))
+        modifier = f"+{hours} hours"
+        try:
+            with self._get_cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO video_audio_assets (
+                        video_id, audio_file_path, audio_format, duration,
+                        file_size_bytes, status, retry_after, retry_count,
+                        error_text, created_at, updated_at
+                    ) VALUES (?, '', '', 0, 0, 'failed', datetime('now', ?), 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(video_id) DO UPDATE SET
+                        status = 'failed',
+                        retry_after = datetime('now', ?),
+                        retry_count = COALESCE(video_audio_assets.retry_count, 0) + 1,
+                        error_text = excluded.error_text,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (video_id, modifier, str(reason or "")[:1000], modifier),
+                )
+        except Exception as e:
+            raise Exception(f"Gagal menandai retry later untuk audio: {str(e)}")
 
     def mark_video_transcript_retry_later(self, video_id: str, reason: str, retry_after_hours: int = 24):
         """Tandai video untuk dicoba ulang nanti tanpa mengubah state transcript utama."""
