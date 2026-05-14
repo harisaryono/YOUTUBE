@@ -1,6 +1,6 @@
 # AI_CONTEXT Handoff
 
-Generated: `2026-05-14T08:45:12.285571+00:00`
+Generated: `2026-05-14T09:35:58.324007+00:00`
 
 ## What to open first
 
@@ -17,14 +17,17 @@ Generated: `2026-05-14T08:45:12.285571+00:00`
 - Search uses `videos_search_cache` + `videos_search_fts`.
 - Manual download flows into resume and formatting automatically.
 - Shell entrypoints live under `scripts/`.
+- Orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
 
 ## Important constraints
 
 - Do not reintroduce `videos_fts` or search paths that depend on `videos.transcript_text`.
 - Keep manual transcript jobs from being double-submitted.
 - Treat large data dirs (`runs/`, `uploads/`, `logs/`, `tmp/`) as runtime artifacts, not source of truth.
+- Orchestrator state DB: `runs/orchestrator/orchestrator_state.db`
 
 ## Notes for AI readers
 
 - The repo has many legacy compatibility files in `partial_py/`, `partial_docs/`, and `partial_ops/`.
 - Use `docs/README.md` as the index, then `docs/WORKFLOWS.md` for operational flow.
+- Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`

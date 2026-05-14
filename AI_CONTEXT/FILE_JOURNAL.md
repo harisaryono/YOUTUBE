@@ -1,8 +1,8 @@
 # File Journal
 
 ## `README.md`
-- size: 11770 bytes
-- sha256: `4649f36ffd2f1a4d`
+- size: 11404 bytes
+- sha256: `822a29b84e41c123`
 ```text
 # YouTube Transcript Framework
 
@@ -11,11 +11,11 @@ Framework Python untuk mengambil transkrip dari video YouTube, memformat hasil t
 ## Dokumen Acuan
 
 Dokumen acuan utama sekarang dipusatkan di `docs/`:
-- [docs/README.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/README.md)
-- [docs/WORKFLOWS.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/WORKFLOWS.md)
-- [docs/PLAN.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/PLAN.md)
-- [docs/PROGRESS.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/PROGRESS.md)
-- [docs/VERIFY.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/VERIFY.md)
+- [docs/README.md](docs/README.md)
+- [docs/WORKFLOWS.md](docs/WORKFLOWS.md)
+- [docs/PLAN.md](docs/PLAN.md)
+- [docs/PROGRESS.md](docs/PROGRESS.md)
+- [docs/VERIFY.md](docs/VERIFY.md)
 ```
 
 ## `docs/WORKFLOWS.md`

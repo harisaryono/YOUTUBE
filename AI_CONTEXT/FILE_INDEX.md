@@ -7,10 +7,13 @@
 - `.vscode/mcp.json` (196 bytes)
 
 ## AGENTS.md
-- `AGENTS.md` (6443 bytes)
+- `AGENTS.md` (11558 bytes)
+
+## COORDINATOR_GUIDE.md
+- `COORDINATOR_GUIDE.md` (661 bytes)
 
 ## README.md
-- `README.md` (11770 bytes)
+- `README.md` (11404 bytes)
 
 ## channels.db
 - `channels.db` (69632 bytes)
@@ -74,6 +77,22 @@
 
 ## manage_database.py
 - `manage_database.py` (16182 bytes)
+
+## orchestrator
+- `orchestrator/__init__.py` (0 bytes)
+- `orchestrator/config.py` (4567 bytes)
+- `orchestrator/cooldown.py` (3747 bytes)
+- `orchestrator/daemon.py` (10908 bytes)
+- `orchestrator/db_queries.py` (9280 bytes)
+- `orchestrator/dispatcher.py` (10361 bytes)
+- `orchestrator/error_analyzer.py` (8781 bytes)
+- `orchestrator/planner.py` (3169 bytes)
+- `orchestrator/reports.py` (7087 bytes)
+- `orchestrator/safety.py` (8661 bytes)
+- `orchestrator/state.py` (8627 bytes)
+
+## orchestrator.yaml
+- `orchestrator.yaml` (1692 bytes)
 
 ## partial_docs
 - `partial_docs/API_METADATA_RESULTS.md` (2504 bytes)
@@ -231,7 +250,7 @@
 - `recover_transcripts_from_csv.py` (24514 bytes)
 
 ## requirements.txt
-- `requirements.txt` (390 bytes)
+- `requirements.txt` (460 bytes)
 
 ## robots.txt
 - `robots.txt` (622 bytes)
@@ -242,7 +261,7 @@
 ## scripts
 - `scripts/README.md` (5387 bytes)
 - `scripts/archive_channels.sh` (891 bytes)
-- `scripts/asr.sh` (7696 bytes)
+- `scripts/asr.sh` (7693 bytes)
 - `scripts/audio.sh` (6882 bytes)
 - `scripts/audit_no_subtitle_webshare.py` (9839 bytes)
 - `scripts/backfill_text_blobs.py` (2429 bytes)
@@ -250,7 +269,7 @@
 - `scripts/cleanup_redundant_summary_files.py` (3618 bytes)
 - `scripts/cleanup_redundant_transcript_files.py` (4365 bytes)
 - `scripts/deploy_exclude.txt` (194 bytes)
-- `scripts/discover.sh` (6105 bytes)
+- `scripts/discover.sh` (6102 bytes)
 - `scripts/format.sh` (7328 bytes)
 - `scripts/generate_tasks.py` (5567 bytes)
 - `scripts/manual_transcript_then_resume_format.sh` (2135 bytes)
@@ -262,14 +281,14 @@
 - `scripts/monitor_pipeline.sh` (4720 bytes)
 - `scripts/refresh_stats.py` (469 bytes)
 - `scripts/repair_db_state.py` (3818 bytes)
-- `scripts/resume.sh` (7929 bytes)
+- `scripts/resume.sh` (7937 bytes)
 - `scripts/run_flask.sh` (2076 bytes)
 - `scripts/run_pipeline.sh` (16552 bytes)
 - `scripts/search.sh` (493 bytes)
 - `scripts/supervisor.sh` (9771 bytes)
 - `scripts/sync_buffer_to_main.py` (2066 bytes)
 - `scripts/sync_missing_rows_to_server.sh` (173 bytes)
-- `scripts/transcript.sh` (19952 bytes)
+- `scripts/transcript.sh` (20207 bytes)
 - `scripts/update_db_from_tar.py` (4408 bytes)
 - `scripts/verify_blobs.py` (1366 bytes)
 - `scripts/verify_fix.py` (1051 bytes)

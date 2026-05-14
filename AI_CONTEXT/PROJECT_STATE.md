@@ -1,6 +1,6 @@
 # Project State
 
-- generated_at: `2026-05-14T08:45:12.301715+00:00`
+- generated_at: `2026-05-14T09:35:58.342292+00:00`
 - repo_type: YouTube transcript / resume / format / ASR pipeline
 - active web app: Flask under `flask_app/app.py`
 - database layout: active DBs are under `db/` with root symlinks for compat
@@ -8,19 +8,22 @@
 - manual transcript chain: `manual transcript -> resume -> format`
 - transcript/summary content: blob-first, file artifacts cleaned where safe
 - discovery: channel/video ingest and repair utilities remain in `scripts/` and `partial_py/`
+- orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
 
 ## Directory Snapshot
 - `docs`: 18 files
-- `scripts`: 53 files
+- `scripts`: 55 files
 - `flask_app`: 20 files
 - `partial_py`: 114 files
 - `partial_docs`: 14 files
 - `partial_ops`: 25 files
 - `webapp`: 17 files
+- `orchestrator`: 22 files
 
 ## Root Files
-- `README.md` (11770 bytes)
-- `AGENTS.md` (6443 bytes)
+- `README.md` (11404 bytes)
+- `AGENTS.md` (11558 bytes)
+- `orchestrator.yaml` (1692 bytes)
 - `database_optimized.py` (106480 bytes)
 - `database_blobs.py` (4244 bytes)
 - `recover_transcripts.py` (59861 bytes)
@@ -37,3 +40,10 @@
 - `savesubs_playwright.py` (20437 bytes)
 - `wsgi.py` (281 bytes)
 - `passenger_wsgi.py` (125 bytes)
+
+## Orchestrator
+- orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
+- safety gate: disk, memory, cooldown YouTube/provider
+- dispatch via subprocess ke script yang sudah ada
+- auto cooldown berdasarkan klasifikasi error
+- report Markdown + JSON di runs/orchestrator/reports/

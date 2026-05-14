@@ -24,6 +24,7 @@ EXCLUDE_DIRS = {
 ROOT_FILES = [
     "README.md",
     "AGENTS.md",
+    "orchestrator.yaml",
     "database_optimized.py",
     "database_blobs.py",
     "recover_transcripts.py",
@@ -50,6 +51,7 @@ IMPORTANT_DIRS = [
     "partial_docs",
     "partial_ops",
     "webapp",
+    "orchestrator",
 ]
 
 IMPORTANT_DOCS = [
@@ -62,6 +64,7 @@ IMPORTANT_DOCS = [
     "docs/STATE_MACHINE.md",
     "docs/LOCAL_SETUP_GUIDE.md",
     "scripts/README.md",
+    "orchestrator.yaml",
     "README.md",
 ]
 
@@ -213,6 +216,7 @@ def build_project_state() -> str:
     lines.append("- manual transcript chain: `manual transcript -> resume -> format`")
     lines.append("- transcript/summary content: blob-first, file artifacts cleaned where safe")
     lines.append("- discovery: channel/video ingest and repair utilities remain in `scripts/` and `partial_py/`")
+    lines.append("- orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)")
     lines.append("")
     lines.append("## Directory Snapshot")
     for d in IMPORTANT_DIRS:
@@ -223,6 +227,13 @@ def build_project_state() -> str:
         path = REPO_ROOT / rel
         if path.exists():
             lines.append(f"- `{rel}` ({path.stat().st_size} bytes)")
+    lines.append("")
+    lines.append("## Orchestrator")
+    lines.append("- orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)")
+    lines.append("- safety gate: disk, memory, cooldown YouTube/provider")
+    lines.append("- dispatch via subprocess ke script yang sudah ada")
+    lines.append("- auto cooldown berdasarkan klasifikasi error")
+    lines.append("- report Markdown + JSON di runs/orchestrator/reports/")
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -236,6 +247,7 @@ def build_changelog() -> str:
             "- Search FTS moved to blob-first cache `videos_search_cache` + `videos_search_fts`.",
             "- Transcript/summary files under `uploads/*/text/` were cleaned once mirrored safely into blobs.",
             "- ASR and transcript wrapper logic now use lease coordinator aware fallback and cache reuse.",
+            "- Orchestrator daemon added: pipeline controller with safety gate, auto cooldown, and reports.",
         ]
     )
     lines.append("")
@@ -262,17 +274,20 @@ Generated: `{datetime.now(timezone.utc).isoformat()}`
 - Search uses `videos_search_cache` + `videos_search_fts`.
 - Manual download flows into resume and formatting automatically.
 - Shell entrypoints live under `scripts/`.
+- Orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
 
 ## Important constraints
 
 - Do not reintroduce `videos_fts` or search paths that depend on `videos.transcript_text`.
 - Keep manual transcript jobs from being double-submitted.
 - Treat large data dirs (`runs/`, `uploads/`, `logs/`, `tmp/`) as runtime artifacts, not source of truth.
+- Orchestrator state DB: `runs/orchestrator/orchestrator_state.db`
 
 ## Notes for AI readers
 
 - The repo has many legacy compatibility files in `partial_py/`, `partial_docs/`, and `partial_ops/`.
 - Use `docs/README.md` as the index, then `docs/WORKFLOWS.md` for operational flow.
+- Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`
 """
 
 

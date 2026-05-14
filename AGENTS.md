@@ -197,3 +197,160 @@ Yang menentukan hasil adalah:
 - validasi yang keras,
 - state yang jelas,
 - dan keputusan cepat saat hasil buruk.
+
+---
+
+# Skill Reference (from .codex/home/skills/)
+
+Skill berikut di-copy dari `.codex/home/skills/` sebagai referensi operasional untuk agen yang bekerja di repo ini.
+
+## youtube-pipeline
+
+Pipeline utama: discovery → transcript → resume → format.
+
+**Workflow:**
+1. Discovery: cache-first → scrapetube → invidious → innertube → yt-dlp → Webshare (last resort)
+2. Transcript: `youtube_transcript_api` → direct subtitle fetch → yt-dlp → savesubs_direct → Webshare
+3. Resume: cached transcript_items → synthesize timestamps → offline by default di `itc-server`
+4. Cooldown: saat 403, captcha, bot-check, rate-limit → catat cooldown, jangan retry dalam tight loop
+
+**Aturan:**
+- Discovery default pasif: `scrapetube → invidious → innertube`
+- Channel discovery bisa `full` mode untuk enumerasi seluruh channel
+- Transcript stop setelah stage pertama sukses, ingat stage yang bekerja
+- Resume retry provider timeout dengan chunk lebih kecil sebelum mark failed
+- Worker queues: `worker_jobs` (discovery/transcript/resume), `refresh_jobs` (backfill)
+
+## youtube-provider-fallback-layer
+
+Urutan fallback untuk sumber data YouTube (bukan fallback LLM).
+
+**Search:** `yt_dlp_search → innertube_search → invidious_search`
+**Metadata:** `yt_dlp_metadata → invidious_metadata`
+**Transcript:** `youtube_transcript_api → direct subtitle track fetch → yt-dlp subtitle download → Webshare proxy fallback`
+
+**Prinsip:**
+- Gunakan sumber direct/default paling murah dan stabil dulu
+- Webshare hanya sebagai opsi terakhir
+- Jika pipeline gagal terlalu sering di non-paid, Webshare boleh dinaikkan sementara
+- Semua provider harus return `ProviderResult(ok=True, provider="...", data=[...], status="ready")`
+
+## api-lease-coordinator
+
+Mengatur peminjaman API provider untuk worker paralel.
+
+**Konsep:**
+1. Worker minta lease
+2. Terima provider/model/base_url/api_key
+3. Pakai lease selama TTL
+4. Lapor sukses/gagal
+5. Coordinator beri cooldown bila error retryable
+
+**Gunakan saat:** banyak worker, banyak provider/model, API key terbatas, perlu cooldown 429/timeout.
+
+## asr-lease-coordinator
+
+Transkripsi audio/MP3 via lease coordinator.
+
+**Workflow:**
+1. Baca source list audio
+2. Acquire lease dari coordinator
+3. Prefer `groq` dulu, lalu `nvidia` sebagai fallback
+4. Pakai `whisper-large-v3` default
+5. Download audio sekali, transcribe, save per item
+6. Long job: heartbeat; short job: release setelah selesai
+7. Success → release dengan `ok=true`
+8. 429/timeout → mark retryable, release cleanly
+9. Auth error → stop, report blocker
+
+**Default coordinator:** `http://8.215.77.132:8788`
+
+## webshare-proxy-rotation
+
+Rotasi proxy Webshare untuk HTTP request.
+
+**Aturan:**
+- Ambil `WEBSHARE_API_KEY` dari env atau `.env.local`
+- Fetch daftar proxy dari `https://proxy.webshare.io/api/v2/proxy/list/`
+- Cache daftar proxy (jangan fetch tiap request)
+- Rotasi deterministik per `request_id` atau key stabil
+- Coba proxy satu per satu sebelum fallback direct
+- Format: `http://username:password@proxy.host:port`
+
+## sqlite-batch-commit
+
+Untuk long-running SQLite writes (import, audit, backfill).
+
+**Default:** commit setiap 25 rows.
+**Pola:**
+```python
+batch = []
+for row in rows:
+    batch.append(row)
+    if len(batch) >= 25:
+        cur.executemany(SQL, batch)
+        conn.commit()
+        batch.clear()
+if batch:
+    cur.executemany(SQL, batch)
+    conn.commit()
+```
+
+## sqlite-zstd-cache
+
+Simpan teks panjang (transcript, resume, OCR) ke SQLite sebagai zstd blob.
+
+## sqlite-delta-journal
+
+Sinkronkan perubahan SQLite besar dengan JSONL event (emit/apply), bukan upload/download DB penuh.
+
+**Cocok untuk:** kerja lintas komputer, perubahan kecil di DB besar.
+
+## ai-context-generator
+
+Generate `AI_CONTEXT/` package agar repo bisa dibaca AI/ChatGPT via Google Drive.
+
+**Output:** `LATEST_HANDOFF.md`, `FILE_INDEX.md`, `FILE_JOURNAL.md`, `PROJECT_STATE.md`, `REPO_CHANGELOG.md`, `GDRIVE_HANDOFF.md`, `repo_snapshot.json`
+
+## audit-trail-watch
+
+Watch AI context outputs, auto-regenerate saat file berubah.
+
+## gdrive-project-sync
+
+Sync repo ke Google Drive via `rclone` dengan exclude rules.
+
+**Exclude default:** `data/*.sqlite3*`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.journal_state/`, `.git/`
+
+## prompt-template-externalization
+
+Pisahkan prompt dari source code ke file `.md` agar mudah diedit dan diaudit.
+
+**Format:**
+```md
+## nama_template
+Isi prompt dengan ${variable}
+```
+
+## portable-project-layout
+
+Buat repo portable antar komputer/server tanpa path absolut.
+
+**Komponen:** `app_config.py` (resolver env/path), `bootstrap_portable_layout.sh` (symlink .env dan folder eksternal)
+
+## data-rework-backfill
+
+Buat job migrasi/perbaikan data lama secara idempotent, batch, dan resumable.
+
+**Pola:** Audit → Buat job → Claim batch → Proses → Finalize → Retry failed
+
+## bundle-first
+
+Meta-skill: kerja dalam bundled chunks, bukan micro-step.
+
+**Aturan:**
+- Mulai dengan 2-4 opsi besar
+- Rekomendasi satu
+- Eksekusi tanpa pause tiap substep
+- Compact context saat terlalu panjang
+- Jangan ubah satu request jadi chain approval kecil
