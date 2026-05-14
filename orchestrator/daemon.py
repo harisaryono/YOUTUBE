@@ -271,14 +271,12 @@ def run_loop(
         jobs_deferred = result.get("jobs_deferred", 0)
 
         if dry_run:
-            # Dry-run: check again soon
+            # Dry-run: check again soon.
             sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
-        elif jobs_dispatched > 0:
-            # Work was done — check again soon
+        elif jobs_dispatched > 0 or jobs_failed > 0:
+            # Keep moving while there is still runnable work.
+            # Hard blocks are handled through cooldown state, not by long sleeps here.
             sleep_seconds = config.get("loop", {}).get("min_sleep_seconds", 60)
-        elif jobs_failed > 0:
-            # Errors — wait longer
-            sleep_seconds = config.get("loop", {}).get("error_sleep_seconds", 1800)
         elif jobs_planned == 0:
             # No work — wait for next cooldown or idle
             next_wakeup = get_next_wakeup(state)
