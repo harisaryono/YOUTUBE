@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Optional, Iterable
 from zoneinfo import ZoneInfo
 
+try:
+    import httpx
+except Exception:
+    httpx = None
+
 from local_services import (
     coordinator_base_url,
     DEFAULT_PROVIDERS_DB,
@@ -36,6 +41,13 @@ ACQUIRE_WAIT_TIMEOUT_SECONDS = max(3, int(os.getenv("YT_RESUME_ACQUIRE_TIMEOUT_S
 ACQUIRE_WAIT_INITIAL_SECONDS = max(1, int(os.getenv("YT_RESUME_ACQUIRE_INITIAL_WAIT_SECONDS", "2") or 2))
 ACQUIRE_WAIT_MAX_SECONDS = max(3, int(os.getenv("YT_RESUME_ACQUIRE_MAX_WAIT_SECONDS", "5") or 5))
 GENERATION_TIMEOUT_SECONDS = max(60, int(os.getenv("YT_RESUME_GENERATION_TIMEOUT_SECONDS", "240") or 240))
+NVIDIA_GENERATION_TIMEOUT_SECONDS = max(
+    20,
+    int(os.getenv("YT_RESUME_NVIDIA_GENERATION_TIMEOUT_SECONDS", "45") or 45),
+)
+NVIDIA_DISABLE_ON_TIMEOUT = str(
+    os.getenv("YT_RESUME_DISABLE_NVIDIA_ON_TIMEOUT", "1") or "1"
+).strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_PROVIDER_FALLBACKS = tuple(
     item.strip().lower()
     for item in os.getenv("YT_RESUME_PROVIDER_FALLBACKS", "nvidia").split(",")
@@ -58,6 +70,44 @@ def is_fatal_auth_error(reason: str) -> bool:
     if not low:
         return False
     return any(pattern in low for pattern in AUTH_FATAL_PATTERNS)
+
+
+def is_timeout_like_error(reason: str) -> bool:
+    low = (reason or "").strip().lower()
+    if not low:
+        return False
+    patterns = (
+        "timeout",
+        "timed out",
+        "read timeout",
+        "connect timeout",
+        "pool timeout",
+        "httpcore",
+        "receive_response_headers",
+        "response headers",
+    )
+    return any(pattern in low for pattern in patterns)
+
+
+def request_timeout_for_account(account: ProviderAccount, timeout_seconds: int):
+    if str(account.provider or "").strip().lower() != "nvidia":
+        return timeout_seconds
+    effective = max(10, min(int(timeout_seconds or NVIDIA_GENERATION_TIMEOUT_SECONDS), NVIDIA_GENERATION_TIMEOUT_SECONDS))
+    if httpx is None:
+        return effective
+    connect = min(10.0, float(effective))
+    read = float(effective)
+    write = min(10.0, float(effective))
+    return httpx.Timeout(connect=connect, read=read, write=write, pool=5.0)
+
+
+def nvidia_client_options(account: ProviderAccount, timeout_seconds: int) -> dict[str, object]:
+    opts: dict[str, object] = {"timeout": request_timeout_for_account(account, timeout_seconds)}
+    if str(account.provider or "").strip().lower() == "nvidia":
+        opts["max_retries"] = 0
+    return opts
+
+
 def next_local_midnight() -> datetime:
     """Get next midnight in local timezone."""
     now = datetime.now(LOCAL_TZ)
@@ -455,7 +505,12 @@ def chat_once(account: ProviderAccount, prompt: str, timeout: int, *, max_tokens
         return extract_message_content(choice.message), str(choice.finish_reason or "").strip()
     base_url = account.endpoint_url.strip()
     if base_url.endswith("/chat/completions"): base_url = base_url[:-len("/chat/completions")]
-    client = OpenAI(api_key=account.api_key, base_url=base_url, timeout=timeout, default_headers=account.extra_headers)
+    client = OpenAI(
+        api_key=account.api_key,
+        base_url=base_url,
+        default_headers=account.extra_headers,
+        **nvidia_client_options(account, timeout),
+    )
     kwargs = {
         "model": account.model_name,
         "messages": [{"role": "system", "content": "Jawab dalam bahasa Indonesia baku."}, {"role": "user", "content": prompt}],
@@ -661,6 +716,7 @@ def main():
     else:
         rows = list(iter_rows_youtube(con, channels=args.channel, missing_only=(not args.force), limit=args.limit))
     log(f"Found {len(rows)} targets")
+    disabled_providers: set[str] = set()
 
     for v in rows:
         success = False
@@ -681,6 +737,7 @@ def main():
                 provider_chain.extend(
                     p for p in provider_fallbacks if p and p not in provider_chain
                 )
+                provider_chain = [p for p in provider_chain if p not in disabled_providers]
                 account = None
                 provider_used = ""
                 acquire_errors: list[str] = []
@@ -842,6 +899,11 @@ def main():
                         lease.stop(state="error")
                     except:
                         pass
+
+                if (provider_used or args.provider).strip().lower() == "nvidia" and NVIDIA_DISABLE_ON_TIMEOUT and is_timeout_like_error(last_reason):
+                    disabled_providers.add("nvidia")
+                    log("[NVIDIA-DISABLED] timeout-like failure detected; skip Nvidia for the rest of this run")
+                    break
                 
                 time.sleep(2 ** attempt)  # Exponential backoff
 

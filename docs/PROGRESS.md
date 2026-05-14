@@ -18,7 +18,7 @@
   - `asr` untuk membaca file audio lokal saja, tanpa YouTube download
 - `scripts/audio.sh` / `scripts/audio_download.sh` sekarang jadi stage `audio_download`, sedangkan `scripts/asr.sh` hanya menjalankan ASR lokal.
 - `recover_asr_transcripts.py` sekarang menyimpan `video_audio_assets.audio_file_path`, mendukung `--local-audio-only`, dan bisa menghapus audio lokal setelah ASR sukses.
-- Policy orchestrator sekarang bukan transcript-only; urutan prioritas operasionalnya adalah `resume -> format -> transcript -> asr -> audio_download -> discovery`, supaya kerja massal yang tidak kena blocking tetap jalan sementara stage YouTube-limited tetap di belakang.
+- Policy orchestrator sekarang adaptif: stage lokal/provider tetap diprioritaskan saat aman, sedangkan stage YouTube-limited (`discovery`, `transcript`, `audio_download`) dinaikkan saat backlog menumpuk dan tetap ditahan kalau kena cooldown/block.
 - Supervisor sadar-state baru sudah disiapkan:
   - `scripts/audio.sh`
   - `scripts/supervisor.sh`
@@ -40,6 +40,15 @@
 - `scripts/migrate_search_cache.py` sekarang memindahkan `videos_search_cache` + `videos_search_fts` ke `db/youtube_transcripts_search.db`; corpus search sudah diperkecil dengan menghapus `summary_search`. Hasil akhirnya: `youtube_transcripts.db` sekitar `51.6 MB`, `db/youtube_transcripts_search.db` sekitar `368.9 MB`, dan `idx_videos_upload_date` juga sudah dibuang.
 - Orchestrator Stage 2 sekarang memisahkan `audio_download -> asr`; batch `audio_download` mencari `no_subtitle` yang belum punya aset audio lokal, sedangkan `asr` hanya memproses row yang sudah punya `video_audio_assets.status = downloaded`.
 - Audit lanjutan menunjukkan `description` di search corpus tidak layak dibuang: simulasi title+transcript-only hanya menghemat sekitar `0.8 MB`, tapi sample query dari description kehilangan sekitar `1.42%` hit.
+- Policy orchestrator final:
+  - orchestrator bekerja terus selama target masih ada dan stage belum blocked
+  - planner sekarang `work_conserving` / `available-work first`, bukan `local first`
+  - stage sensitif YouTube hanya `discovery`, `transcript`, dan `audio_download`
+  - stage lokal/provider tetap boleh jalan selama resource aman dan lease tersedia
+  - `batch_limit` adalah ukuran potongan kerja, bukan batas total kerja harian
+  - kalau batch habis dan masih ada backlog, orchestrator harus re-plan dan membuat batch baru
+  - loop aggressiveness sekarang diturunkan ke `min_sleep_seconds: 5` agar re-plan cepat saat masih ada kerja yang aman
+  - command `./scripts/orchestrator.sh explain` sekarang menampilkan inventori kerja, blocker, dan reason code defer aktif
 - Ingest metadata-only terbaru: `@MentalCuann`, `@JurnalInvestasiku`, `@SiPalingLogis`, `@nalarlambat`, `@ilmulidi`, dan video `rn9-P466MWw` dari `@SeniMengaturGaji` dicatat di `runs/manual_channel_ingest_20260514_062000/report.json`.
 - Ingest metadata-only berikutnya: `@KendatiDemikianStudio`, `@kayaalaceo`, `@FinansialMedia`, `@Jejolok`, `@RuangKaya`, serta normalisasi `@OasisCeritaUsaha` dicatat di `runs/manual_channel_ingest_20260514_062350/report.json`.
 - Ingest channel baru `@NosTec.id1` sudah dilakukan lewat source `/videos`; hasil metadata awal yang tersimpan: `Nostalgia Technologi`, `37` video, `channel_db_id=648`.
@@ -296,3 +305,8 @@
   - 3,919 file transcript aktif dibackfill ke blob `transcript`, lalu file fisiknya dihapus setelah commit batch.
   - 88 orphan file transcript yang sudah tidak punya `transcript_file_path` di DB juga dibackfill dari disk, lalu dihapus.
   - Folder `uploads/*/text/` sekarang kosong.
+
+- **2026-05-14 (Local)**: Resume NVIDIA dibuat fail-fast.
+  - Jalur `fill_missing_resumes_youtube_db.py` sekarang memberi timeout khusus yang lebih pendek untuk NVIDIA daripada timeout generasi default.
+  - Retry internal OpenAI client untuk NVIDIA dimatikan agar request tidak macet terlalu lama di `chat.completions.create()`.
+  - Kalau NVIDIA kena timeout-like error, provider itu ditandai disabled untuk sisa run supaya worker pindah ke backlog lain alih-alih mengulang macet yang sama.
