@@ -1,12 +1,12 @@
 # FTS Migration Plan
 
-This repo still keeps `videos.transcript_text` and `videos.summary_text` because the active FTS5 setup is still wired to those columns.
+Historically this repo kept `videos.transcript_text` and `videos.summary_text` because the active FTS5 setup was still wired to those columns. The live DB has since been cleaned so those shadow columns are empty again, and the search cache now lives in `youtube_transcripts_search.db` without `summary_search` in the indexed corpus.
 
 Current state:
-- Search is being migrated to `videos_search_cache` + `videos_search_fts`, both blob-first.
+- Search is now stored in `youtube_transcripts_search.db` as `videos_search_cache` + `videos_search_fts`, both blob-first.
 - Legacy `videos_fts` / `videos_ai` / `videos_ad` / `videos_au` still exist in old DBs but are no longer the target path.
 - Runtime reads are already blob-first for transcript, summary, and formatted content.
-- `transcript_text` and `summary_text` are now only shadow columns during the stabilization window.
+- `transcript_text` and `summary_text` are legacy shadow columns during the stabilization window and should stay empty in new writes.
 - The formatting pipeline now reads transcript content from blob-backed helpers in the active wrappers, so future removal of `videos.transcript_text` only needs search/legacy cleanup.
 
 Goal:
@@ -16,8 +16,8 @@ Goal:
 Recommended migration path:
 
 1. Create a new search cache table
-   - Implemented: `videos_search_cache(video_id, title, description, transcript_search, summary_search, updated_at)`
-   - Populate `transcript_search` and `summary_search` from blob-backed readers, not from the legacy file paths.
+   - Implemented: `videos_search_cache(video_id, title, description, transcript_search, updated_at)`
+   - Populate `transcript_search` from blob-backed readers, not from the legacy file paths.
 
 2. Build a new FTS table on top of that cache
    - Implemented: `videos_search_fts`
@@ -31,9 +31,9 @@ Recommended migration path:
 
 4. Switch application reads
    - Implemented in `database_optimized.search_videos()` and `count_search_videos()`.
-   - Keep legacy fallback read paths for a short stabilization window.
+   - Search now queries the separate search DB while main content stays in the main DB and blobs.
 
-5. Drop legacy shadow columns only after the new path is stable
+5. Keep legacy shadow columns empty, then drop them only after the new path is stable
    - `videos.transcript_text`
    - `videos.summary_text`
    - old FTS triggers and any stale maintenance code

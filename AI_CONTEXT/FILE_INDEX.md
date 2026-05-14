@@ -22,7 +22,10 @@
 - `database_blobs.py` (4244 bytes)
 
 ## database_optimized.py
-- `database_optimized.py` (106480 bytes)
+- `database_optimized.py` (100325 bytes)
+
+## database_search.py
+- `database_search.py` (9351 bytes)
 
 ## db
 - `db/README.md` (493 bytes)
@@ -31,10 +34,10 @@
 - `diet_db.py` (4116 bytes)
 
 ## docs
-- `docs/DB_DIET_AUDIT.md` (3532 bytes)
-- `docs/FTS_MIGRATION_PLAN.md` (2450 bytes)
+- `docs/DB_DIET_AUDIT.md` (4757 bytes)
+- `docs/FTS_MIGRATION_PLAN.md` (2724 bytes)
 - `docs/LOCAL_SETUP_GUIDE.md` (9176 bytes)
-- `docs/PROGRESS.md` (30160 bytes)
+- `docs/PROGRESS.md` (30903 bytes)
 - `docs/README.md` (3379 bytes)
 - `docs/STATE_MACHINE.md` (2351 bytes)
 - `docs/VERIFY.md` (13598 bytes)
@@ -65,7 +68,7 @@
 - `flask_app/templates/videos.html` (6798 bytes)
 
 ## format_transcripts_pool.py
-- `format_transcripts_pool.py` (74636 bytes)
+- `format_transcripts_pool.py` (74566 bytes)
 
 ## generate_ai_context.py
 
@@ -250,7 +253,7 @@
 - `recover_transcripts.py` (59861 bytes)
 
 ## recover_transcripts_from_csv.py
-- `recover_transcripts_from_csv.py` (24514 bytes)
+- `recover_transcripts_from_csv.py` (24603 bytes)
 
 ## requirements.txt
 - `requirements.txt` (491 bytes)
@@ -262,7 +265,7 @@
 - `savesubs_playwright.py` (20437 bytes)
 
 ## scripts
-- `scripts/README.md` (5387 bytes)
+- `scripts/README.md` (5626 bytes)
 - `scripts/archive_channels.sh` (891 bytes)
 - `scripts/asr.sh` (7693 bytes)
 - `scripts/audio.sh` (6882 bytes)
@@ -278,7 +281,7 @@
 - `scripts/manual_transcript_then_resume_format.sh` (2135 bytes)
 - `scripts/migrate_metadata.py` (1655 bytes)
 - `scripts/migrate_metadata_to_blob.py` (3001 bytes)
-- `scripts/migrate_search_cache.py` (4855 bytes)
+- `scripts/migrate_search_cache.py` (4129 bytes)
 - `scripts/migrate_tar_to_blobs.py` (3718 bytes)
 - `scripts/migrate_to_blobs.py` (2700 bytes)
 - `scripts/monitor_pipeline.sh` (4720 bytes)
@@ -331,7 +334,7 @@
 - `youtube_cache.db` (0 bytes)
 
 ## youtube_transcripts.db
-- `youtube_transcripts.db` (1056653312 bytes)
+- `youtube_transcripts.db` (51638272 bytes)
 
 ## youtube_transcripts_blobs.db
 - `youtube_transcripts_blobs.db` (468848640 bytes)

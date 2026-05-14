@@ -199,7 +199,10 @@ def run_long_video_asr_split(
             transcript_text = ""
 
     if not transcript_text:
-        transcript_text = str(video_row.get("transcript_text") or "").strip()
+        try:
+            transcript_text = str(recoverer.db.get_transcript_content(video_id) or "").strip()
+        except Exception:
+            transcript_text = ""
 
     if not transcript_text and file_path and file_path.exists():
         try:

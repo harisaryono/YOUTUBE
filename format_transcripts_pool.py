@@ -1471,9 +1471,8 @@ class TranscriptFormatterPool:
         
         order_sql = "ASC" if self.order != "desc" else "DESC"
         base_query = """
-            SELECT v.id, v.channel_id, v.video_id, v.title, 
+            SELECT v.id, v.channel_id, v.video_id, v.title,
                    v.transcript_file_path,
-                   v.transcript_text,
                    REPLACE(REPLACE(c.channel_id, '@', ''), '/', '_') as channel_slug
             FROM videos v
             JOIN channels c ON v.channel_id = c.id
@@ -1496,7 +1495,7 @@ class TranscriptFormatterPool:
                         video_id=row["video_id"],
                         title=row["title"],
                         transcript_path=transcript_path,
-                        transcript_text=str(row["transcript_text"] or ""),
+                        transcript_text="",
                         channel_slug=row["channel_slug"],
                     )
                 )

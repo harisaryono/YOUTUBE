@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-05-14T11:00:57.556408+00:00",
+  "generated_at": "2026-05-14T12:06:38.753215+00:00",
   "repo_root": "/media/harry/DATA120B/GIT/YOUTUBE",
-  "file_count": 274,
+  "file_count": 276,
   "root_files": [
     "README.md",
     "AGENTS.md",
@@ -85,10 +85,17 @@
     },
     {
       "path": "database_optimized.py",
-      "size": 106480,
-      "mtime": "2026-05-14T08:35:22.657386+00:00",
+      "size": 100325,
+      "mtime": "2026-05-14T11:40:26.597461+00:00",
       "is_symlink": false,
-      "sha256": "78988369220f91f7617d8e1012996db27a89133a971dc455e4b92fa69b45e108"
+      "sha256": "48b84b1fac893eede7d9e738c73ae75dc2408886302addb92d840014f0701d5e"
+    },
+    {
+      "path": "database_search.py",
+      "size": 9351,
+      "mtime": "2026-05-14T11:40:23.496405+00:00",
+      "is_symlink": false,
+      "sha256": "235b15c69556d869f66af9bf2761d3dbe63479ee4e9af3c98d492cbca29cae57"
     },
     {
       "path": "db/README.md",
@@ -120,10 +127,10 @@
     },
     {
       "path": "docs/DB_DIET_AUDIT.md",
-      "size": 3532,
-      "mtime": "2026-05-14T08:15:53.583121+00:00",
+      "size": 4757,
+      "mtime": "2026-05-14T11:44:44.050987+00:00",
       "is_symlink": false,
-      "sha256": "e991ff7f6704c30c87a6beec6bb71e15d93451d98624ee544cf7c3d598b53c1c"
+      "sha256": "9dfc64f9223b05695279b3bf9b3ab2a3c4c1ab93bc443b5da030ea745d013628"
     },
     {
       "path": "docs/DEVELOPER_GUIDE.md",
@@ -134,10 +141,10 @@
     },
     {
       "path": "docs/FTS_MIGRATION_PLAN.md",
-      "size": 2450,
-      "mtime": "2026-05-14T08:32:20.364333+00:00",
+      "size": 2724,
+      "mtime": "2026-05-14T11:42:04.134191+00:00",
       "is_symlink": false,
-      "sha256": "dce7ab4fbc9cf6a408ea1a46b0bda5b85ac50479fc79c8c1e2e09200e78894ac"
+      "sha256": "7378224c8db03296ef2e96ac368cfc2524a87822dbb42b25834fc9b531d585e6"
     },
     {
       "path": "docs/LOCAL_SETUP_GUIDE.md",
@@ -169,10 +176,10 @@
     },
     {
       "path": "docs/PROGRESS.md",
-      "size": 30160,
-      "mtime": "2026-05-14T08:35:31.718180+00:00",
+      "size": 30903,
+      "mtime": "2026-05-14T11:44:48.916072+00:00",
       "is_symlink": false,
-      "sha256": "cd61ffdb130b966d6a953452ff526f5b52e5cdd5807d723b3beb3bff0914a1d3"
+      "sha256": "98b07764731dbb8abbb522fe748fac0e5097770fc38d3f7c1aba3f7cd05430bf"
     },
     {
       "path": "docs/README.md",
@@ -372,10 +379,10 @@
     },
     {
       "path": "format_transcripts_pool.py",
-      "size": 74636,
-      "mtime": "2026-05-14T08:12:08.480804+00:00",
+      "size": 74566,
+      "mtime": "2026-05-14T11:20:46.220275+00:00",
       "is_symlink": false,
-      "sha256": "10b08f9fbdc9e0050252970bec82aefba64b6eee544e8724566fc6e9dca93007"
+      "sha256": "01b9f6c48fbf6812733652e98b85352f1faf91164af02425bf521506bdbafd62"
     },
     {
       "path": "generate_ai_context.py",
@@ -1450,10 +1457,10 @@
     },
     {
       "path": "recover_transcripts_from_csv.py",
-      "size": 24514,
-      "mtime": "2026-05-12T14:51:27.581960+00:00",
+      "size": 24603,
+      "mtime": "2026-05-14T11:20:49.160320+00:00",
       "is_symlink": false,
-      "sha256": "b98d668834cb8659d63d66a4d0cd0d7f55a8f99f6c177819a4ec4532d33e7f73"
+      "sha256": "079ccf74f51d10a5aa8cce26b5f5bdd3614fdcaa76766507d4e51ec1d1174954"
     },
     {
       "path": "requirements.txt",
@@ -1478,10 +1485,10 @@
     },
     {
       "path": "scripts/README.md",
-      "size": 5387,
-      "mtime": "2026-05-14T08:32:11.454922+00:00",
+      "size": 5626,
+      "mtime": "2026-05-14T11:29:35.297961+00:00",
       "is_symlink": false,
-      "sha256": "4ba0000bf98fe362358a0f86c612dd3bf0b212a7b3329216ca716c481ca6ac0c"
+      "sha256": "56d3b6f603d9ff28c98b89192f8e79a95d97076e9062c55703fdc822b4854f10"
     },
     {
       "path": "scripts/app.sh",
@@ -1554,6 +1561,13 @@
       "sha256": "5e9b63a8a0ee2c0aa5ea0b44995e6f40d0bf88a2254ed6ff89a4adcff4c0632b"
     },
     {
+      "path": "scripts/clear_shadow_text_columns.py",
+      "size": 3589,
+      "mtime": "2026-05-14T11:21:44.317164+00:00",
+      "is_symlink": false,
+      "sha256": "b8ec9021b177f6fca371c4314947396cabd848aa7984c9a76a01120635714c22"
+    },
+    {
       "path": "scripts/deploy_exclude.txt",
       "size": 194,
       "mtime": "2026-05-14T02:35:57.242510+00:00",
@@ -1611,10 +1625,10 @@
     },
     {
       "path": "scripts/migrate_search_cache.py",
-      "size": 4855,
-      "mtime": "2026-05-14T08:33:01.326249+00:00",
+      "size": 4129,
+      "mtime": "2026-05-14T11:40:37.660658+00:00",
       "is_symlink": false,
-      "sha256": "ece53089a6afeacb3264a1f3a2a30e1417af91aad55935cf3595b02b8a41a41f"
+      "sha256": "2a5c54627aeed68fe261b408b337bb7ca28d89ef03937d96aeb657e5ce0325e2"
     },
     {
       "path": "scripts/migrate_tar_to_blobs.py",
@@ -1956,10 +1970,10 @@
   "db_files": [
     {
       "path": "db/youtube_transcripts.db",
-      "size": 1056653312,
-      "mtime": "2026-05-14T10:58:30.022558+00:00",
+      "size": 51638272,
+      "mtime": "2026-05-14T11:41:40.076766+00:00",
       "is_symlink": false,
-      "sha256": "8d7d8b26a8021ccd7b7a2f974c709c7e707f657c904b7aa5e3f11da8f3fed875"
+      "sha256": "bd4a31240141b1f9dd85a552fa3f172d19527b3ffa889a403bb9a7455a3d5785"
     },
     {
       "path": "db/youtube_transcripts_blobs.db",

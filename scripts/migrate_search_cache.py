@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
-"""
-Backfill blob-first search cache and migrate away from legacy videos_fts.
-
-This script:
-1. Creates/refreshes videos_search_cache from blob-backed transcript/summary reads.
-2. Drops the legacy videos_fts / triggers that still depend on videos.transcript_text
-   and videos.summary_text.
-3. Commits incrementally so long runs can survive interruption.
-"""
+"""Rebuild the separate search DB with a slimmer search corpus."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -21,26 +14,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from database_optimized import OptimizedDatabase
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = REPO_ROOT / "db" / "youtube_transcripts.db"
+MAIN_DB_PATH = REPO_ROOT / "db" / "youtube_transcripts.db"
+SEARCH_DB_PATH = REPO_ROOT / "db" / "youtube_transcripts_search.db"
 
 
-def ensure_legacy_drop(conn: sqlite3.Connection) -> None:
-    cursor = conn.cursor()
-    cursor.execute("DROP TRIGGER IF EXISTS videos_ai")
-    cursor.execute("DROP TRIGGER IF EXISTS videos_ad")
-    cursor.execute("DROP TRIGGER IF EXISTS videos_au")
-    cursor.execute("DROP TABLE IF EXISTS videos_fts")
-    conn.commit()
+def _remove_search_db_files() -> None:
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(f"{SEARCH_DB_PATH}{suffix}")
+        if path.exists():
+            path.unlink()
 
 
-def backfill_cache(batch_size: int = 25, drop_legacy: bool = True) -> int:
-    db = OptimizedDatabase(str(DB_PATH))
-    read_conn = sqlite3.connect(str(DB_PATH))
+def rebuild_search_db(batch_size: int = 250) -> int:
+    _remove_search_db_files()
+    db = OptimizedDatabase(str(MAIN_DB_PATH))
+    read_conn = sqlite3.connect(str(MAIN_DB_PATH))
     read_conn.row_factory = sqlite3.Row
 
     try:
-        with db._get_cursor() as cursor:
-            cursor.execute("DELETE FROM videos_search_cache")
+        db.search_storage.conn.execute("DELETE FROM videos_search_cache")
+        db.search_storage.conn.commit()
 
         read_cur = read_conn.cursor()
         read_cur.execute(
@@ -52,10 +45,10 @@ def backfill_cache(batch_size: int = 25, drop_legacy: bool = True) -> int:
         )
 
         total = 0
-        batch: list[tuple[str, str, str, str, str]] = []
+        batch: list[tuple[str, str, str, str]] = []
 
         while True:
-            rows = read_cur.fetchmany(batch_size)
+            rows = read_cur.fetchmany(max(1, int(batch_size)))
             if not rows:
                 break
 
@@ -69,71 +62,68 @@ def backfill_cache(batch_size: int = 25, drop_legacy: bool = True) -> int:
                         str(row["title"] or "").strip(),
                         str(row["description"] or ""),
                         db.read_transcript(video_id) or "",
-                        db.read_summary(video_id) or "",
                     )
                 )
 
             if batch:
-                with db._get_cursor() as cursor:
-                    cursor.executemany(
-                        """
-                        INSERT INTO videos_search_cache (
-                            video_id, title, description, transcript_search, summary_search, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT(video_id) DO UPDATE SET
-                            title = excluded.title,
-                            description = excluded.description,
-                            transcript_search = excluded.transcript_search,
-                            summary_search = excluded.summary_search,
-                            updated_at = CURRENT_TIMESTAMP
-                        """,
-                        batch,
-                    )
+                db.search_storage.bulk_replace_cache(batch)
                 total += len(batch)
                 print(f"[backfill] committed {total} rows")
                 batch.clear()
 
         if batch:
-            with db._get_cursor() as cursor:
-                cursor.executemany(
-                    """
-                    INSERT INTO videos_search_cache (
-                        video_id, title, description, transcript_search, summary_search, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(video_id) DO UPDATE SET
-                        title = excluded.title,
-                        description = excluded.description,
-                        transcript_search = excluded.transcript_search,
-                        summary_search = excluded.summary_search,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    batch,
-                )
+            db.search_storage.bulk_replace_cache(batch)
             total += len(batch)
             print(f"[backfill] committed {total} rows")
 
-        if drop_legacy:
-            ensure_legacy_drop(db.conn)
-            print("[migrate] dropped legacy videos_fts triggers/tables")
-
+        db.search_storage.rebuild()
+        print("[backfill] rebuilt search FTS")
         return total
     finally:
         try:
             read_conn.close()
         except Exception:
             pass
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Backfill blob-first search cache and migrate legacy FTS")
-    parser.add_argument("--batch-size", type=int, default=25)
-    parser.add_argument("--keep-legacy-fts", action="store_true")
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--batch-size", type=int, default=250)
+    parser.add_argument("--keep-main-search", action="store_true", help="Keep legacy search objects in main DB")
+    parser.add_argument("--skip-vacuum", action="store_true", help="Skip VACUUM on the main DB after cleanup")
     args = parser.parse_args()
 
-    total = backfill_cache(batch_size=max(1, int(args.batch_size)), drop_legacy=not args.keep_legacy_fts)
-    print(f"[done] backfilled {total} search cache rows")
+    total = rebuild_search_db(batch_size=max(1, int(args.batch_size)))
+    print(f"[done] rebuilt {total} search cache rows into the slimmer DB")
+
+    if args.keep_main_search:
+        print("[done] legacy main-db search objects kept")
+        return 0
+
+    cleanup_conn = sqlite3.connect(str(MAIN_DB_PATH), timeout=30)
+    try:
+        cursor = cleanup_conn.cursor()
+        cursor.execute("DROP TRIGGER IF EXISTS videos_search_cache_ai")
+        cursor.execute("DROP TRIGGER IF EXISTS videos_search_cache_ad")
+        cursor.execute("DROP TRIGGER IF EXISTS videos_search_cache_au")
+        cursor.execute("DROP INDEX IF EXISTS idx_videos_search_cache_video_id")
+        cursor.execute("DROP TABLE IF EXISTS videos_search_fts")
+        cursor.execute("DROP TABLE IF EXISTS videos_search_cache")
+        cleanup_conn.commit()
+        print("[cleanup] dropped legacy search objects from main DB")
+        if not args.skip_vacuum:
+            cleanup_conn.execute("VACUUM")
+            cleanup_conn.commit()
+            print("[cleanup] VACUUM completed on main DB")
+    finally:
+        cleanup_conn.close()
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -37,8 +37,8 @@ Dokumen ini adalah ringkasan operasional cepat untuk alur kerja repo `YOUTUBE`. 
 ```
 
 ## `docs/PROGRESS.md`
-- size: 30160 bytes
-- sha256: `cd61ffdb130b966d`
+- size: 30903 bytes
+- sha256: `98b07764731dbb8a`
 ```text
 # RECOVERY PROGRESS
 
@@ -55,26 +55,24 @@ Dokumen ini adalah ringkasan operasional cepat untuk alur kerja repo `YOUTUBE`. 
 ```
 
 ## `docs/FTS_MIGRATION_PLAN.md`
-- size: 2450 bytes
-- sha256: `dce7ab4fbc9cf6a4`
+- size: 2724 bytes
+- sha256: `7378224c8db03296`
 ```text
 # FTS Migration Plan
 
-This repo still keeps `videos.transcript_text` and `videos.summary_text` because the active FTS5 setup is still wired to those columns.
+Historically this repo kept `videos.transcript_text` and `videos.summary_text` because the active FTS5 setup was still wired to those columns. The live DB has since been cleaned so those shadow columns are empty again, and the search cache now lives in `youtube_transcripts_search.db` without `summary_search` in the indexed corpus.
 
 Current state:
-- Search is being migrated to `videos_search_cache` + `videos_search_fts`, both blob-first.
+- Search is now stored in `youtube_transcripts_search.db` as `videos_search_cache` + `videos_search_fts`, both blob-first.
 - Legacy `videos_fts` / `videos_ai` / `videos_ad` / `videos_au` still exist in old DBs but are no longer the target path.
 - Runtime reads are already blob-first for transcript, summary, and formatted content.
-- `transcript_text` and `summary_text` are now only shadow columns during the stabilization window.
-- The formatting pipeline now reads transcript content from blob-backed helpers in the active wrappers, so future removal of `videos.transcript_text` only needs search/legacy cleanup.
-
-Goal:
+- `transcript_text` and `summary_text` are legacy shadow columns during the stabilization window and should stay empty in new writes.
+- The formatting pipeline now reads transcript content from blo...
 ```
 
 ## `scripts/README.md`
-- size: 5387 bytes
-- sha256: `4ba0000bf98fe362`
+- size: 5626 bytes
+- sha256: `56d3b6f603d9ff28`
 ```text
 # Scripts Index
 
@@ -108,21 +106,21 @@ RUN_DIR_VALUE=""
 ```
 
 ## `scripts/migrate_search_cache.py`
-- size: 4855 bytes
-- sha256: `ece53089a6afeacb`
+- size: 4129 bytes
+- sha256: `2a5c54627aeed68f`
 ```text
 #!/usr/bin/env python3
-"""
-Backfill blob-first search cache and migrate away from legacy videos_fts.
-
-This script:
-1. Creates/refreshes videos_search_cache from blob-backed transcript/summary reads.
-2. Drops the legacy videos_fts / triggers that still depend on videos.transcript_text
-   and videos.summary_text.
-3. Commits incrementally so long runs can survive interruption.
-"""
+"""Rebuild the separate search DB with a slimmer search corpus."""
 
 from __future__ import annotations
+
+import argparse
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 ```
 
 ## `scripts/generate_tasks.py`
@@ -198,8 +196,8 @@ import time
 ```
 
 ## `database_optimized.py`
-- size: 106480 bytes
-- sha256: `78988369220f91f7`
+- size: 100325 bytes
+- sha256: `48b84b1fac893eed`
 ```text
 #!/usr/bin/env python3
 """

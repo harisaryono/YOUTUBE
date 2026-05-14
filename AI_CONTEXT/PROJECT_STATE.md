@@ -1,6 +1,6 @@
 # Project State
 
-- generated_at: `2026-05-14T11:00:59.801028+00:00`
+- generated_at: `2026-05-14T12:06:40.624730+00:00`
 - repo_type: YouTube transcript / resume / format / ASR pipeline
 - active web app: Flask under `flask_app/app.py`
 - database layout: active DBs are under `db/` with root symlinks for compat
@@ -12,7 +12,7 @@
 
 ## Directory Snapshot
 - `docs`: 18 files
-- `scripts`: 56 files
+- `scripts`: 58 files
 - `flask_app`: 20 files
 - `partial_py`: 114 files
 - `partial_docs`: 14 files
@@ -24,14 +24,14 @@
 - `README.md` (11404 bytes)
 - `AGENTS.md` (11558 bytes)
 - `orchestrator.yaml` (1681 bytes)
-- `database_optimized.py` (106480 bytes)
+- `database_optimized.py` (100325 bytes)
 - `database_blobs.py` (4244 bytes)
 - `recover_transcripts.py` (59861 bytes)
-- `recover_transcripts_from_csv.py` (24514 bytes)
+- `recover_transcripts_from_csv.py` (24603 bytes)
 - `recover_asr_transcripts.py` (90658 bytes)
 - `launch_resume_queue.py` (22351 bytes)
 - `fill_missing_resumes_youtube_db.py` (33036 bytes)
-- `format_transcripts_pool.py` (74636 bytes)
+- `format_transcripts_pool.py` (74566 bytes)
 - `update_latest_channel_videos.py` (55722 bytes)
 - `manage_database.py` (16182 bytes)
 - `local_services.py` (52678 bytes)
