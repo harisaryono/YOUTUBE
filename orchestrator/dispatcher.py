@@ -58,6 +58,16 @@ def _make_run_dir(stage: str) -> Path:
     return run_dir
 
 
+def _append_limit(cmd: list[str], limit: Any) -> None:
+    """Append --limit only when the limit is positive."""
+    try:
+        limit_value = int(limit)
+    except (TypeError, ValueError):
+        return
+    if limit_value > 0:
+        cmd.extend(["--limit", str(limit_value)])
+
+
 def run_import_pending(
     job: dict[str, Any],
     config: dict[str, Any],
@@ -97,7 +107,7 @@ def run_discovery(
     """Run discovery for a channel."""
     python = _get_venv_python()
     script = SCRIPTS_DIR / "discover.sh"
-    channel_id = job.get("channel_id", "")
+    channel_id = job.get("channel_id", "") or job.get("channel_identifier", "")
 
     if not script.exists():
         return {"success": False, "error": f"Script not found: {script}"}
@@ -144,14 +154,14 @@ def run_transcript(
     workers = config.get("youtube", {}).get("safe_transcript_workers", 2)
     run_dir = _make_run_dir("transcript")
 
-    limit = int(job.get("limit") or 20)
+    limit = job.get("limit", config.get("youtube", {}).get("batch_limit", 100))
     cmd = [
         "bash", str(script),
-        "--limit", str(limit),
         "--workers", str(workers),
         "--rate-limit-safe",
         "--run-dir", str(run_dir),
     ]
+    _append_limit(cmd, limit)
     if channel_id:
         cmd.extend(["--channel-id", channel_id])
 
@@ -196,13 +206,13 @@ def run_resume(
     provider_plan = config.get("resume", {}).get("provider_plan", "nvidia_first")
     run_dir = _make_run_dir("resume")
 
-    limit = int(job.get("limit") or 20)
+    limit = job.get("limit", config.get("resume", {}).get("batch_limit", 0))
     cmd = [
         "bash", str(script),
-        "--limit", str(limit),
         "--max-workers", str(max_workers),
         "--run-dir", str(run_dir),
     ]
+    _append_limit(cmd, limit)
     if provider_plan == "nvidia_first":
         cmd.append("--nvidia-only")
 
@@ -239,13 +249,13 @@ def run_format(
     max_workers = config.get("format", {}).get("max_workers", 4)
     run_dir = _make_run_dir("format")
 
-    limit = int(job.get("limit") or 20)
+    limit = job.get("limit", config.get("format", {}).get("batch_limit", 500))
     cmd = [
         python, str(script),
-        "--limit", str(limit),
         "--workers", str(max_workers),
         "--run-dir", str(run_dir),
     ]
+    _append_limit(cmd, limit)
 
     try:
         result = subprocess.run(
@@ -278,9 +288,11 @@ def run_asr(
     if not script.exists():
         return {"success": False, "error": f"Script not found: {script}"}
 
+    limit = job.get("limit", config.get("asr", {}).get("batch_limit", 20))
     cmd = ["bash", str(script)]
     if video_id:
         cmd.extend(["--video-id", video_id])
+    _append_limit(cmd, limit)
 
     try:
         result = subprocess.run(

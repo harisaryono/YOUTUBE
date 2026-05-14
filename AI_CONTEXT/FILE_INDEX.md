@@ -76,7 +76,7 @@
 - `job_tracker.py` (5204 bytes)
 
 ## launch_resume_queue.py
-- `launch_resume_queue.py` (22351 bytes)
+- `launch_resume_queue.py` (22348 bytes)
 
 ## local_services.py
 - `local_services.py` (52678 bytes)
@@ -86,19 +86,19 @@
 
 ## orchestrator
 - `orchestrator/__init__.py` (0 bytes)
-- `orchestrator/config.py` (4567 bytes)
+- `orchestrator/config.py` (4691 bytes)
 - `orchestrator/cooldown.py` (3747 bytes)
-- `orchestrator/daemon.py` (13520 bytes)
+- `orchestrator/daemon.py` (13082 bytes)
 - `orchestrator/db_queries.py` (12486 bytes)
-- `orchestrator/dispatcher.py` (10499 bytes)
+- `orchestrator/dispatcher.py` (11036 bytes)
 - `orchestrator/error_analyzer.py` (9749 bytes)
-- `orchestrator/planner.py` (4620 bytes)
+- `orchestrator/planner.py` (5149 bytes)
 - `orchestrator/reports.py` (10805 bytes)
 - `orchestrator/safety.py` (12492 bytes)
 - `orchestrator/state.py` (11134 bytes)
 
 ## orchestrator.yaml
-- `orchestrator.yaml` (1681 bytes)
+- `orchestrator.yaml` (1797 bytes)
 
 ## partial_docs
 - `partial_docs/API_METADATA_RESULTS.md` (2504 bytes)
@@ -181,12 +181,12 @@
 - `partial_py/fix_tabs_final.py` (2751 bytes)
 - `partial_py/fix_transcript_paths.py` (1398 bytes)
 - `partial_py/format_pool_watchdog.py` (9005 bytes)
-- `partial_py/format_transcripts.py` (19431 bytes)
+- `partial_py/format_transcripts.py` (19428 bytes)
 - `partial_py/generate_resumes.py` (25896 bytes)
 - `partial_py/import_kokbisa_videos.py` (2617 bytes)
 - `partial_py/import_pending_updates.py` (15286 bytes)
 - `partial_py/import_youtube_exports_to_db.py` (20917 bytes)
-- `partial_py/launch_universal_resume.py` (2752 bytes)
+- `partial_py/launch_universal_resume.py` (2749 bytes)
 - `partial_py/merge_harta_alam_channels.py` (5347 bytes)
 - `partial_py/migrate_channels.py` (12924 bytes)
 - `partial_py/migrate_fts.py` (2138 bytes)
@@ -268,7 +268,7 @@
 - `scripts/README.md` (5626 bytes)
 - `scripts/archive_channels.sh` (891 bytes)
 - `scripts/asr.sh` (7693 bytes)
-- `scripts/audio.sh` (6882 bytes)
+- `scripts/audio.sh` (6879 bytes)
 - `scripts/audit_no_subtitle_webshare.py` (9839 bytes)
 - `scripts/backfill_text_blobs.py` (2429 bytes)
 - `scripts/backfill_transcript_files_to_blob.py` (6967 bytes)
@@ -276,7 +276,7 @@
 - `scripts/cleanup_redundant_transcript_files.py` (4365 bytes)
 - `scripts/deploy_exclude.txt` (194 bytes)
 - `scripts/discover.sh` (6102 bytes)
-- `scripts/format.sh` (7328 bytes)
+- `scripts/format.sh` (7325 bytes)
 - `scripts/generate_tasks.py` (5567 bytes)
 - `scripts/manual_transcript_then_resume_format.sh` (2135 bytes)
 - `scripts/migrate_metadata.py` (1655 bytes)
@@ -291,7 +291,7 @@
 - `scripts/run_flask.sh` (2076 bytes)
 - `scripts/run_pipeline.sh` (16552 bytes)
 - `scripts/search.sh` (493 bytes)
-- `scripts/supervisor.sh` (9771 bytes)
+- `scripts/supervisor.sh` (9768 bytes)
 - `scripts/sync_buffer_to_main.py` (2066 bytes)
 - `scripts/sync_missing_rows_to_server.sh` (173 bytes)
 - `scripts/transcript.sh` (20207 bytes)

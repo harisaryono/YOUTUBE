@@ -21,7 +21,7 @@ echo "🎵 YouTube Audio Cache Warmup Tool"
 echo "============================================="
 echo "Run dir: $REPO_DIR"
 echo "Python: $VENV_PYTHON"
-echo "Coordinator: ${YT_PROVIDER_COORDINATOR_URL:-http://8.215.77.132:8788}"
+echo "Coordinator: ${YT_PROVIDER_COORDINATOR_URL:-http://127.0.0.1:8788}"
 echo "============================================="
 echo ""
 

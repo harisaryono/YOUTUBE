@@ -142,8 +142,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ```
 
 ## `scripts/format.sh`
-- size: 7328 bytes
-- sha256: `1e62d4cf954a9056`
+- size: 7325 bytes
+- sha256: `08b4d5f6fabcc945`
 ```text
 #!/bin/bash
 # Wrapper script untuk format transcript video YouTube

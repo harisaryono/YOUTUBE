@@ -59,7 +59,7 @@ def main():
             print(f"Launching worker {agent_id}...")
             # Set environment variables for the subprocess
             env = os.environ.copy()
-            env["YT_PROVIDER_COORDINATOR_URL"] = service_env("YT_PROVIDER_COORDINATOR_URL", "http://8.215.77.132:8788")
+            env["YT_PROVIDER_COORDINATOR_URL"] = service_env("YT_PROVIDER_COORDINATOR_URL", "http://127.0.0.1:8788")
             
             # Use setsid to detach from current session
             with open(log_file, "w") as f: # Use "w" to clear old logs

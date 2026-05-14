@@ -133,29 +133,18 @@ def run_once(
             stage = job.get("stage", "")
             lock_key = f"stage:{stage}"
 
-            # Check stage lock — prevent duplicate stage runs
-            if state.is_locked(lock_key):
-                state.add_event(
-                    event_type="deferred",
-                    message=f"{stage} already running (lock held), deferring",
-                    stage=stage,
-                    scope=job.get("scope", ""),
-                    severity="info",
-                )
-                cycle_result["jobs_deferred"] += 1
-                continue
-
             if dry_run:
                 print(f"  [DRY-RUN] Would dispatch: {job.get('description', stage)}")
                 cycle_result["jobs_dispatched"] += 1
                 continue
 
-            # Acquire stage lock — check return to prevent race condition
+            # Acquire stage lock and always release it, even if dispatch fails.
             if not state.acquire_lock(lock_key, ttl_seconds=7200):
                 state.add_event(
                     event_type="deferred",
-                    message=f"{stage} lock contention (another process holds it), deferring",
+                    message=f"{stage} lock could not be acquired, deferring",
                     stage=stage,
+                    scope=job.get("scope", ""),
                     severity="info",
                 )
                 cycle_result["jobs_deferred"] += 1

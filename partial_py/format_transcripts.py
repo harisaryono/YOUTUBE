@@ -129,7 +129,7 @@ class TranscriptFormatter:
         # uploads_dir should be absolute or relative to current directory
         # We'll use it directly as the base for all file operations
         self.uploads_dir = Path(uploads_dir).resolve() if not Path(uploads_dir).is_absolute() else Path(uploads_dir)
-        self.coordinator_url = coordinator_url or "http://8.215.77.132:8788"
+        self.coordinator_url = coordinator_url or "http://127.0.0.1:8788"
         
         self.db_conn = None
         self.stats = {

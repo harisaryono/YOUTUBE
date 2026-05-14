@@ -22,6 +22,20 @@ JOB_PRIORITY = [
 ]
 
 
+def _limit_value(value: Any, default: int) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(limit, 0)
+
+
+def _batch_description(stage: str, limit: int, noun: str) -> str:
+    if limit <= 0:
+        return f"{stage.capitalize()} all pending {noun}"
+    return f"{stage.capitalize()} up to {limit} pending {noun}"
+
+
 def plan_jobs(
     config: dict[str, Any],
     state: OrchestratorState,
@@ -64,13 +78,13 @@ def plan_jobs(
     # 3. Transcript — max 1 batch per cycle
     transcript_count = db_queries.count_videos_need_transcript(config, state)
     if transcript_count > 0:
-        batch_limit = config.get("youtube", {}).get("batch_limit", 20)
+        batch_limit = _limit_value(config.get("youtube", {}).get("batch_limit", 100), 100)
         jobs.append({
             "stage": "transcript",
             "scope": "youtube",
             "priority": 2,
             "limit": batch_limit,
-            "description": f"Transcript up to {batch_limit} pending videos ({transcript_count} total pending)",
+            "description": f"{_batch_description('transcript', batch_limit, 'videos')} ({transcript_count} total pending)",
             "count": transcript_count,
         })
 
@@ -78,13 +92,13 @@ def plan_jobs(
     if config.get("resume", {}).get("enabled", True):
         resume_count = db_queries.count_videos_need_resume(config, state)
         if resume_count > 0:
-            batch_limit = config.get("resume", {}).get("batch_limit", 20)
+            batch_limit = _limit_value(config.get("resume", {}).get("batch_limit", 0), 0)
             jobs.append({
                 "stage": "resume",
                 "scope": "provider",
                 "priority": 3,
                 "limit": batch_limit,
-                "description": f"Resume up to {batch_limit} videos ({resume_count} total pending)",
+                "description": f"{_batch_description('resume', batch_limit, 'videos')} ({resume_count} total pending)",
                 "count": resume_count,
             })
 
@@ -92,13 +106,13 @@ def plan_jobs(
     if config.get("format", {}).get("enabled", True):
         format_count = db_queries.count_videos_need_format(config, state)
         if format_count > 0:
-            batch_limit = config.get("format", {}).get("batch_limit", 20)
+            batch_limit = _limit_value(config.get("format", {}).get("batch_limit", 500), 500)
             jobs.append({
                 "stage": "format",
                 "scope": "global",
                 "priority": 4,
                 "limit": batch_limit,
-                "description": f"Format up to {batch_limit} videos ({format_count} total pending)",
+                "description": f"{_batch_description('format', batch_limit, 'videos')} ({format_count} total pending)",
                 "count": format_count,
             })
 
@@ -106,13 +120,13 @@ def plan_jobs(
     if config.get("asr", {}).get("enabled", False):
         asr_count = db_queries.count_videos_need_asr(config, state)
         if asr_count > 0:
-            batch_limit = config.get("asr", {}).get("batch_limit", 3)
+            batch_limit = _limit_value(config.get("asr", {}).get("batch_limit", 20), 20)
             jobs.append({
                 "stage": "asr",
                 "scope": "global",
                 "priority": 5,
                 "limit": batch_limit,
-                "description": f"ASR up to {batch_limit} videos ({asr_count} total pending)",
+                "description": f"{_batch_description('asr', batch_limit, 'videos')} ({asr_count} total pending)",
                 "count": asr_count,
             })
 
