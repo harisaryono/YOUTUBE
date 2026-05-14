@@ -11,9 +11,6 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +23,7 @@ from .safety import (
     safety_gate_for_job,
 )
 from .planner import plan_jobs
-from .dispatcher import dispatch_job
+from .dispatcher import launch_job
 from .cooldown import clear_all_cooldowns, get_next_wakeup
 from .reports import generate_report
 from .reports import build_inventory_snapshot
@@ -43,12 +40,246 @@ def _effective_max_jobs(config: dict[str, Any], requested: int) -> int:
     return int(config.get("orchestrator", {}).get("max_jobs_per_cycle", 7) or 7)
 
 
-def _effective_parallel_jobs(config: dict[str, Any]) -> int:
-    value = config.get("orchestrator", {}).get("max_parallel_jobs", 2)
+def _parallel_config(config: dict[str, Any]) -> dict[str, Any]:
+    parallel = config.get("parallel", {}) or {}
+    if parallel:
+        return parallel
+    # Backward-compatible fallback for older configs.
+    groups = config.get("orchestrator", {}).get("parallel_groups", {}) or {}
+    return {
+        "enabled": True,
+        "max_total_jobs": config.get("orchestrator", {}).get("max_parallel_jobs", 1),
+        "groups": {
+            "youtube": {"max_running": groups.get("youtube", 1), "stages": ["discovery", "transcript", "audio_download"]},
+            "provider": {"max_running": groups.get("provider", 1), "stages": ["resume", "asr"]},
+            "local": {"max_running": groups.get("local", 1), "stages": ["format", "janitor", "import_pending"]},
+        },
+        "stages": {
+            "discovery": {"slots": 1},
+            "transcript": {"slots": 1},
+            "audio_download": {"slots": 1},
+            "resume": {"slots": 1},
+            "asr": {"slots": 1},
+            "format": {"slots": 1},
+            "janitor": {"slots": 1},
+        },
+    }
+
+
+def _max_total_jobs(config: dict[str, Any]) -> int:
+    parallel = _parallel_config(config)
+    value = parallel.get("max_total_jobs")
+    if value is None:
+        value = config.get("orchestrator", {}).get("max_parallel_jobs", 1)
     try:
-        return max(1, int(value or 2))
+        return max(1, int(value or 1))
     except (TypeError, ValueError):
-        return 2
+        return 1
+
+
+def _stage_slots(config: dict[str, Any], stage: str) -> int:
+    parallel = _parallel_config(config)
+    stage_cfg = parallel.get("stages", {}).get(stage, {}) or {}
+    try:
+        return max(1, int(stage_cfg.get("slots", 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _stage_group_name(config: dict[str, Any], stage: str) -> str:
+    stage = str(stage or "").strip().lower()
+    parallel = _parallel_config(config)
+    groups = parallel.get("groups", {}) or {}
+    for group_name, group_cfg in groups.items():
+        stages = {str(s).strip().lower() for s in (group_cfg.get("stages", []) or [])}
+        if stage in stages:
+            return str(group_name)
+    if stage in {"discovery", "transcript", "audio_download"}:
+        return "youtube"
+    if stage in {"resume", "asr"}:
+        return "provider"
+    return "local"
+
+
+def _group_limit(config: dict[str, Any], group_name: str) -> int:
+    parallel = _parallel_config(config)
+    group_cfg = parallel.get("groups", {}).get(group_name, {}) or {}
+    try:
+        return max(0, int(group_cfg.get("max_running", 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _running_slot_indexes(state: OrchestratorState, stage: str) -> set[int]:
+    indexes: set[int] = set()
+    for row in state.list_running_jobs():
+        if str(row.get("stage", "")).strip() != stage:
+            continue
+        try:
+            slot_index = int(row.get("slot_index") or 0)
+        except (TypeError, ValueError):
+            slot_index = 0
+        if slot_index > 0:
+            indexes.add(slot_index)
+    return indexes
+
+
+def _claim_stage_slot(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    stage: str,
+) -> tuple[int, str] | None:
+    slots = _stage_slots(config, stage)
+    used = _running_slot_indexes(state, stage)
+    for slot_index in range(1, slots + 1):
+        if slot_index in used:
+            continue
+        lock_key = f"stage:{stage}:slot:{slot_index}"
+        if state.acquire_lock(lock_key, owner=f"pending:{stage}:{slot_index}", ttl_seconds=7200):
+            return slot_index, lock_key
+    return None
+
+
+def _active_jobs_snapshot(state: OrchestratorState) -> list[dict[str, Any]]:
+    try:
+        return state.list_running_jobs()
+    except Exception:
+        return []
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _read_exit_code(run_dir: str | Path) -> int | None:
+    path = Path(run_dir) / "exit_code.txt"
+    if not path.exists():
+        return None
+    try:
+        return int(path.read_text().strip())
+    except Exception:
+        return None
+
+
+def _waitpid_returncode(pid: int) -> tuple[bool, int | None]:
+    """Try to reap a child without blocking. Returns (finished, returncode)."""
+    try:
+        waited_pid, status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return False, None
+    except OSError:
+        return False, None
+
+    if waited_pid == 0:
+        return False, None
+
+    if os.WIFEXITED(status):
+        return True, os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return True, 128 + int(os.WTERMSIG(status))
+    return True, 1
+
+
+def poll_active_jobs(
+    config: dict[str, Any],
+    state: OrchestratorState,
+) -> dict[str, int]:
+    """Poll active jobs and finalize the ones that already exited."""
+    result = {"finished": 0, "failed": 0, "still_running": 0}
+    active_jobs = _active_jobs_snapshot(state)
+
+    for row in active_jobs:
+        job_id = str(row.get("job_id") or "")
+        stage = str(row.get("stage") or "")
+        scope = str(row.get("scope") or "")
+        pid = int(row.get("pid") or 0)
+        lock_key = str(row.get("lock_key") or "").strip()
+        run_dir = str(row.get("run_dir") or "")
+        log_path = str(row.get("log_path") or "")
+        slot_index = int(row.get("slot_index") or 0)
+
+        finished, exit_code = _waitpid_returncode(pid)
+        if not finished:
+            if _pid_is_alive(pid):
+                result["still_running"] += 1
+                continue
+            exit_code = _read_exit_code(run_dir)
+            if exit_code is None:
+                exit_code = 1
+
+        status = "completed" if exit_code == 0 else "failed"
+        error_text = ""
+        if exit_code != 0:
+            try:
+                log_text = Path(log_path).read_text(errors="ignore")
+                error_text = log_text[-4000:]
+            except Exception:
+                error_text = "failed to read log"
+
+        state.mark_active_job_finished(
+            job_id=job_id,
+            returncode=exit_code,
+            status=status,
+            error_text=error_text,
+        )
+        if lock_key:
+            state.release_lock(lock_key)
+
+        if exit_code == 0:
+            state.add_event(
+                event_type="dispatch_success",
+                stage=stage,
+                scope=scope,
+                message=f"{stage} slot {slot_index} completed successfully",
+                severity="info",
+                payload={"job_id": job_id, "pid": pid, "slot_index": slot_index},
+            )
+            _maybe_update_adaptive_batch(config, state, stage, success=True, blocked=False)
+            result["finished"] += 1
+            continue
+
+        from .error_analyzer import classify_error
+
+        classification = classify_error(error_text or f"exit code {exit_code}", exit_code)
+        if classification.cooldown_seconds > 0:
+            cooldown_scope = classification.suggested_scope or scope or "global"
+            state.set_cooldown(
+                scope=cooldown_scope,
+                reason=classification.description,
+                duration_seconds=classification.cooldown_seconds,
+                severity=classification.severity,
+                recommendation=classification.recommendation,
+            )
+        state.add_event(
+            event_type="dispatch_failure",
+            stage=stage,
+            scope=scope,
+            message=f"{stage} slot {slot_index} failed: {classification.error_type}",
+            severity=classification.severity,
+            recommendation=classification.recommendation,
+            reason_code=classification.error_type,
+            payload={
+                "job_id": job_id,
+                "pid": pid,
+                "returncode": exit_code,
+                "slot_index": slot_index,
+                "error_text": error_text[-1000:],
+            },
+        )
+        _maybe_update_adaptive_batch(config, state, stage, success=False, blocked=classification.cooldown_seconds > 0)
+        result["failed"] += 1
+
+    return result
 
 
 def _short_sleep_seconds(config: dict[str, Any]) -> int:
@@ -150,16 +381,7 @@ def run_once(
     max_jobs: int = 5,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """
-    Run one orchestrator cycle:
-    1. Clear expired cooldowns and locks
-    2. Check system health
-    3. Plan jobs (batch model: 1 job = 1 stage)
-    4. Safety gate each job
-    5. Acquire stage lock before dispatch
-    6. Dispatch safe jobs
-    7. Generate report
-    """
+    """Run one launch-only orchestrator cycle."""
     start_time = time.time()
     max_jobs = _effective_max_jobs(config, max_jobs)
     cycle_result: dict[str, Any] = {
@@ -168,37 +390,28 @@ def run_once(
         "jobs_succeeded": 0,
         "jobs_failed": 0,
         "jobs_deferred": 0,
+        "active_jobs": 0,
         "duration_seconds": 0,
         "disk_free_gb": 0,
         "mem_available_mb": 0,
         "dry_run": dry_run,
     }
-    runnable_jobs: list[dict[str, Any]] = []
 
-    # 1. Clear expired cooldowns and locks
     cleared_cd = clear_all_cooldowns(state)
     if cleared_cd > 0:
-        state.add_event(
-            event_type="cleanup",
-            message=f"Cleared {cleared_cd} expired cooldown(s)",
-            severity="info",
-        )
+        state.add_event(event_type="cleanup", message=f"Cleared {cleared_cd} expired cooldown(s)", severity="info")
     cleared_locks = state.clear_expired_locks()
     if cleared_locks > 0:
-        state.add_event(
-            event_type="cleanup",
-            message=f"Cleared {cleared_locks} expired lock(s)",
-            severity="info",
-        )
+        state.add_event(event_type="cleanup", message=f"Cleared {cleared_locks} expired lock(s)", severity="info")
     cleared_stale_locks = state.clear_stale_pid_locks()
     if cleared_stale_locks > 0:
-        state.add_event(
-            event_type="cleanup",
-            message=f"Cleared {cleared_stale_locks} stale pid lock(s)",
-            severity="info",
-        )
+        state.add_event(event_type="cleanup", message=f"Cleared {cleared_stale_locks} stale pid lock(s)", severity="info")
 
-    # 2. Check health
+    poll_result = poll_active_jobs(config, state)
+    cycle_result["jobs_succeeded"] += poll_result["finished"]
+    cycle_result["jobs_failed"] += poll_result["failed"]
+    cycle_result["active_jobs"] = state.count_running_total()
+
     sys_health = check_system_health(config)
     provider_health = check_provider_health(config, state)
     youtube_health = check_youtube_health(config, state)
@@ -206,58 +419,37 @@ def run_once(
     cycle_result["disk_free_gb"] = sys_health.disk_free_gb
     cycle_result["mem_available_mb"] = sys_health.mem_available_mb
 
-    # Log health issues
     if not sys_health.ok:
         for err in sys_health.errors:
-            state.add_event(
-                event_type="health",
-                message=f"System: {err}",
-                severity="blocking",
-            )
+            state.add_event(event_type="health", message=f"System: {err}", severity="blocking")
     if not provider_health.ok:
         for err in provider_health.errors:
-            state.add_event(
-                event_type="health",
-                message=f"Provider: {err}",
-                severity="warning",
-            )
+            state.add_event(event_type="health", message=f"Provider: {err}", severity="warning")
     if not youtube_health.ok:
         for err in youtube_health.errors:
-            state.add_event(
-                event_type="health",
-                message=f"YouTube: {err}",
-                severity="blocking",
-            )
+            state.add_event(event_type="health", message=f"YouTube: {err}", severity="blocking")
 
-    # 3. Plan jobs (batch model)
     jobs = plan_jobs(config, state, max_jobs=max_jobs)
     cycle_result["jobs_planned"] = len(jobs)
 
-    if not jobs:
-        state.add_event(
-            event_type="plan",
-            message="No jobs to run",
-            severity="info",
-        )
+    if not jobs and cycle_result["active_jobs"] == 0:
+        state.add_event(event_type="plan", message="No jobs to run", severity="info")
         cycle_result["duration_seconds"] = time.time() - start_time
         generate_report(config, state, cycle_result)
         return cycle_result
 
-    # 4. Safety gate + collect runnable jobs, then dispatch them in parallel
+    max_total = _max_total_jobs(config)
+
     for job in jobs:
-        decision = safety_gate_for_job(
-            job, config, sys_health, provider_health, youtube_health, state
-        )
+        stage = str(job.get("stage", ""))
+        decision = safety_gate_for_job(job, config, sys_health, provider_health, youtube_health, state)
 
-        if decision.verdict == "RUN":
-            runnable_jobs.append(job)
-
-        elif decision.verdict == "WAIT":
+        if decision.verdict == "WAIT":
             cycle_result["jobs_deferred"] += 1
             state.add_event(
                 event_type="deferred",
-                message=f"{decision.reason_code or 'DEFER'}: {job.get('stage', '?')} - {decision.reason}",
-                stage=job.get("stage", ""),
+                message=f"{decision.reason_code or 'DEFER'}: {stage} - {decision.reason}",
+                stage=stage,
                 scope=job.get("scope", ""),
                 severity="info",
                 recommendation=decision.recommendation,
@@ -265,126 +457,119 @@ def run_once(
             )
             if decision.cooldown_seconds > 0 and job.get("scope"):
                 state.set_cooldown(
-                    scope=job["scope"],
+                    scope=str(job["scope"]),
                     reason=decision.reason,
                     duration_seconds=decision.cooldown_seconds,
                     recommendation=decision.recommendation,
                 )
+            continue
 
-        elif decision.verdict == "SKIP_PERMANENT":
+        if decision.verdict == "SKIP_PERMANENT":
             state.add_event(
                 event_type="skipped",
-                message=f"Job skipped permanently ({job.get('stage', '?')}): {decision.reason}",
-                stage=job.get("stage", ""),
+                message=f"Job skipped permanently ({stage}): {decision.reason}",
+                stage=stage,
                 scope=job.get("scope", ""),
                 severity="info",
                 recommendation=decision.recommendation,
             )
+            continue
 
-        elif decision.verdict == "REPORT":
+        if decision.verdict == "REPORT":
             state.add_event(
                 event_type="report",
-                message=f"Job reported ({job.get('stage', '?')}): {decision.reason}",
-                stage=job.get("stage", ""),
+                message=f"Job reported ({stage}): {decision.reason}",
+                stage=stage,
                 scope=job.get("scope", ""),
                 severity="warning",
                 recommendation=decision.recommendation,
             )
+            continue
 
-    def _execute_job(job: dict[str, Any]) -> dict[str, Any]:
-        stage = job.get("stage", "")
-        lock_key = f"stage:{stage}"
-        if not state.acquire_lock(lock_key, ttl_seconds=7200):
+        if state.count_running_total() >= max_total:
+            cycle_result["jobs_deferred"] += 1
             state.add_event(
                 event_type="deferred",
-                message=f"{stage} lock could not be acquired, deferring",
+                message=f"{stage} deferred: max_total_jobs reached",
                 stage=stage,
                 scope=job.get("scope", ""),
                 severity="info",
-                reason_code="DEFER_STAGE_LOCKED",
+                reason_code="DEFER_MAX_TOTAL_JOBS",
             )
-            return {
-                "success": False,
-                "deferred": True,
-                "error": "stage lock could not be acquired",
-                "returncode": 1,
-            }
-        try:
-            return dispatch_job(job, config, state)
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"dispatch exception: {e}",
-                "returncode": 1,
-            }
-        finally:
+            continue
+
+        group_name = _stage_group_name(config, stage)
+        if state.count_running_by_group(group_name) >= _group_limit(config, group_name):
+            cycle_result["jobs_deferred"] += 1
+            state.add_event(
+                event_type="deferred",
+                message=f"{stage} deferred: group {group_name} limit reached",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="info",
+                reason_code="DEFER_PARALLEL_GROUP_LIMIT",
+            )
+            continue
+
+        slot_claim = _claim_stage_slot(config, state, stage)
+        if slot_claim is None:
+            cycle_result["jobs_deferred"] += 1
+            state.add_event(
+                event_type="deferred",
+                message=f"{stage} deferred: no free slot available",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="info",
+                reason_code="DEFER_STAGE_SLOTS_FULL",
+            )
+            continue
+
+        slot_index, lock_key = slot_claim
+
+        if dry_run:
+            print(f"  [DRY-RUN] Would launch: {job.get('description', stage)}")
             state.release_lock(lock_key)
+            cycle_result["jobs_dispatched"] += 1
+            continue
 
-    if dry_run:
-        for job in runnable_jobs:
-            stage = job.get("stage", "")
-            print(f"  [DRY-RUN] Would dispatch: {job.get('description', stage)}")
-        cycle_result["jobs_dispatched"] += len(runnable_jobs)
-    elif runnable_jobs:
-        parallel_jobs = min(len(runnable_jobs), _effective_parallel_jobs(config))
-        cycle_result["jobs_dispatched"] += len(runnable_jobs)
-        with ThreadPoolExecutor(max_workers=parallel_jobs) as executor:
-            future_map = {executor.submit(_execute_job, job): job for job in runnable_jobs}
-            for future in as_completed(future_map):
-                job = future_map[future]
-                stage = job.get("stage", "")
-                try:
-                    result = future.result()
-                except Exception as e:
-                    result = {
-                        "success": False,
-                        "error": f"dispatch exception: {e}",
-                        "returncode": 1,
-                    }
-                if result.get("deferred"):
-                    cycle_result["jobs_deferred"] += 1
-                    continue
-                if result.get("success"):
-                    cycle_result["jobs_succeeded"] += 1
-                    _maybe_update_adaptive_batch(config, state, stage, success=True, blocked=False)
-                    continue
-                cycle_result["jobs_failed"] += 1
-                error_msg = result.get("error", result.get("stderr", ""))
-                blocked_failure = False
-                if error_msg:
-                    from .error_analyzer import classify_error
+        try:
+            result = launch_job(
+                job,
+                config,
+                state,
+                slot_index=slot_index,
+                lock_key=lock_key,
+            )
+        except Exception as e:
+            state.release_lock(lock_key)
+            cycle_result["jobs_failed"] += 1
+            state.add_event(
+                event_type="error",
+                message=f"Launch failed for {stage}: {e}",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="warning",
+                reason_code="LAUNCH_FAILED",
+            )
+            continue
 
-                    classification = classify_error(error_msg, result.get("returncode", 0))
-                    blocked_failure = classification.cooldown_seconds > 0
-                    if classification.cooldown_seconds > 0:
-                        scope = classification.suggested_scope or job.get("scope", "global")
-                        state.set_cooldown(
-                            scope=scope,
-                            reason=classification.description,
-                            duration_seconds=classification.cooldown_seconds,
-                            severity=classification.severity,
-                            recommendation=classification.recommendation,
-                        )
-                    state.add_event(
-                        event_type="error",
-                        message=f"[{classification.error_type}] {classification.description}: {error_msg[:200]}",
-                        stage=stage,
-                        scope=job.get("scope", ""),
-                        severity=classification.severity,
-                        recommendation=classification.recommendation,
-                        reason_code=classification.error_type,
-                        payload={
-                            "returncode": result.get("returncode", 0),
-                            "error_type": classification.error_type,
-                            "cooldown_seconds": classification.cooldown_seconds,
-                        },
-                    )
-                _maybe_update_adaptive_batch(config, state, stage, success=False, blocked=blocked_failure)
+        if result.get("launched"):
+            cycle_result["jobs_dispatched"] += 1
+        else:
+            state.release_lock(lock_key)
+            cycle_result["jobs_failed"] += 1
+            state.add_event(
+                event_type="error",
+                message=f"Launch failed for {stage}: {result.get('error', 'unknown error')}",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="warning",
+                reason_code="LAUNCH_FAILED",
+            )
 
-    # 5. Generate report
+    cycle_result["active_jobs"] = state.count_running_total()
     cycle_result["duration_seconds"] = time.time() - start_time
     generate_report(config, state, cycle_result)
-
     return cycle_result
 
 
@@ -431,11 +616,12 @@ def run_loop(
         jobs_failed = result.get("jobs_failed", 0)
         jobs_planned = result.get("jobs_planned", 0)
         jobs_deferred = result.get("jobs_deferred", 0)
+        active_jobs = result.get("active_jobs", 0)
 
         if dry_run:
             # Dry-run: check again soon.
             sleep_seconds = _short_sleep_seconds(config)
-        elif jobs_dispatched > 0 or jobs_failed > 0:
+        elif active_jobs > 0 or jobs_dispatched > 0 or jobs_failed > 0:
             # Keep moving while there is still runnable work.
             # Hard blocks are handled through cooldown state, not by long sleeps here.
             sleep_seconds = _short_sleep_seconds(config)
@@ -618,6 +804,7 @@ def main() -> None:
             print(f"Profile: {report.get('profile', '?')}")
             print(f"Pending: {report.get('pending_work', {})}")
             print(f"Cooldowns: {report.get('cooldowns', {}).get('active_count', 0)} active")
+            print(f"Active jobs: {report.get('inventory', {}).get('active_jobs', {}).get('active_count', 0)}")
         else:
             print("No report yet. Run 'orchestrator once' first.")
 
@@ -628,6 +815,7 @@ def main() -> None:
         print(f"Work remaining: {inventory.get('work_remaining', {})}")
         print(f"Blocked: {inventory.get('blocked', {})}")
         print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
+        print(f"Active jobs: {inventory.get('active_jobs', {}).get('active_count', 0)}")
         print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
         system_info = inventory.get("system", {})
         print(f"Disk free: {system_info.get('disk_free_gb', 0):.1f} GB")
@@ -639,61 +827,55 @@ def main() -> None:
         provider_blocked = bool(blocked.get("provider"))
         disk_low = float(system_info.get("disk_free_gb", 0) or 0) < float(config.get("system", {}).get("min_free_disk_gb", 5) or 5)
         mem_low = float(system_info.get("mem_available_mb", 0) or 0)
-        stage_decisions = [
-            ("Import Pending", "RUN" if work_remaining.get("import_pending", 0) else "NO_WORK"),
-            (
-                "Transcript",
-                "PAUSED"
-                if pauses.get("pause:stage:transcript") or pauses.get("pause:scope:youtube") or pauses.get("pause:scope:all")
-                else "WAIT_YOUTUBE_COOLDOWN"
-                if youtube_blocked and work_remaining.get("transcript", 0)
-                else ("RUN" if work_remaining.get("transcript", 0) else "NO_WORK"),
-            ),
-            (
-                "Audio Download",
-                "PAUSED"
-                if pauses.get("pause:stage:audio_download") or pauses.get("pause:scope:youtube") or pauses.get("pause:scope:all")
-                else "WAIT_YOUTUBE_COOLDOWN"
-                if youtube_blocked and work_remaining.get("audio_download", 0)
-                else ("RUN" if work_remaining.get("audio_download", 0) else "NO_WORK"),
-            ),
-            (
-                "ASR",
-                "PAUSED"
-                if pauses.get("pause:stage:asr") or pauses.get("pause:scope:provider") or pauses.get("pause:scope:all")
-                else "WAIT_MEMORY"
-                if mem_low < float(config.get("system", {}).get("min_memory_mb_asr", 2500) or 2500)
-                else ("RUN" if work_remaining.get("asr", 0) else "NO_WORK"),
-            ),
-            (
-                "Resume",
-                "PAUSED"
-                if pauses.get("pause:stage:resume") or pauses.get("pause:scope:provider") or pauses.get("pause:scope:all")
-                else "WAIT_PROVIDER_COOLDOWN"
-                if provider_blocked and work_remaining.get("resume", 0)
-                else "WAIT_MEMORY"
-                if mem_low < float(config.get("system", {}).get("min_memory_mb_resume", 1500) or 1500)
-                else ("RUN" if work_remaining.get("resume", 0) else "NO_WORK"),
-            ),
-            (
-                "Format",
-                "PAUSED"
-                if pauses.get("pause:stage:format") or pauses.get("pause:scope:provider") or pauses.get("pause:scope:all")
-                else "WAIT_PROVIDER_COOLDOWN"
-                if provider_blocked and work_remaining.get("format", 0)
-                else "WAIT_MEMORY"
-                if mem_low < float(config.get("system", {}).get("min_memory_mb_format", 1200) or 1200)
-                else ("RUN" if work_remaining.get("format", 0) else "NO_WORK"),
-            ),
-            (
-                "Discovery",
-                "PAUSED"
-                if pauses.get("pause:stage:discovery") or pauses.get("pause:scope:youtube") or pauses.get("pause:scope:all")
-                else "WAIT_YOUTUBE_COOLDOWN"
-                if youtube_blocked and work_remaining.get("discovery", 0)
-                else ("RUN" if work_remaining.get("discovery", 0) else "NO_WORK"),
-            ),
+        stage_defs = [
+            ("Import Pending", "import_pending", "local"),
+            ("Transcript", "transcript", "youtube"),
+            ("Audio Download", "audio_download", "youtube"),
+            ("ASR", "asr", "provider"),
+            ("Resume", "resume", "provider"),
+            ("Format", "format", "local"),
+            ("Discovery", "discovery", "youtube"),
         ]
+        stage_decisions: list[tuple[str, str]] = []
+        active_total = int(inventory.get("active_jobs", {}).get("active_count", 0) or 0)
+        max_total_jobs = _max_total_jobs(config)
+        for label, stage_key, dep in stage_defs:
+            work_count = int(work_remaining.get(stage_key, 0) or 0)
+            if pauses.get(f"pause:stage:{stage_key}") or pauses.get("pause:scope:all") or (dep == "youtube" and pauses.get("pause:scope:youtube")) or (dep == "provider" and pauses.get("pause:scope:provider")):
+                stage_decisions.append((label, "PAUSED"))
+                continue
+            if work_count <= 0:
+                stage_decisions.append((label, "NO_WORK"))
+                continue
+            if disk_low:
+                stage_decisions.append((label, "WAIT_DISK"))
+                continue
+            if stage_key == "asr" and mem_low < float(config.get("system", {}).get("min_memory_mb_asr", 2500) or 2500):
+                stage_decisions.append((label, "WAIT_MEMORY"))
+                continue
+            if stage_key == "resume" and mem_low < float(config.get("system", {}).get("min_memory_mb_resume", 1500) or 1500):
+                stage_decisions.append((label, "WAIT_MEMORY"))
+                continue
+            if stage_key == "format" and mem_low < float(config.get("system", {}).get("min_memory_mb_format", 1200) or 1200):
+                stage_decisions.append((label, "WAIT_MEMORY"))
+                continue
+            if dep == "youtube" and youtube_blocked:
+                stage_decisions.append((label, "WAIT_YOUTUBE_COOLDOWN"))
+                continue
+            if dep == "provider" and provider_blocked:
+                stage_decisions.append((label, "WAIT_PROVIDER_COOLDOWN"))
+                continue
+            stage_group = _stage_group_name(config, stage_key)
+            if active_total >= max_total_jobs:
+                stage_decisions.append((label, "WAIT_MAX_TOTAL_JOBS"))
+                continue
+            if state.count_running_by_group(stage_group) >= _group_limit(config, stage_group):
+                stage_decisions.append((label, "WAIT_GROUP_SLOT"))
+                continue
+            if state.count_running_by_stage(stage_key) >= _stage_slots(config, stage_key):
+                stage_decisions.append((label, "WAIT_STAGE_SLOT"))
+                continue
+            stage_decisions.append((label, "RUN"))
         print("Stage decisions:")
         for stage_name, decision_text in stage_decisions:
             print(f"  - {stage_name}: {decision_text}")

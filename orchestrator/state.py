@@ -34,7 +34,7 @@ class OrchestratorState:
             conn = sqlite3.connect(str(self.db_path))
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA busy_timeout=30000")
             self._local.conn = conn
         return conn
 
@@ -93,6 +93,32 @@ class OrchestratorState:
 
             CREATE INDEX IF NOT EXISTS idx_inventory_snapshots_created
                 ON orchestrator_inventory_snapshots(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS orchestrator_active_jobs (
+                job_id TEXT PRIMARY KEY,
+                stage TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                slot_index INTEGER NOT NULL DEFAULT 0,
+                lock_key TEXT NOT NULL DEFAULT '',
+                pid INTEGER NOT NULL,
+                command TEXT NOT NULL DEFAULT '',
+                run_dir TEXT NOT NULL DEFAULT '',
+                log_path TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'running',
+                returncode INTEGER,
+                error_text TEXT NOT NULL DEFAULT '',
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                finished_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_active_jobs_status_stage
+                ON orchestrator_active_jobs(status, stage);
+
+            CREATE INDEX IF NOT EXISTS idx_active_jobs_status_group
+                ON orchestrator_active_jobs(status, group_name);
         """)
         conn.commit()
 
@@ -417,6 +443,117 @@ class OrchestratorState:
         if isinstance(payload, dict):
             payload.setdefault("created_at", row["created_at"])
         return payload
+
+    # --- Active Jobs ---
+
+    def register_active_job(
+        self,
+        job_id: str,
+        stage: str,
+        scope: str,
+        group_name: str,
+        pid: int,
+        command: str,
+        run_dir: str,
+        log_path: str,
+        *,
+        slot_index: int = 0,
+        lock_key: str = "",
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        conn = self._connect()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO orchestrator_active_jobs (
+                job_id, stage, scope, group_name, slot_index, lock_key,
+                pid, command, run_dir, log_path, status, payload_json,
+                started_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, datetime('now'), datetime('now'))
+            """,
+            (
+                job_id,
+                stage,
+                scope,
+                group_name,
+                int(slot_index or 0),
+                lock_key,
+                int(pid),
+                command,
+                run_dir,
+                log_path,
+                json.dumps(payload or {}),
+            ),
+        )
+        conn.commit()
+
+    def mark_active_job_finished(
+        self,
+        job_id: str,
+        returncode: int,
+        status: str,
+        error_text: str = "",
+    ) -> None:
+        conn = self._connect()
+        conn.execute(
+            """
+            UPDATE orchestrator_active_jobs
+            SET status = ?,
+                returncode = ?,
+                error_text = ?,
+                updated_at = datetime('now'),
+                finished_at = datetime('now')
+            WHERE job_id = ?
+            """,
+            (status, int(returncode), error_text, job_id),
+        )
+        conn.commit()
+
+    def list_running_jobs(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM orchestrator_active_jobs
+            WHERE status = 'running'
+            ORDER BY started_at ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_running_total(self) -> int:
+        conn = self._connect()
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM orchestrator_active_jobs
+            WHERE status = 'running'
+            """
+        ).fetchone()
+        return int(row["cnt"] if row else 0)
+
+    def count_running_by_stage(self, stage: str) -> int:
+        conn = self._connect()
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM orchestrator_active_jobs
+            WHERE status = 'running' AND stage = ?
+            """,
+            (stage,),
+        ).fetchone()
+        return int(row["cnt"] if row else 0)
+
+    def count_running_by_group(self, group_name: str) -> int:
+        conn = self._connect()
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM orchestrator_active_jobs
+            WHERE status = 'running' AND group_name = ?
+            """,
+            (group_name,),
+        ).fetchone()
+        return int(row["cnt"] if row else 0)
 
     # --- Adaptive batch state ---
 

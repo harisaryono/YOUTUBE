@@ -49,7 +49,11 @@
   - stage lokal/provider tetap boleh jalan selama resource aman dan lease tersedia
   - `batch_limit` adalah ukuran potongan kerja, bukan batas total kerja harian
   - `resume.batch_limit` sekarang finite (`100`) supaya satu batch tidak memonopoli satu cycle daemon terlalu lama
-  - daemon sekarang bisa menjalankan beberapa stage aman secara paralel dalam satu cycle, dengan pool parallel default `3`, supaya `transcript`, `audio_download`, dan `resume` bisa overlap
+  - orchestrator sekarang bergeser ke **slot-based active job manager**: cycle tiap 5 detik mem-poll job aktif, lalu launch batch baru via `Popen` tanpa menunggu stage lain selesai
+  - lane paralel dibagi per stage/group melalui config `parallel.groups` dan `parallel.stages`; YouTube-group tetap dibatasi ketat, sedangkan stage lokal/provider bisa overlap selama slot masih tersedia
+  - job aktif persisten di SQLite lewat `orchestrator_active_jobs`, jadi daemon bisa melihat job yang masih berjalan setelah cycle berikutnya
+  - implementasi slot-based active manager sudah lolos `py_compile` dan `orchestrator.sh once --dry-run`; restart daemon live ditunda sementara karena ada job ASR lama yang masih berjalan di proses lama
+  - SQLite orchestrator state sekarang pakai `busy_timeout=30000` agar concurrent event/cooldown write lebih tahan bentrok
   - kalau batch habis dan masih ada backlog, orchestrator harus re-plan dan membuat batch baru
   - loop aggressiveness sekarang diturunkan ke `min_sleep_seconds: 5` agar re-plan cepat saat masih ada kerja yang aman
   - command `./scripts/orchestrator.sh explain` sekarang menampilkan inventori kerja, blocker, dan reason code defer aktif

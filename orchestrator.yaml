@@ -17,12 +17,56 @@ orchestrator:
   max_jobs_per_cycle: 7
   # Maximum jobs that may run concurrently in one cycle.
   max_parallel_jobs: 3
+  # Parallel slots by stage group to avoid stacking YouTube-sensitive jobs.
+  parallel_groups:
+    youtube: 1
+    local: 2
+    provider: 1
   # Sleep when there is still runnable work.
   short_sleep_seconds: 5
   # Sleep when all work is currently blocked or exhausted.
   idle_sleep_seconds: 900
   # If YouTube backlog crosses this count, YouTube-sensitive stages are boosted.
   youtube_backlog_boost_threshold: 500
+
+parallel:
+  enabled: true
+  # Global rem so the server is not overloaded.
+  max_total_jobs: 8
+  groups:
+    youtube:
+      max_running: 2
+      stages:
+        - discovery
+        - transcript
+        - audio_download
+    provider:
+      max_running: 3
+      stages:
+        - resume
+        - asr
+    local:
+      max_running: 2
+      stages:
+        - format
+        - janitor
+        - import_pending
+  stages:
+    discovery:
+      slots: 1
+      prefer_never_discovered: true
+    transcript:
+      slots: 2
+    audio_download:
+      slots: 1
+    resume:
+      slots: 2
+    asr:
+      slots: 1
+    format:
+      slots: 1
+    janitor:
+      slots: 1
 
 system:
   # Minimum free disk space (GB) before stopping jobs

@@ -101,9 +101,41 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
             "mode": "work_conserving",
             "max_jobs_per_cycle": 7,
             "max_parallel_jobs": 3,
+            "parallel_groups": {
+                "youtube": 1,
+                "local": 2,
+                "provider": 1,
+            },
             "short_sleep_seconds": 5,
             "idle_sleep_seconds": 900,
             "youtube_backlog_boost_threshold": 500,
+        },
+        "parallel": {
+            "enabled": True,
+            "max_total_jobs": 8,
+            "groups": {
+                "youtube": {
+                    "max_running": 2,
+                    "stages": ["discovery", "transcript", "audio_download"],
+                },
+                "provider": {
+                    "max_running": 3,
+                    "stages": ["resume", "asr"],
+                },
+                "local": {
+                    "max_running": 2,
+                    "stages": ["format", "janitor", "import_pending"],
+                },
+            },
+            "stages": {
+                "discovery": {"slots": 1, "prefer_never_discovered": True},
+                "transcript": {"slots": 2},
+                "audio_download": {"slots": 1},
+                "resume": {"slots": 2},
+                "asr": {"slots": 1},
+                "format": {"slots": 1},
+                "janitor": {"slots": 1},
+            },
         },
         "system": {
             "min_free_disk_gb": 5,

@@ -34,6 +34,7 @@ def build_inventory_snapshot(
     counts = planner.get_summary_counts(config, state)
     active_cooldowns = state.list_active_cooldowns()
     active_locks = state.list_active_locks()
+    active_jobs = state.list_running_jobs()
     recent_events = state.get_recent_events(limit=50)
     pauses = state.list_pauses()
     sys_health = None
@@ -95,6 +96,10 @@ def build_inventory_snapshot(
             "active_count": len(active_locks),
             "details": active_locks,
         },
+        "active_jobs": {
+            "active_count": len(active_jobs),
+            "details": active_jobs,
+        },
         "pauses": pauses,
         "defer_reasons": defer_reasons,
         "cycle_result": cycle_result or {},
@@ -120,6 +125,7 @@ def generate_report(
     blocked_channels = cd.get_blocked_channels(state)
     next_wakeup = cd.get_next_wakeup(state)
     active_locks = state.list_active_locks()
+    active_jobs = state.list_running_jobs()
     inventory = build_inventory_snapshot(config, state, cycle_result)
 
     # Build suggestions
@@ -143,6 +149,10 @@ def generate_report(
         "locks": {
             "active_count": len(active_locks),
             "details": active_locks,
+        },
+        "active_jobs": {
+            "active_count": len(active_jobs),
+            "details": active_jobs,
         },
         "inventory": inventory,
         "pending_work": counts,
@@ -295,6 +305,19 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
         for lock in lock_info.get("details", []):
             lines.append(
                 f"| {lock['lock_key']} | {lock['owner']} | {lock['expires_at']} |"
+            )
+        lines.append("")
+
+    active_jobs_info = report.get("inventory", {}).get("active_jobs", {})
+    if active_jobs_info.get("active_count", 0) > 0:
+        lines.append("## Active Jobs")
+        lines.append("")
+        lines.append("| Job ID | Stage | Scope | PID | Slot | Status |")
+        lines.append("|--------|-------|-------|-----|------|--------|")
+        for job in active_jobs_info.get("details", [])[:20]:
+            lines.append(
+                f"| {job.get('job_id', '?')} | {job.get('stage', '?')} | {job.get('scope', '')} "
+                f"| {job.get('pid', '?')} | {job.get('slot_index', '?')} | {job.get('status', '?')} |"
             )
         lines.append("")
 

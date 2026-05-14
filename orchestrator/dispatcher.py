@@ -5,8 +5,10 @@ Dispatcher — Execute pipeline stages via subprocess.
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,249 @@ def _config_audio_dir(config: dict[str, Any]) -> str:
     if path.is_absolute():
         return str(path)
     return str((PROJECT_ROOT / path).resolve())
+
+
+def _parallel_group_for_stage(stage: str) -> str:
+    stage = str(stage or "").strip().lower()
+    if stage in {"discovery", "transcript", "audio_download"}:
+        return "youtube"
+    if stage in {"resume", "asr"}:
+        return "provider"
+    return "local"
+
+
+def _shell_wrap_command(cmd: list[str], exit_code_path: Path) -> list[str]:
+    quoted = " ".join(shlex.quote(str(part)) for part in cmd)
+    shell = (
+        "set +e;"
+        f" {quoted};"
+        " code=$?;"
+        f" printf '%s\\n' \"$code\" > {shlex.quote(str(exit_code_path))};"
+        " exit $code"
+    )
+    return ["bash", "-lc", shell]
+
+
+def _build_stage_launch_command(
+    job: dict[str, Any],
+    config: dict[str, Any],
+    state: OrchestratorState,
+) -> tuple[list[str], dict[str, str], Path, Path]:
+    stage = str(job.get("stage", "")).strip()
+    env = os.environ.copy()
+
+    if stage == "import_pending":
+        python = _get_venv_python()
+        script = PROJECT_ROOT / "partial_py" / "import_pending_updates.py"
+        run_dir = _make_run_dir("import_pending")
+        log_path = run_dir / "stdout_stderr.log"
+        cmd = [python, str(script)]
+        return cmd, env, run_dir, log_path
+
+    if stage == "discovery":
+        script = SCRIPTS_DIR / "discover.sh"
+        run_dir = _make_run_dir("discovery")
+        log_path = run_dir / "stdout_stderr.log"
+        channel_id = job.get("channel_id", "") or job.get("channel_identifier", "")
+        cmd = [
+            "bash", str(script),
+            "--latest-only",
+            "--recent-per-channel", "50",
+            "--rate-limit-safe",
+        ]
+        if channel_id:
+            cmd.extend(["--channel-id", str(channel_id)])
+        return cmd, env, run_dir, log_path
+
+    if stage == "transcript":
+        script = SCRIPTS_DIR / "transcript.sh"
+        run_dir = _make_run_dir("transcript")
+        log_path = run_dir / "stdout_stderr.log"
+        workers = config.get("youtube", {}).get("safe_transcript_workers", 2)
+        limit = job.get("limit", config.get("youtube", {}).get("batch_limit", 100))
+        channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
+        cmd = [
+            "bash", str(script),
+            "--workers", str(workers),
+            "--rate-limit-safe",
+            "--run-dir", str(run_dir),
+        ]
+        _append_limit(cmd, limit)
+        if channel_id:
+            cmd.extend(["--channel-id", str(channel_id)])
+        return cmd, env, run_dir, log_path
+
+    if stage == "audio_download":
+        script = SCRIPTS_DIR / "audio_download.sh"
+        if not script.exists():
+            script = SCRIPTS_DIR / "audio.sh"
+        run_dir = _make_run_dir("audio_download")
+        log_path = run_dir / "stdout_stderr.log"
+        workers = config.get("audio_download", {}).get("workers", 1)
+        limit = job.get("limit", config.get("audio_download", {}).get("batch_limit", 50))
+        channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
+        env["ASR_AUDIO_DIR"] = _config_audio_dir(config)
+        nvidia_model = str(config.get("asr", {}).get("nvidia_model", "") or "").strip()
+        if nvidia_model:
+            env["ASR_MODEL_NVIDIA_RIVA"] = nvidia_model
+        cmd = [
+            "bash", str(script),
+            "--workers", str(workers),
+            "--run-dir", str(run_dir),
+        ]
+        if config.get("audio_download", {}).get("yt_dlp_rate_limit_safe", True):
+            cmd.append("--rate-limit-safe")
+        _append_limit(cmd, limit)
+        if channel_id:
+            cmd.extend(["--channel-id", str(channel_id)])
+        return cmd, env, run_dir, log_path
+
+    if stage == "resume":
+        script = SCRIPTS_DIR / "resume.sh"
+        run_dir = _make_run_dir("resume")
+        log_path = run_dir / "stdout_stderr.log"
+        max_workers = config.get("resume", {}).get("max_workers", 4)
+        limit = job.get("limit", config.get("resume", {}).get("batch_limit", 100))
+        channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
+        cmd = [
+            "bash", str(script),
+            "--max-workers", str(max_workers),
+            "--run-dir", str(run_dir),
+        ]
+        _append_limit(cmd, limit)
+        if channel_id:
+            cmd.extend(["--channel-id", str(channel_id)])
+        if config.get("resume", {}).get("provider_plan", "nvidia_first") == "nvidia_first":
+            cmd.append("--nvidia-only")
+        return cmd, env, run_dir, log_path
+
+    if stage == "format":
+        python = _get_venv_python()
+        script = PROJECT_ROOT / "format_transcripts_pool.py"
+        run_dir = _make_run_dir("format")
+        log_path = run_dir / "stdout_stderr.log"
+        max_workers = config.get("format", {}).get("max_workers", 4)
+        limit = job.get("limit", config.get("format", {}).get("batch_limit", 500))
+        channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
+        cmd = [
+            python, str(script),
+            "--workers", str(max_workers),
+            "--run-dir", str(run_dir),
+        ]
+        _append_limit(cmd, limit)
+        if channel_id:
+            cmd.extend(["--channel-id", str(channel_id)])
+        return cmd, env, run_dir, log_path
+
+    if stage == "asr":
+        script = SCRIPTS_DIR / "asr.sh"
+        run_dir = _make_run_dir("asr")
+        log_path = run_dir / "stdout_stderr.log"
+        limit = job.get("limit", config.get("asr", {}).get("batch_limit", 20))
+        channel_id = job.get("channel_identifier", "") or job.get("channel_id", "")
+        video_id = job.get("video_id", "")
+        env["ASR_AUDIO_DIR"] = _config_audio_dir(config)
+        groq_model = str(config.get("asr", {}).get("groq_model", "") or "").strip()
+        nvidia_model = str(config.get("asr", {}).get("nvidia_model", "") or "").strip()
+        if groq_model:
+            env["ASR_MODEL_GROQ"] = groq_model
+        if nvidia_model:
+            env["ASR_MODEL_NVIDIA_RIVA"] = nvidia_model
+        cmd = ["bash", str(script), "--local-audio-only"]
+        if video_id:
+            cmd.extend(["--video-id", str(video_id)])
+        elif channel_id:
+            cmd.extend(["--channel-id", str(channel_id)])
+        _append_limit(cmd, limit)
+        if config.get("asr", {}).get("delete_audio_after_success", True):
+            cmd.append("--delete-audio-after-success")
+        return cmd, env, run_dir, log_path
+
+    raise ValueError(f"Unsupported launch stage: {stage}")
+
+
+def launch_job(
+    job: dict[str, Any],
+    config: dict[str, Any],
+    state: OrchestratorState,
+    *,
+    slot_index: int,
+    lock_key: str,
+) -> dict[str, Any]:
+    """Launch a stage job asynchronously and register it in orchestrator_active_jobs."""
+    stage = str(job.get("stage", "")).strip()
+    if not stage:
+        return {"success": False, "error": "Missing stage"}
+
+    cmd, env, run_dir, log_path = _build_stage_launch_command(job, config, state)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    exit_code_path = run_dir / "exit_code.txt"
+    shell_cmd = _shell_wrap_command(cmd, exit_code_path)
+    command_text = " ".join(shlex.quote(str(part)) for part in cmd)
+
+    try:
+        process = subprocess.Popen(
+            shell_cmd,
+            cwd=str(PROJECT_ROOT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            start_new_session=True,
+        )
+    except Exception as e:
+        return {"success": False, "error": f"Failed to launch {stage}: {e}"}
+
+    job_id = f"{stage}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    group_name = _parallel_group_for_stage(stage)
+    try:
+        state.register_active_job(
+            job_id=job_id,
+            stage=stage,
+            scope=str(job.get("scope", "")),
+            group_name=group_name,
+            slot_index=slot_index,
+            lock_key=lock_key,
+            pid=process.pid,
+            command=command_text,
+            run_dir=str(run_dir),
+            log_path=str(log_path),
+            payload={"job": job, "exit_code_path": str(exit_code_path)},
+        )
+    except Exception as e:
+        try:
+            process.terminate()
+        except Exception:
+            pass
+        return {"success": False, "error": f"Failed to register active job: {e}"}
+    state.add_event(
+        event_type="dispatch",
+        stage=stage,
+        scope=str(job.get("scope", "")),
+        message=f"Launched {stage} slot {slot_index} pid={process.pid}",
+        severity="info",
+        payload={
+            "job_id": job_id,
+            "pid": process.pid,
+            "run_dir": str(run_dir),
+            "log_path": str(log_path),
+            "command": command_text,
+            "slot_index": slot_index,
+            "lock_key": lock_key,
+        },
+    )
+    return {
+        "success": True,
+        "launched": True,
+        "started": True,
+        "job_id": job_id,
+        "pid": process.pid,
+        "run_dir": str(run_dir),
+        "log_path": str(log_path),
+        "slot_index": slot_index,
+        "lock_key": lock_key,
+    }
 
 
 def run_import_pending(

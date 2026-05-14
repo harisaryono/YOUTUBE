@@ -55,6 +55,76 @@ def _adaptive_priority(stage: str, youtube_pressure: int, boost_threshold: int) 
     return int(JOB_PRIORITY_AVAILABLE_WORK_FIRST.get(stage, 99))
 
 
+def _parallel_config(config: dict[str, Any]) -> dict[str, Any]:
+    return config.get("parallel", {}) or {}
+
+
+def _stage_slots(config: dict[str, Any], stage: str) -> int:
+    parallel = _parallel_config(config)
+    stage_cfg = parallel.get("stages", {}).get(stage, {}) or {}
+    try:
+        return max(1, int(stage_cfg.get("slots", 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _query_limit_for_stage(stage: str, batch_limit: int, slots: int) -> int:
+    # Overfetch a little so we can split rows into per-channel jobs.
+    if stage in {"discovery", "import_pending"}:
+        return max(1, batch_limit)
+    return max(batch_limit, batch_limit * max(1, slots) * 4)
+
+
+def _group_rows_by_channel(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for row in rows:
+        channel_id = str(row.get("channel_identifier") or row.get("channel_id") or "").strip()
+        if not channel_id:
+            channel_id = str(row.get("scope") or row.get("video_id") or "").strip()
+        if not channel_id:
+            channel_id = f"row:{row.get('id', '')}"
+        if channel_id not in grouped:
+            grouped[channel_id] = {
+                "channel_id": channel_id,
+                "channel_name": str(row.get("channel_name") or channel_id),
+                "rows": [],
+            }
+            order.append(channel_id)
+        grouped[channel_id]["rows"].append(row)
+    return [grouped[key] for key in order]
+
+
+def _append_scoped_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    stage: str,
+    scope_prefix: str,
+    rows: list[dict[str, Any]],
+    limit: int,
+    priority: int,
+    description_label: str,
+    max_jobs: int,
+) -> None:
+    grouped = _group_rows_by_channel(rows)
+    for group in grouped[:max_jobs]:
+        channel_id = str(group.get("channel_id") or "").strip()
+        if not channel_id:
+            continue
+        channel_name = str(group.get("channel_name") or channel_id).strip()
+        count = len(group.get("rows", []))
+        jobs.append({
+            "stage": stage,
+            "scope": f"{scope_prefix}:{channel_id}",
+            "channel_identifier": channel_id,
+            "channel_id": channel_id,
+            "priority": priority,
+            "limit": limit,
+            "description": f"{description_label} for {channel_name} ({count} pending)",
+            "count": count,
+        })
+
+
 def _adaptive_batch_limit(
     stage: str,
     default_limit: int,
@@ -108,86 +178,109 @@ def plan_jobs(
     audio_count = db_queries.count_videos_need_audio_download(config, state)
     youtube_pressure = transcript_count + audio_count
 
-    # 2. Resume — max 1 batch per cycle
-    if config.get("resume", {}).get("enabled", True):
-        if resume_count > 0:
-            batch_limit = _limit_value(config.get("resume", {}).get("batch_limit", 0), 0)
-            jobs.append({
-                "stage": "resume",
-                "scope": "provider",
-                "priority": _adaptive_priority("resume", youtube_pressure, boost_threshold),
-                "limit": batch_limit,
-                "description": f"{_batch_description('resume', batch_limit, 'videos')} ({resume_count} total pending)",
-                "count": resume_count,
-            })
+    # 2. Resume — split by channel so multiple lanes can work without colliding.
+    if config.get("resume", {}).get("enabled", True) and resume_count > 0:
+        batch_limit = _limit_value(config.get("resume", {}).get("batch_limit", 0), 0)
+        stage_slots = _stage_slots(config, "resume")
+        fetch_limit = _query_limit_for_stage("resume", batch_limit or 100, stage_slots)
+        rows = db_queries.find_videos_need_resume(config, state, limit=fetch_limit)
+        _append_scoped_jobs(
+            jobs,
+            stage="resume",
+            scope_prefix="channel",
+            rows=rows,
+            limit=batch_limit,
+            priority=_adaptive_priority("resume", youtube_pressure, boost_threshold),
+            description_label="Resume batch",
+            max_jobs=stage_slots,
+        )
 
-    # 3. Format — max 1 batch per cycle
-    if config.get("format", {}).get("enabled", True):
-        if format_count > 0:
-            batch_limit = _limit_value(config.get("format", {}).get("batch_limit", 500), 500)
-            jobs.append({
-                "stage": "format",
-                "scope": "global",
-                "priority": _adaptive_priority("format", youtube_pressure, boost_threshold),
-                "limit": batch_limit,
-                "description": f"{_batch_description('format', batch_limit, 'videos')} ({format_count} total pending)",
-                "count": format_count,
-            })
+    # 3. Format — split by channel so multiple lanes can work without colliding.
+    if config.get("format", {}).get("enabled", True) and format_count > 0:
+        batch_limit = _limit_value(config.get("format", {}).get("batch_limit", 500), 500)
+        stage_slots = _stage_slots(config, "format")
+        fetch_limit = _query_limit_for_stage("format", batch_limit, stage_slots)
+        rows = db_queries.find_videos_need_format(config, state, limit=fetch_limit)
+        _append_scoped_jobs(
+            jobs,
+            stage="format",
+            scope_prefix="channel",
+            rows=rows,
+            limit=batch_limit,
+            priority=_adaptive_priority("format", youtube_pressure, boost_threshold),
+            description_label="Format batch",
+            max_jobs=stage_slots,
+        )
 
-    # 4. ASR — local-audio processing only
-    if config.get("asr", {}).get("enabled", False):
-        if asr_count > 0:
-            batch_limit = _limit_value(config.get("asr", {}).get("batch_limit", 20), 20)
-            jobs.append({
-                "stage": "asr",
-                "scope": "local:asr",
-                "priority": _adaptive_priority("asr", youtube_pressure, boost_threshold),
-                "limit": batch_limit,
-                "description": f"{_batch_description('asr', batch_limit, 'local audio files')} ({asr_count} total pending)",
-                "count": asr_count,
-            })
+    # 4. ASR — split by channel so local audio lanes can overlap safely.
+    if config.get("asr", {}).get("enabled", False) and asr_count > 0:
+        batch_limit = _limit_value(config.get("asr", {}).get("batch_limit", 20), 20)
+        stage_slots = _stage_slots(config, "asr")
+        fetch_limit = _query_limit_for_stage("asr", batch_limit, stage_slots)
+        rows = db_queries.find_videos_need_asr(config, state, limit=fetch_limit)
+        _append_scoped_jobs(
+            jobs,
+            stage="asr",
+            scope_prefix="channel",
+            rows=rows,
+            limit=batch_limit,
+            priority=_adaptive_priority("asr", youtube_pressure, boost_threshold),
+            description_label="ASR batch",
+            max_jobs=stage_slots,
+        )
 
-    # 5. Transcript — max 1 batch per cycle
+    # 5. Transcript — split by channel so YouTube lanes can overlap safely.
     if transcript_count > 0:
         batch_limit = _limit_value(config.get("youtube", {}).get("batch_limit", 100), 100)
         batch_limit = _adaptive_batch_limit("transcript", batch_limit, config, state)
-        jobs.append({
-            "stage": "transcript",
-            "scope": "youtube",
-            "priority": _adaptive_priority("transcript", youtube_pressure, boost_threshold),
-            "limit": batch_limit,
-            "description": f"{_batch_description('transcript', batch_limit, 'videos')} ({transcript_count} total pending)",
-            "count": transcript_count,
-        })
+        stage_slots = _stage_slots(config, "transcript")
+        fetch_limit = _query_limit_for_stage("transcript", batch_limit, stage_slots)
+        rows = db_queries.find_videos_need_transcript(config, state, limit=fetch_limit)
+        _append_scoped_jobs(
+            jobs,
+            stage="transcript",
+            scope_prefix="channel",
+            rows=rows,
+            limit=batch_limit,
+            priority=_adaptive_priority("transcript", youtube_pressure, boost_threshold),
+            description_label="Transcript batch",
+            max_jobs=stage_slots,
+        )
 
-    # 6. Audio download — fetch local audio for no_subtitle videos
-    if config.get("audio_download", {}).get("enabled", True):
-        if audio_count > 0:
-            batch_limit = _limit_value(config.get("audio_download", {}).get("batch_limit", 50), 50)
-            batch_limit = _adaptive_batch_limit("audio_download", batch_limit, config, state)
-            jobs.append({
-                "stage": "audio_download",
-                "scope": "youtube",
-                "priority": _adaptive_priority("audio_download", youtube_pressure, boost_threshold),
-                "limit": batch_limit,
-                "description": f"{_batch_description('audio download', batch_limit, 'videos')} ({audio_count} total pending)",
-                "count": audio_count,
-            })
+    # 6. Audio download — fetch local audio for no_subtitle videos, split by channel.
+    if config.get("audio_download", {}).get("enabled", True) and audio_count > 0:
+        batch_limit = _limit_value(config.get("audio_download", {}).get("batch_limit", 50), 50)
+        batch_limit = _adaptive_batch_limit("audio_download", batch_limit, config, state)
+        stage_slots = _stage_slots(config, "audio_download")
+        fetch_limit = _query_limit_for_stage("audio_download", batch_limit, stage_slots)
+        rows = db_queries.find_videos_need_audio_download(config, state, limit=fetch_limit)
+        _append_scoped_jobs(
+            jobs,
+            stage="audio_download",
+            scope_prefix="channel",
+            rows=rows,
+            limit=batch_limit,
+            priority=_adaptive_priority("audio_download", youtube_pressure, boost_threshold),
+            description_label="Audio download batch",
+            max_jobs=stage_slots,
+        )
 
-    # 7. Discovery — max 1 batch per cycle, pick 1 real channel
-    channels = db_queries.find_channels_need_discovery(config, state, limit=1)
+    # 7. Discovery — split by channel, one lane per discovered target.
+    discovery_slots = _stage_slots(config, "discovery")
+    channels = db_queries.find_channels_need_discovery(config, state, limit=max(1, discovery_slots * 4))
     if channels:
-        ch = channels[0]
         discovery_count = db_queries.count_channels_need_discovery(config, state)
-        jobs.append({
-            "stage": "discovery",
-            "scope": f"channel:{ch['channel_id']}",
-            "channel_id": ch["channel_id"],
-            "limit": 1,
-            "priority": _adaptive_priority("discovery", youtube_pressure, boost_threshold),
-            "description": f"Discover {ch.get('channel_name', ch['channel_id'])} ({discovery_count} total pending)",
-            "count": discovery_count,
-        })
+        for ch in channels[:discovery_slots]:
+            jobs.append({
+                "stage": "discovery",
+                "scope": f"channel:{ch['channel_id']}",
+                "channel_id": ch["channel_id"],
+                "channel_identifier": ch["channel_id"],
+                "limit": 1,
+                "priority": _adaptive_priority("discovery", youtube_pressure, boost_threshold),
+                "description": f"Discover {ch.get('channel_name', ch['channel_id'])} ({discovery_count} total pending)",
+                "count": discovery_count,
+            })
 
     # Sort by priority (lower = higher priority)
     jobs.sort(key=lambda j: (j.get("priority", 99), j.get("stage", "")))
