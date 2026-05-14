@@ -84,10 +84,12 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] `./scripts/orchestrator.sh cancel --job-id <JOB_ID>` bisa menandai job running sebagai `cancelled` dan melepaskan lock.
 - [ ] `./scripts/orchestrator.sh cancel-stage <stage>` dan `cancel-group <group>` hanya menarget job running yang cocok.
 - [ ] `./scripts/orchestrator.sh reconcile` menandai job yang PID-nya sudah mati berdasarkan `exit_code.txt` atau log yang tersedia.
+- [ ] Claim per video aktif: row yang sudah di-claim punya `processing_stage` / `processing_owner` / `processing_until`, dan wrapper transcript/resume/format me-release claim setelah job selesai.
 - [ ] `timeouts:` di [orchestrator.yaml](/media/harry/DATA120B/GIT/YOUTUBE/orchestrator.yaml) memuat timeout stage dasar untuk discovery, transcript, audio download, resume, ASR, dan format.
 - [ ] `timeouts:` juga bisa dioverride lewat `.env` dengan `ORCH_TIMEOUT_*` keys yang relevan.
 - [ ] `./scripts/orchestrator.sh active` menampilkan kolom `TIMEOUT` dan `REMAIN` untuk tiap job running.
 - [ ] `poll_active_jobs()` menandai job yang melewati timeout stage sebagai `timeout`, melepaskan lock, dan menulis event timeout.
+- [ ] discovery hanya ikut cooldown `youtube` global atau `youtube:discovery`; cooldown `youtube:content` tidak boleh memblok discovery.
 - [ ] `recover_asr_transcripts.py --help` dan `scripts/asr.sh --help` berjalan tanpa error sintaks.
 - [ ] `iyo9VuY5dpg` smoke ASR selesai via lease coordinator dan menulis transcript final ke DB + disk.
 - [ ] Transcript panjang yang melewati threshold post-process harus tercatat `postprocess_status=skipped_long` dan tidak memanggil GPT OSS 120B.

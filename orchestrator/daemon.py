@@ -249,6 +249,42 @@ def _timeout_key_for_stage(stage: str) -> str:
     return mapping.get(stage, "default_seconds")
 
 
+def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) -> list[str]:
+    stage = str(stage or "").strip().lower()
+    scope = str(scope or "").strip()
+    error_type = str(getattr(classification, "error_type", "") or "").strip()
+
+    scopes: list[str] = []
+    if scope.startswith("channel:"):
+        scopes.append(scope)
+
+    severe_youtube_errors = {
+        "youtube_bot_detection",
+        "youtube_signin_required",
+        "youtube_ip_blocked",
+    }
+
+    if error_type.startswith("youtube_"):
+        if error_type in severe_youtube_errors:
+            scopes.append("youtube")
+        elif stage == "discovery":
+            scopes.append("youtube:discovery")
+        elif stage in {"transcript", "audio_download"}:
+            scopes.append("youtube:content")
+        else:
+            scopes.append("youtube")
+    elif getattr(classification, "suggested_scope", ""):
+        scopes.append(str(classification.suggested_scope))
+    elif not scopes:
+        scopes.append(scope or "global")
+
+    deduped: list[str] = []
+    for item in scopes:
+        if item and item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
 def _stage_timeout_seconds(config: dict[str, Any], stage: str) -> int:
     timeouts = config.get("timeouts", {}) or {}
     key = _timeout_key_for_stage(stage)
@@ -685,14 +721,14 @@ def poll_active_jobs(
 
         classification = classify_error(error_text or f"exit code {exit_code}", exit_code)
         if classification.cooldown_seconds > 0:
-            cooldown_scope = classification.suggested_scope or scope or "global"
-            state.set_cooldown(
-                scope=cooldown_scope,
-                reason=classification.description,
-                duration_seconds=classification.cooldown_seconds,
-                severity=classification.severity,
-                recommendation=classification.recommendation,
-            )
+            for cooldown_scope in _cooldown_scopes_for_failure(stage, scope, classification):
+                state.set_cooldown(
+                    scope=cooldown_scope,
+                    reason=classification.description,
+                    duration_seconds=classification.cooldown_seconds,
+                    severity=classification.severity,
+                    recommendation=classification.recommendation,
+                )
         state.add_event(
             event_type="dispatch_failure",
             stage=stage,

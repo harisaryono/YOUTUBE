@@ -318,13 +318,37 @@ def safety_gate_for_job(
 
     if stage in ("discovery", "transcript", "audio_download"):
         # YouTube-dependent stages
-        if youtube_health.global_cooldown_active:
-            return SafetyDecision.wait(
-                f"YouTube cooldown active: {youtube_health.cooldown_reason}",
-                cooldown_seconds=3600,
-                recommendation="Wait for YouTube cooldown to expire",
-                reason_code="DEFER_YOUTUBE_COOLDOWN",
-            )
+        youtube_cd = state.get_cooldown("youtube")
+        if stage == "discovery":
+            discovery_cd = state.get_cooldown("youtube:discovery")
+            if youtube_cd is not None:
+                return SafetyDecision.wait(
+                    f"YouTube cooldown active: {youtube_cd['reason']}",
+                    cooldown_seconds=3600,
+                    recommendation="Wait for YouTube cooldown to expire",
+                    reason_code="DEFER_YOUTUBE_COOLDOWN",
+                )
+            if discovery_cd is not None:
+                return SafetyDecision.wait(
+                    f"Discovery cooldown active: {discovery_cd['reason']}",
+                    recommendation=discovery_cd.get("recommendation", ""),
+                    reason_code="DEFER_DISCOVERY_COOLDOWN",
+                )
+        else:
+            content_cd = state.get_cooldown("youtube:content")
+            if youtube_cd is not None:
+                return SafetyDecision.wait(
+                    f"YouTube cooldown active: {youtube_cd['reason']}",
+                    cooldown_seconds=3600,
+                    recommendation="Wait for YouTube cooldown to expire",
+                    reason_code="DEFER_YOUTUBE_COOLDOWN",
+                )
+            if content_cd is not None:
+                return SafetyDecision.wait(
+                    f"Content cooldown active: {content_cd['reason']}",
+                    recommendation=content_cd.get("recommendation", ""),
+                    reason_code="DEFER_YOUTUBE_CONTENT_COOLDOWN",
+                )
 
         # Channel-specific cooldown (only if scope is a channel)
         if scope and scope.startswith("channel:") and state.is_cooldown_active(scope):

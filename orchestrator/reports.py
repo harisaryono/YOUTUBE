@@ -45,6 +45,8 @@ def build_inventory_snapshot(
 
     blocked = {
         "youtube": any(cd_entry["scope"] == "youtube" for cd_entry in active_cooldowns),
+        "youtube_discovery": any(cd_entry["scope"] == "youtube:discovery" for cd_entry in active_cooldowns),
+        "youtube_content": any(cd_entry["scope"] == "youtube:content" for cd_entry in active_cooldowns),
         "provider": any(cd_entry["scope"].startswith("provider:") for cd_entry in active_cooldowns),
         "channel": any(cd_entry["scope"].startswith("channel:") for cd_entry in active_cooldowns),
     }
@@ -211,6 +213,10 @@ def _build_suggestions(
                 suggestions.append("Stop all YouTube activity for 12-24h, use different IP/proxy")
             elif "403" in reason or "forbidden" in reason.lower():
                 suggestions.append("Check cookies/proxy/IP, wait before retry")
+        elif scope == "youtube:discovery":
+            suggestions.append("Discovery is rate-limited; keep transcript/audio running and retry discovery later")
+        elif scope == "youtube:content":
+            suggestions.append("Transcript/audio is rate-limited; keep discovery running and let content cooldown expire")
         elif scope.startswith("provider:"):
             provider = scope.replace("provider:", "")
             if "quota" in reason.lower():

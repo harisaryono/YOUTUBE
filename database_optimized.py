@@ -252,6 +252,9 @@ class OptimizedDatabase:
                 ("transcript_retry_after", "TIMESTAMP"),
                 ("transcript_retry_reason", "TEXT"),
                 ("transcript_retry_count", "INTEGER DEFAULT 0"),
+                ("processing_stage", "TEXT NOT NULL DEFAULT ''"),
+                ("processing_owner", "TEXT NOT NULL DEFAULT ''"),
+                ("processing_until", "TEXT"),
             ]
             for column_name, column_def in video_retry_columns:
                 if column_name not in video_columns:
@@ -261,6 +264,14 @@ class OptimizedDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_videos_channel_rank
                 ON videos(channel_id, channel_rank)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_videos_processing_until
+                ON videos(processing_until)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_videos_processing_owner
+                ON videos(processing_owner, processing_until)
             """)
 
             cursor.execute("PRAGMA table_info(channels)")

@@ -75,6 +75,7 @@ for _candidate in (Path(__file__).resolve().parent / ".env", Path(__file__).reso
         load_dotenv(_candidate, override=False)
 
 from database_optimized import OptimizedDatabase
+from orchestrator.video_claims import claim_rows_by_query, release_claims
 from local_services import (
     coordinator_acquire_accounts,
     coordinator_heartbeat_lease,
@@ -469,6 +470,7 @@ class ASRPipeline:
         self.coordinator_pid = os.getpid()
         self._report_status_path = self.run_dir / "coordinator_status.json"
         self._provider_disabled_until: dict[str, float] = {}
+        self.claim_owner = str(os.getenv("JOB_ID") or f"asr:{os.getpid()}:{self.run_dir.name}").strip()
         self._ensure_coordinator_ready()
 
     def _resolve_audio_dir(self) -> Path:
@@ -760,6 +762,10 @@ class ASRPipeline:
         return self._acquire_provider_lease(provider_name, cfg)
 
     def close(self) -> None:
+        try:
+            release_claims(self.db.conn, owner=self.claim_owner)
+        except Exception:
+            pass
         for lease in list(self.provider_leases.values()):
             try:
                 lease.stop(final_state="idle", note="recover_asr_transcripts cleanup")
@@ -1228,123 +1234,169 @@ class ASRPipeline:
         if self.args.csv:
             return self._load_rows_from_csv(Path(self.args.csv))
 
-        with self.db._get_cursor() as cursor:
-            if self.args.video_id:
-                if self.download_only:
-                    cursor.execute(
-                        """
-                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                               COALESCE(v.transcript_language, '') AS transcript_language,
-                               c.channel_id, c.channel_name,
-                               COALESCE(a.audio_file_path, '') AS audio_file_path,
-                               COALESCE(a.status, 'pending') AS audio_status
-                        FROM videos v
-                        JOIN channels c ON c.id = v.channel_id
-                        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
-                        WHERE v.video_id = ?
-                        """,
-                        (self.args.video_id,),
-                    )
-                elif self.local_audio_only:
-                    cursor.execute(
-                        """
-                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                               COALESCE(v.transcript_language, '') AS transcript_language,
-                               c.channel_id, c.channel_name,
-                               COALESCE(a.audio_file_path, '') AS audio_file_path,
-                               COALESCE(a.audio_format, '') AS audio_format,
-                               COALESCE(a.status, '') AS audio_status
-                        FROM videos v
-                        JOIN channels c ON c.id = v.channel_id
-                        JOIN video_audio_assets a ON a.video_id = v.video_id
-                        WHERE v.video_id = ?
-                          AND COALESCE(a.status, '') = 'downloaded'
-                        """,
-                        (self.args.video_id,),
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                               COALESCE(v.transcript_language, '') AS transcript_language,
-                               c.channel_id, c.channel_name
-                        FROM videos v
-                        JOIN channels c ON c.id = v.channel_id
-                        WHERE v.video_id = ?
-                        """,
-                        (self.args.video_id,),
-                    )
+        owner = self.claim_owner
+        stage = "audio_download" if self.download_only else "asr"
+        params: list[object] = []
+
+        if self.args.video_id:
+            if self.download_only:
+                select_sql = f"""
+                    SELECT v.id, v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                           COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                           COALESCE(v.transcript_language, '') AS transcript_language,
+                           c.channel_id, c.channel_name,
+                           COALESCE(a.audio_file_path, '') AS audio_file_path,
+                           COALESCE(a.status, 'pending') AS audio_status
+                    FROM videos v
+                    JOIN channels c ON c.id = v.channel_id
+                    LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+                    WHERE v.video_id = ?
+                      AND COALESCE(v.is_short, 0) = 0
+                      AND COALESCE(v.is_member_only, 0) = 0
+                      AND COALESCE(v.transcript_downloaded, 0) = 0
+                      AND v.transcript_language = 'no_subtitle'
+                      AND (
+                          a.video_id IS NULL
+                          OR COALESCE(a.status, '') IN ('pending', 'failed')
+                      )
+                      AND (
+                          a.retry_after IS NULL
+                          OR a.retry_after <= datetime('now')
+                      )
+                      AND {active_video_claim_clause('v')}
+                    ORDER BY v.created_at DESC, v.id DESC
+                """
+            elif self.local_audio_only:
+                select_sql = f"""
+                    SELECT v.id, v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                           COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                           COALESCE(v.transcript_language, '') AS transcript_language,
+                           c.channel_id, c.channel_name,
+                           COALESCE(a.audio_file_path, '') AS audio_file_path,
+                           COALESCE(a.audio_format, '') AS audio_format,
+                           COALESCE(a.status, '') AS audio_status
+                    FROM videos v
+                    JOIN channels c ON c.id = v.channel_id
+                    JOIN video_audio_assets a ON a.video_id = v.video_id
+                    WHERE v.video_id = ?
+                      AND COALESCE(v.is_short, 0) = 0
+                      AND COALESCE(v.is_member_only, 0) = 0
+                      AND COALESCE(v.transcript_downloaded, 0) = 0
+                      AND v.transcript_language = 'no_subtitle'
+                      AND COALESCE(a.status, '') = 'downloaded'
+                      AND COALESCE(a.audio_file_path, '') != ''
+                      AND {active_video_claim_clause('v')}
+                    ORDER BY v.created_at DESC, v.id DESC
+                """
             else:
-                if self.download_only:
-                    query = """
-                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                               COALESCE(v.transcript_language, '') AS transcript_language,
-                               c.channel_id, c.channel_name,
-                               COALESCE(a.audio_file_path, '') AS audio_file_path,
-                               COALESCE(a.status, 'pending') AS audio_status
-                        FROM videos v
-                        JOIN channels c ON c.id = v.channel_id
-                        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
-                        WHERE COALESCE(v.is_short, 0) = 0
-                          AND COALESCE(v.is_member_only, 0) = 0
-                          AND COALESCE(v.transcript_downloaded, 0) = 0
-                          AND v.transcript_language = 'no_subtitle'
-                          AND (
-                              a.video_id IS NULL
-                              OR COALESCE(a.status, '') IN ('pending', 'failed')
-                          )
-                          AND (
-                              a.retry_after IS NULL
-                              OR a.retry_after <= datetime('now')
-                          )
-                    """
-                elif self.local_audio_only:
-                    query = """
-                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                               COALESCE(v.transcript_language, '') AS transcript_language,
-                               c.channel_id, c.channel_name,
-                               COALESCE(a.audio_file_path, '') AS audio_file_path,
-                               COALESCE(a.audio_format, '') AS audio_format,
-                               COALESCE(a.status, '') AS audio_status
-                        FROM videos v
-                        JOIN channels c ON c.id = v.channel_id
-                        JOIN video_audio_assets a ON a.video_id = v.video_id
-                        WHERE COALESCE(v.is_short, 0) = 0
-                          AND COALESCE(v.is_member_only, 0) = 0
-                          AND COALESCE(v.transcript_downloaded, 0) = 0
-                          AND v.transcript_language = 'no_subtitle'
-                          AND COALESCE(a.status, '') = 'downloaded'
-                          AND COALESCE(a.audio_file_path, '') != ''
-                    """
-                else:
-                    query = """
-                        SELECT v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
-                               COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
-                               COALESCE(v.transcript_language, '') AS transcript_language,
-                               c.channel_id, c.channel_name
-                        FROM videos v
-                        JOIN channels c ON c.id = v.channel_id
-                        WHERE COALESCE(v.is_short, 0) = 0
-                          AND COALESCE(v.is_member_only, 0) = 0
-                          AND COALESCE(v.transcript_downloaded, 0) = 0
-                          AND (COALESCE(v.transcript_language, '') = '' OR v.transcript_language = 'no_subtitle')
-                    """
-                params: list[object] = []
-                if self.args.channel_id:
-                    query += " AND (c.channel_id = ? OR c.channel_id = ?)"
-                    params.extend([self.args.channel_id, self.args.channel_id.lstrip("@")])
-                query += " ORDER BY v.created_at DESC, v.id DESC"
-                if self.args.limit > 0:
-                    query += " LIMIT ?"
-                    params.append(self.args.limit)
-                cursor.execute(query, params)
-            rows = [dict(row) for row in cursor.fetchall()]
-        return rows
+                select_sql = f"""
+                    SELECT v.id, v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                           COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                           COALESCE(v.transcript_language, '') AS transcript_language,
+                           c.channel_id, c.channel_name
+                    FROM videos v
+                    JOIN channels c ON c.id = v.channel_id
+                    WHERE v.video_id = ?
+                      AND COALESCE(v.is_short, 0) = 0
+                      AND COALESCE(v.is_member_only, 0) = 0
+                      AND COALESCE(v.transcript_downloaded, 0) = 0
+                      AND (COALESCE(v.transcript_language, '') = '' OR v.transcript_language = 'no_subtitle')
+                      AND {active_video_claim_clause('v')}
+                    ORDER BY v.created_at DESC, v.id DESC
+                """
+            params = [self.args.video_id]
+            if self.args.limit > 0:
+                select_sql += " LIMIT ?"
+                params.append(self.args.limit)
+            return claim_rows_by_query(
+                self.db.conn,
+                select_sql=select_sql,
+                params=params,
+                owner=owner,
+                stage=stage,
+                ttl_seconds=self.lease_ttl_seconds,
+            )
+
+        if self.download_only:
+            select_sql = f"""
+                SELECT v.id, v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                       COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                       COALESCE(v.transcript_language, '') AS transcript_language,
+                       c.channel_id, c.channel_name,
+                       COALESCE(a.audio_file_path, '') AS audio_file_path,
+                       COALESCE(a.status, 'pending') AS audio_status
+                FROM videos v
+                JOIN channels c ON c.id = v.channel_id
+                LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
+                WHERE COALESCE(v.is_short, 0) = 0
+                  AND COALESCE(v.is_member_only, 0) = 0
+                  AND COALESCE(v.transcript_downloaded, 0) = 0
+                  AND v.transcript_language = 'no_subtitle'
+                  AND (
+                      a.video_id IS NULL
+                      OR COALESCE(a.status, '') IN ('pending', 'failed')
+                  )
+                  AND (
+                      a.retry_after IS NULL
+                      OR a.retry_after <= datetime('now')
+                  )
+                  AND {active_video_claim_clause('v')}
+                ORDER BY v.created_at DESC, v.id DESC
+            """
+        elif self.local_audio_only:
+            select_sql = f"""
+                SELECT v.id, v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                       COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                       COALESCE(v.transcript_language, '') AS transcript_language,
+                       c.channel_id, c.channel_name,
+                       COALESCE(a.audio_file_path, '') AS audio_file_path,
+                       COALESCE(a.audio_format, '') AS audio_format,
+                       COALESCE(a.status, '') AS audio_status
+                FROM videos v
+                JOIN channels c ON c.id = v.channel_id
+                JOIN video_audio_assets a ON a.video_id = v.video_id
+                WHERE COALESCE(v.is_short, 0) = 0
+                  AND COALESCE(v.is_member_only, 0) = 0
+                  AND COALESCE(v.transcript_downloaded, 0) = 0
+                  AND v.transcript_language = 'no_subtitle'
+                  AND COALESCE(a.status, '') = 'downloaded'
+                  AND COALESCE(a.audio_file_path, '') != ''
+                  AND {active_video_claim_clause('v')}
+                ORDER BY v.created_at DESC, v.id DESC
+            """
+        else:
+            select_sql = f"""
+                SELECT v.id, v.video_id, v.title, v.video_url, COALESCE(v.duration, 0) AS duration,
+                       COALESCE(v.transcript_downloaded, 0) AS transcript_downloaded,
+                       COALESCE(v.transcript_language, '') AS transcript_language,
+                       c.channel_id, c.channel_name
+                FROM videos v
+                JOIN channels c ON c.id = v.channel_id
+                WHERE COALESCE(v.is_short, 0) = 0
+                  AND COALESCE(v.is_member_only, 0) = 0
+                  AND COALESCE(v.transcript_downloaded, 0) = 0
+                  AND (COALESCE(v.transcript_language, '') = '' OR v.transcript_language = 'no_subtitle')
+                  AND {active_video_claim_clause('v')}
+                ORDER BY v.created_at DESC, v.id DESC
+            """
+        if self.args.channel_id and not self.args.video_id:
+            select_sql = select_sql.replace(
+                "WHERE COALESCE(v.is_short, 0) = 0",
+                "WHERE (c.channel_id = ? OR c.channel_id = ?) AND COALESCE(v.is_short, 0) = 0",
+                1,
+            )
+            params = [self.args.channel_id, self.args.channel_id.lstrip("@")]
+        if self.args.limit > 0:
+            select_sql += " LIMIT ?"
+            params.append(self.args.limit)
+        return claim_rows_by_query(
+            self.db.conn,
+            select_sql=select_sql,
+            params=params,
+            owner=owner,
+            stage=stage,
+            ttl_seconds=self.lease_ttl_seconds,
+        )
 
     def _load_rows_from_csv(self, csv_path: Path) -> list[dict]:
         ids: list[str] = []

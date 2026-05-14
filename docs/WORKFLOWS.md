@@ -43,6 +43,10 @@ Catatan:
 - Setelah full-history pertama selesai, channel itu masuk rotasi `latest-only` untuk menangkap video baru dan retry incomplete tanpa mengulang full crawl terus-menerus.
 - Channel backlog diproses dengan `scan-all-missing`.
 - Channel bersih diproses dengan `latest-only`.
+- Cooldown YouTube sekarang dipisah:
+  - `youtube:discovery` hanya menahan discovery.
+  - `youtube:content` hanya menahan transcript/audio.
+  - cooldown `youtube` global tetap dipakai untuk blok berat seperti bot/captcha/IP block.
 
 ## Transcript
 
@@ -72,6 +76,7 @@ Output:
 - report di `runs/<run_id>/.../recover_report.csv`
 
 Catatan:
+- Wrapper transcript sekarang men-claim row target sebelum menulis `tasks.csv`, lalu melepas claim setelah worker selesai.
 - Jalur web/manual untuk video publik yang belum punya transcript sekarang memakai chain `scripts/manual_transcript_then_resume_format.sh`, jadi setelah manual download sukses, resume dan format jalan otomatis.
 - hard block harus ditandai jelas.
 - batch harus berhenti lebih awal jika hard block berturut-turut sudah melewati threshold.
@@ -101,6 +106,9 @@ Output:
 - resume di `uploads/<channel_id>/resume/`
 - status job di `runs/<run_id>/...`
 
+Catatan:
+- Wrapper resume men-claim target row sebelum membangun `tasks.csv`, lalu melepas claim setelah `launch_resume_queue.py` selesai.
+
 ## Format
 
 Tujuan:
@@ -125,6 +133,7 @@ Output:
 Catatan:
 - transcript bahasa Inggris jangan diam-diam diterjemahkan.
 - output formatting tidak boleh memunculkan tag reasoning seperti `<think>`.
+- Wrapper format men-claim row sebelum membangun `tasks.csv`, lalu melepas claim setelah `format_transcripts_pool.py` selesai.
 
 ## Audio
 
@@ -219,6 +228,9 @@ Mode penting:
 - `--postprocess` bila ingin GPT OSS dipakai sebagai post-process
 - `--download-only` untuk warm audio cache background
 - `--require-cached-audio` untuk memaksa ASR hanya pakai cache audio yang sudah ada
+
+Catatan:
+- ASR worker sekarang juga memakai claim owner berbasis `JOB_ID` agar row yang sama tidak diproses paralel dua kali.
 
 ## Supervisor
 

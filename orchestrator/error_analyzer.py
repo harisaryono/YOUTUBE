@@ -80,6 +80,42 @@ RECOMMENDATIONS: dict[str, str] = {
 }
 
 
+def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassification) -> list[str]:
+    stage = str(stage or "").strip().lower()
+    scope = str(scope or "").strip()
+    error_type = str(classification.error_type or "").strip()
+
+    scopes: list[str] = []
+    if scope.startswith("channel:"):
+        scopes.append(scope)
+
+    severe_youtube_errors = {
+        "youtube_bot_detection",
+        "youtube_signin_required",
+        "youtube_ip_blocked",
+    }
+
+    if error_type.startswith("youtube_"):
+        if error_type in severe_youtube_errors:
+            scopes.append("youtube")
+        elif stage == "discovery":
+            scopes.append("youtube:discovery")
+        elif stage in {"transcript", "audio_download"}:
+            scopes.append("youtube:content")
+        else:
+            scopes.append("youtube")
+    elif classification.suggested_scope:
+        scopes.append(classification.suggested_scope)
+    elif not scopes:
+        scopes.append(scope or "global")
+
+    deduped: list[str] = []
+    for item in scopes:
+        if item and item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
 def classify_error(
     log_line: str,
     exit_code: int = 0,
@@ -171,8 +207,6 @@ def analyze_report_csv(
                     scope = f"video:{video_id}" if video_id else "global"
                 elif classification.error_type in ("channel_unavailable",):
                     scope = f"channel:{channel_id}" if channel_id else "global"
-                elif classification.error_type.startswith("youtube_"):
-                    scope = "youtube"
                 elif classification.error_type.startswith("provider_"):
                     # Try to extract provider name
                     provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", error_msg)
@@ -181,13 +215,14 @@ def analyze_report_csv(
 
                 # Set cooldown if needed
                 if classification.cooldown_seconds > 0:
-                    state.set_cooldown(
-                        scope=scope,
-                        reason=classification.description,
-                        duration_seconds=classification.cooldown_seconds,
-                        severity=classification.severity,
-                        recommendation=classification.recommendation,
-                    )
+                    for cooldown_scope in _cooldown_scopes_for_row(row.get("stage", ""), scope, classification):
+                        state.set_cooldown(
+                            scope=cooldown_scope,
+                            reason=classification.description,
+                            duration_seconds=classification.cooldown_seconds,
+                            severity=classification.severity,
+                            recommendation=classification.recommendation,
+                        )
 
                 # Record event
                 event_id = state.add_event(

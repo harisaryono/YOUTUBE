@@ -111,8 +111,10 @@ JOB_RUN_DIR="${JOB_RUN_DIR:-$RUN_DIR_VALUE}"
 if [ -z "$JOB_RUN_DIR" ]; then
     JOB_RUN_DIR="runs/resume_${JOB_ID}"
 fi
+export JOB_ID JOB_SOURCE JOB_RUN_DIR
 mkdir -p "$JOB_RUN_DIR"
 JOB_LOG_PATH="${JOB_LOG_PATH:-$REPO_DIR/logs/${JOB_ID}.log}"
+export JOB_LOG_PATH
 mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
 
@@ -130,6 +132,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from orchestrator.video_claims import active_video_claim_clause, claim_rows_by_query, release_claims
+
 repo_root = Path(os.environ["REPO_ROOT"])
 db_path = repo_root / "youtube_transcripts.db"
 tasks_csv = Path(os.environ["TASKS_CSV_PATH"])
@@ -137,41 +141,54 @@ video_id = str(os.environ.get("TARGET_VIDEO_ID", "")).strip()
 channel_id = str(os.environ.get("TARGET_CHANNEL_ID", "")).strip()
 limit_raw = str(os.environ.get("LIMIT_NUM_VAL", "0")).strip()
 limit_value = int(limit_raw) if limit_raw else 0
+claim_owner = str(os.environ.get("JOB_ID") or "").strip()
+if not claim_owner:
+    raise SystemExit("missing JOB_ID for resume claim owner")
 
 tasks_csv.parent.mkdir(parents=True, exist_ok=True)
 params = []
 
 if video_id:
-    query = """
-        SELECT v.video_id, c.channel_name
+    select_sql = f"""
+        SELECT v.id, v.video_id, c.channel_name
         FROM videos v
         JOIN channels c ON c.id = v.channel_id
         WHERE v.video_id = ?
           AND v.transcript_downloaded = 1
           AND COALESCE(v.summary_file_path, '') = ''
+          AND {active_video_claim_clause('v')}
+        ORDER BY c.channel_name ASC, v.id DESC
     """
     params.append(video_id)
 else:
-    query = """
-        SELECT v.video_id, c.channel_name
+    select_sql = f"""
+        SELECT v.id, v.video_id, c.channel_name
         FROM videos v
         JOIN channels c ON c.id = v.channel_id
         WHERE v.transcript_downloaded = 1
           AND COALESCE(v.summary_file_path, '') = ''
-          AND (c.channel_id = ? OR c.channel_id = ?)
-        ORDER BY c.channel_name ASC, v.id DESC
+          AND {active_video_claim_clause('v')}
     """
     if not channel_id:
         raise SystemExit("missing channel_id")
+    select_sql += " AND (c.channel_id = ? OR c.channel_id = ?)"
     params.extend([channel_id, channel_id.lstrip("@")])
+    select_sql += " ORDER BY c.channel_name ASC, v.id DESC"
     if limit_value > 0:
-        query += " LIMIT ?"
+        select_sql += " LIMIT ?"
         params.append(limit_value)
 
 con = sqlite3.connect(str(db_path))
 con.row_factory = sqlite3.Row
 try:
-    rows = con.execute(query, params).fetchall()
+    rows = claim_rows_by_query(
+        con,
+        select_sql=select_sql,
+        params=params,
+        owner=claim_owner,
+        stage="resume",
+        ttl_seconds=4 * 60 * 60,
+    )
 finally:
     con.close()
 
@@ -261,6 +278,23 @@ else
     echo "❌ Resume generation failed with exit code: $EXIT_CODE"
 fi
 echo "============================================="
+
+echo "📦 Releasing resume claims..."
+"$VENV_PYTHON" - <<'PY' || true
+import os
+
+from database_optimized import OptimizedDatabase
+from orchestrator.video_claims import release_claims
+
+job_id = str(os.environ.get("JOB_ID") or "").strip()
+if job_id:
+    db = OptimizedDatabase("youtube_transcripts.db", "uploads")
+    try:
+        released = release_claims(db.conn, owner=job_id)
+        print(f"released_claims={released}")
+    finally:
+        db.close()
+PY
 
 # Auto-import results to DB
 echo "📥 Importing pending updates to database..."

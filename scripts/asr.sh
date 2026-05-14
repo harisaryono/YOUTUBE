@@ -176,8 +176,10 @@ JOB_RUN_DIR="${JOB_RUN_DIR:-$RUN_DIR_VALUE}"
 if [ -z "$JOB_RUN_DIR" ]; then
     JOB_RUN_DIR="runs/${JOB_ID}"
 fi
+export JOB_ID JOB_SOURCE JOB_RUN_DIR
 mkdir -p "$JOB_RUN_DIR"
 JOB_LOG_PATH="${JOB_LOG_PATH:-$REPO_DIR/logs/${JOB_ID}.log}"
+export JOB_LOG_PATH
 mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
 

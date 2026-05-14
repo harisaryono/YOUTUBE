@@ -149,8 +149,10 @@ JOB_RUN_DIR="${JOB_RUN_DIR:-$RUN_DIR_VALUE}"
 if [ -z "$JOB_RUN_DIR" ]; then
     JOB_RUN_DIR="runs/transcript_${JOB_ID}"
 fi
+export JOB_ID JOB_SOURCE JOB_RUN_DIR
 mkdir -p "$JOB_RUN_DIR"
 JOB_LOG_PATH="${JOB_LOG_PATH:-$REPO_DIR/logs/${JOB_ID}.log}"
+export JOB_LOG_PATH
 mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
 
@@ -195,6 +197,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from orchestrator.video_claims import active_video_claim_clause, claim_rows_by_query
 from recover_transcripts import TranscriptRecoverer
 
 repo_root = Path(os.environ["REPO_ROOT"])
@@ -210,29 +213,53 @@ audit_report = Path(os.environ.get("AUDIT_REPORT_PATH", str(tasks_csv.parent / "
 tasks_csv.parent.mkdir(parents=True, exist_ok=True)
 
 params: list[object] = []
+claim_owner = str(os.environ.get("JOB_ID") or "").strip()
+if not claim_owner:
+    raise SystemExit("missing JOB_ID for transcript claim owner")
+
 if video_id:
-    query = "SELECT v.video_id FROM videos v WHERE v.video_id = ?"
+    select_sql = f"""
+        SELECT v.id, v.video_id
+        FROM videos v
+        WHERE v.video_id = ?
+          AND COALESCE(v.transcript_downloaded, 0) = 0
+          AND (v.transcript_language IS NULL OR v.transcript_language != 'no_subtitle')
+          AND COALESCE(v.is_short, 0) = 0
+          AND COALESCE(v.is_member_only, 0) = 0
+          AND {active_video_claim_clause('v')}
+        ORDER BY v.created_at DESC, v.id DESC
+    """
     params.append(video_id)
 else:
-    query = """
-        SELECT v.video_id
+    select_sql = f"""
+        SELECT v.id, v.video_id
         FROM videos v
         LEFT JOIN channels c ON c.id = v.channel_id
         WHERE COALESCE(v.transcript_downloaded, 0) = 0
           AND (v.transcript_language IS NULL OR v.transcript_language != 'no_subtitle')
+          AND COALESCE(v.is_short, 0) = 0
+          AND COALESCE(v.is_member_only, 0) = 0
+          AND {active_video_claim_clause('v')}
     """
     if channel_id:
-        query += " AND (c.channel_id = ? OR c.channel_id = ?)"
+        select_sql += " AND (c.channel_id = ? OR c.channel_id = ?)"
         params.extend([channel_id, channel_id.lstrip("@")])
-    query += " ORDER BY v.created_at DESC"
+    select_sql += " ORDER BY v.created_at DESC, v.id DESC"
     if limit_value > 0:
-        query += " LIMIT ?"
+        select_sql += " LIMIT ?"
         params.append(limit_value)
 
 con = sqlite3.connect(str(db_path))
 con.row_factory = sqlite3.Row
 try:
-    rows = con.execute(query, params).fetchall()
+    rows = claim_rows_by_query(
+        con,
+        select_sql=select_sql,
+        params=params,
+        owner=claim_owner,
+        stage="transcript",
+        ttl_seconds=4 * 60 * 60,
+    )
 
     if not rows and audit_enabled and not video_id:
         recoverer = TranscriptRecoverer()
@@ -507,6 +534,22 @@ PY
         echo "❌ Parallel transcript failed with exit code: $WORKER_EXIT"
     fi
     echo "============================================="
+    echo "📦 Releasing transcript claims..."
+    "$VENV_PYTHON" - <<'PY' || true
+import os
+
+from database_optimized import OptimizedDatabase
+from orchestrator.video_claims import release_claims
+
+job_id = str(os.environ.get("JOB_ID") or "").strip()
+if job_id:
+    db = OptimizedDatabase("youtube_transcripts.db", "uploads")
+    try:
+        released = release_claims(db.conn, owner=job_id)
+        print(f"released_claims={released}")
+    finally:
+        db.close()
+PY
     exit $WORKER_EXIT
 fi
 
@@ -585,6 +628,23 @@ fi
 echo "============================================="
 
 # Auto-import results to DB
+echo "📦 Releasing transcript claims..."
+"$VENV_PYTHON" - <<'PY' || true
+import os
+
+from database_optimized import OptimizedDatabase
+from orchestrator.video_claims import release_claims
+
+job_id = str(os.environ.get("JOB_ID") or "").strip()
+if job_id:
+    db = OptimizedDatabase("youtube_transcripts.db", "uploads")
+    try:
+        released = release_claims(db.conn, owner=job_id)
+        print(f"released_claims={released}")
+    finally:
+        db.close()
+PY
+
 echo "📥 Importing pending updates to database..."
 "$VENV_PYTHON" "$REPO_DIR/partial_py/import_pending_updates.py"
 

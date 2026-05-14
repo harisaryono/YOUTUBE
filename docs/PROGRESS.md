@@ -54,12 +54,17 @@
   - job aktif persisten di SQLite lewat `orchestrator_active_jobs`, jadi daemon bisa melihat job yang masih berjalan setelah cycle berikutnya
   - implementasi slot-based active manager sudah lolos `py_compile` dan `orchestrator.sh once --dry-run`; restart daemon live ditunda sementara karena ada job ASR lama yang masih berjalan di proses lama
   - SQLite orchestrator state sekarang pakai `busy_timeout=30000` agar concurrent event/cooldown write lebih tahan bentrok
+  - Stage 7 claim per video sudah mulai dipasang di jalur transcript/resume/format/ASR supaya row yang sama tidak diproses paralel dua kali; claim memakai kolom `processing_stage`, `processing_owner`, dan `processing_until`
   - kalau batch habis dan masih ada backlog, orchestrator harus re-plan dan membuat batch baru
   - loop aggressiveness sekarang diturunkan ke `min_sleep_seconds: 5` agar re-plan cepat saat masih ada kerja yang aman
   - command `./scripts/orchestrator.sh explain` sekarang menampilkan inventori kerja, blocker, dan reason code defer aktif
   - command operasional tambahan sekarang tersedia: `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, dan `reconcile`
   - timeout stage dasar sekarang aktif lewat `timeouts:` di config; job yang lewat batas akan diterminasi dan dicatat sebagai `timeout` saat cycle polling normal
-  - discovery sekarang punya bootstrap state: channel yang belum punya `full_history_scanned_at` dipindai `scan-all-missing` dulu, lalu setelah itu masuk rotasi `latest-only`
+- discovery sekarang punya bootstrap state: channel yang belum punya `full_history_scanned_at` dipindai `scan-all-missing` dulu, lalu setelah itu masuk rotasi `latest-only`
+- cooldown YouTube sekarang dipisah lebih halus:
+  - `youtube:content` hanya menahan transcript/audio
+  - `youtube:discovery` hanya menahan discovery
+  - cooldown `youtube` global tetap dipakai untuk blok YouTube berat seperti bot/captcha/IP block
 - Ingest metadata-only terbaru: `@MentalCuann`, `@JurnalInvestasiku`, `@SiPalingLogis`, `@nalarlambat`, `@ilmulidi`, dan video `rn9-P466MWw` dari `@SeniMengaturGaji` dicatat di `runs/manual_channel_ingest_20260514_062000/report.json`.
 - Ingest metadata-only berikutnya: `@KendatiDemikianStudio`, `@kayaalaceo`, `@FinansialMedia`, `@Jejolok`, `@RuangKaya`, serta normalisasi `@OasisCeritaUsaha` dicatat di `runs/manual_channel_ingest_20260514_062350/report.json`.
 - Ingest channel baru `@NosTec.id1` sudah dilakukan lewat source `/videos`; hasil metadata awal yang tersimpan: `Nostalgia Technologi`, `37` video, `channel_db_id=648`.

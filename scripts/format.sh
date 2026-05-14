@@ -91,8 +91,10 @@ JOB_RUN_DIR="${JOB_RUN_DIR:-$RUN_DIR_VALUE}"
 if [ -z "$JOB_RUN_DIR" ]; then
     JOB_RUN_DIR="runs/format_${JOB_ID}"
 fi
+export JOB_ID JOB_SOURCE JOB_RUN_DIR
 mkdir -p "$JOB_RUN_DIR"
 JOB_LOG_PATH="${JOB_LOG_PATH:-$REPO_DIR/logs/${JOB_ID}.log}"
+export JOB_LOG_PATH
 mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
 
@@ -104,6 +106,7 @@ export TASKS_CSV_PATH
 export VIDEO_ID_VALUE
 export CHANNEL_ID_VALUE
 export LIMIT_VALUE
+export JOB_ID
 
 "$VENV_PYTHON" - <<'PY'
 import csv
@@ -112,6 +115,7 @@ import sqlite3
 from pathlib import Path
 
 from database_optimized import OptimizedDatabase
+from orchestrator.video_claims import active_video_claim_clause, claim_rows_by_query
 
 repo_root = Path(os.environ["REPO_ROOT"])
 db_path = repo_root / "youtube_transcripts.db"
@@ -120,30 +124,60 @@ video_id_filter = str(os.environ.get("VIDEO_ID_VALUE", "")).strip()
 channel_filter = str(os.environ.get("CHANNEL_ID_VALUE", "")).strip()
 limit_raw = str(os.environ.get("LIMIT_VALUE", "0")).strip()
 limit_value = int(limit_raw) if limit_raw else 0
+claim_owner = str(os.environ.get("JOB_ID") or "").strip()
+if not claim_owner:
+    raise SystemExit("missing JOB_ID for format claim owner")
 
-query = """
-    SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
-    FROM videos v
-    JOIN channels c ON c.id = v.channel_id
-    WHERE v.transcript_downloaded = 1
-      AND COALESCE(v.transcript_formatted_path, '') = ''
-"""
 params = []
 if video_id_filter:
-    query += " AND v.video_id = ?"
+    select_sql = f"""
+        SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
+        FROM videos v
+        JOIN channels c ON c.id = v.channel_id
+        WHERE v.video_id = ?
+          AND v.transcript_downloaded = 1
+          AND COALESCE(v.transcript_formatted_path, '') = ''
+          AND {active_video_claim_clause('v')}
+        ORDER BY v.id ASC
+    """
     params.append(video_id_filter)
 elif channel_filter:
-    query += " AND (c.channel_id = ? OR c.channel_id = ?)"
+    select_sql = f"""
+        SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
+        FROM videos v
+        JOIN channels c ON c.id = v.channel_id
+        WHERE v.transcript_downloaded = 1
+          AND COALESCE(v.transcript_formatted_path, '') = ''
+          AND {active_video_claim_clause('v')}
+          AND (c.channel_id = ? OR c.channel_id = ?)
+        ORDER BY v.id ASC
+    """
     params.extend([channel_filter, channel_filter.lstrip("@")])
-query += " ORDER BY v.id ASC"
+else:
+    select_sql = f"""
+        SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
+        FROM videos v
+        JOIN channels c ON c.id = v.channel_id
+        WHERE v.transcript_downloaded = 1
+          AND COALESCE(v.transcript_formatted_path, '') = ''
+          AND {active_video_claim_clause('v')}
+        ORDER BY v.id ASC
+    """
 if limit_value > 0:
-    query += " LIMIT ?"
+    select_sql += " LIMIT ?"
     params.append(limit_value)
 
 con = sqlite3.connect(str(db_path))
 con.row_factory = sqlite3.Row
 try:
-    rows = con.execute(query, params).fetchall()
+    rows = claim_rows_by_query(
+        con,
+        select_sql=select_sql,
+        params=params,
+        owner=claim_owner,
+        stage="format",
+        ttl_seconds=4 * 60 * 60,
+    )
 finally:
     con.close()
 
@@ -253,6 +287,23 @@ else
     echo "❌ Transcript formatting failed with exit code: $EXIT_CODE"
 fi
 echo "============================================="
+
+echo "📦 Releasing format claims..."
+"$VENV_PYTHON" - <<'PY' || true
+import os
+
+from database_optimized import OptimizedDatabase
+from orchestrator.video_claims import release_claims
+
+job_id = str(os.environ.get("JOB_ID") or "").strip()
+if job_id:
+    db = OptimizedDatabase("youtube_transcripts.db", "uploads")
+    try:
+        released = release_claims(db.conn, owner=job_id)
+        print(f"released_claims={released}")
+    finally:
+        db.close()
+PY
 
 # Auto-import results to DB
 echo "📥 Importing pending updates to database..."
