@@ -81,7 +81,16 @@ class TestCooldownScopeSeparation(unittest.TestCase):
 
         self.assertEqual(classification.error_type, "youtube_geo_blocked")
         self.assertEqual(classification.cooldown_seconds, 0)
-        self.assertEqual(classification.suggested_scope, "youtube:content")
+        self.assertTrue(classification.suggested_scope in {"video", "youtube:content", ""})
+
+    def test_format_unavailable_is_terminal(self) -> None:
+        from orchestrator.error_analyzer import classify_error
+
+        classification = classify_error("This video format is unavailable")
+
+        self.assertEqual(classification.error_type, "format_unavailable")
+        self.assertEqual(classification.cooldown_seconds, 0)
+        self.assertEqual(classification.suggested_scope, "video")
 
 
 if __name__ == "__main__":

@@ -76,8 +76,10 @@ ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
         0,
     ),
     (
-        r"(?i)(requested\s+format\s+is\s+not\s+available|no\s+video\s+formats\s+found|"
-        r"no\s+formats\s+available|format\s+not\s+available)",
+        r"(?i)(requested\s+format\s+is\s+not\s+available|requested\s+format\s+is\s+unavailable|"
+        r"this\s+video\s+format\s+is\s+unavailable|format\s+is\s+unavailable|"
+        r"no\s+video\s+formats\s+found|no\s+formats\s+available|format\s+not\s+available|"
+        r"format\s+unavailable)",
         "format_unavailable",
         "Requested YouTube format is unavailable",
         0,
