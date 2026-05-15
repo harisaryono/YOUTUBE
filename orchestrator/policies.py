@@ -4,6 +4,11 @@ Orchestrator policy helpers.
 This module keeps the control-plane rules for pauses, group scoping, and
 quarantine decisions in one place so daemon, doctor, and actions can share the
 same semantics.
+
+Quarantine rule:
+- A channel quarantine may be global, but it should usually be stage-scoped.
+- Example: a transcript/history failure on a channel must not block resume or
+  format jobs for the same channel.
 """
 
 from __future__ import annotations
@@ -56,6 +61,93 @@ def _read_pause_reason(state: OrchestratorState, key: str) -> str:
     return raw
 
 
+def _decode_control_payload(raw: str) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return {"reason": text}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _normalize_stage_list(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        raw_items = [item.strip() for item in value.replace(";", ",").split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = [str(item).strip() for item in value]
+    else:
+        raw_items = [str(value).strip()]
+    result: set[str] = set()
+    aliases = {
+        "history": "discovery",
+        "channel_history": "discovery",
+        "channel-history": "discovery",
+        "youtube_history": "discovery",
+        "youtube-history": "discovery",
+        "transkrip": "transcript",
+        "subtitle": "transcript",
+        "audio": "audio_download",
+        "download": "audio_download",
+        "summarize": "resume",
+        "summary": "resume",
+        "ringkasan": "resume",
+        "formatting": "format",
+    }
+    known = {"discovery", "transcript", "audio_download", "resume", "asr", "format", "janitor", "import_pending"}
+    for item in raw_items:
+        key = item.lower().replace(" ", "_").strip()
+        if not key:
+            continue
+        key = aliases.get(key, key)
+        if key in known:
+            result.add(key)
+    return result
+
+
+def quarantine_stages_from_payload(payload: dict[str, Any]) -> set[str]:
+    """Return stages affected by a quarantine payload.
+
+    Empty set means legacy/global channel quarantine. New quarantines should set
+    `stages` explicitly so a transcript-specific channel issue does not block
+    unrelated provider/local work for that channel.
+    """
+    stages = set()
+    for key in ("stages", "stage", "target_stages", "target_stage", "affected_stages", "quarantine_stages"):
+        stages.update(_normalize_stage_list(payload.get(key)))
+    if stages:
+        return stages
+
+    # Backward-compatible inference for old quarantine records that only stored
+    # a human reason. This prevents existing "transcript/transkrip" quarantines
+    # from continuing to block resume/format for the same channel.
+    reason = str(payload.get("reason") or "").lower()
+    inferred: set[str] = set()
+    if any(token in reason for token in ("transcript", "transkrip", "subtitle", "caption")):
+        inferred.add("transcript")
+    if any(token in reason for token in ("audio_download", "audio download", "audio", "yt-dlp")):
+        inferred.add("audio_download")
+    if any(token in reason for token in ("discovery", "channel history", "full history", "scan-all-missing")):
+        inferred.add("discovery")
+    if any(token in reason for token in ("resume", "summary", "ringkasan")):
+        inferred.add("resume")
+    if "asr" in reason:
+        inferred.add("asr")
+    if "format" in reason:
+        inferred.add("format")
+    return inferred
+
+
+def quarantine_applies_to_stage(payload: dict[str, Any], stage: str) -> bool:
+    stages = quarantine_stages_from_payload(payload)
+    if not stages:
+        return True
+    return str(stage or "").strip().lower() in stages
+
+
 def policy_blockers_for_job(
     state: OrchestratorState,
     *,
@@ -80,21 +172,22 @@ def policy_blockers_for_job(
 
     channel_id = channel_id_from_scope(scope)
     if channel_id and state.is_quarantined_channel(channel_id):
-        payload = {}
-        try:
-            payload = json.loads(str(state.get(f"quarantine:channel:{channel_id}", "") or "{}"))
-        except Exception:
-            payload = {}
-        reason = str(payload.get("reason") or "channel quarantined").strip()
-        blockers.append(
-            {
-                "type": "quarantine",
-                "key": f"quarantine:channel:{channel_id}",
-                "reason": reason,
-                "channel_id": channel_id,
-                "message": f"channel {channel_id} quarantined: {reason}",
-            }
-        )
+        raw = str(state.get(f"quarantine:channel:{channel_id}", "") or "")
+        payload = _decode_control_payload(raw)
+        if quarantine_applies_to_stage(payload, stage):
+            reason = str(payload.get("reason") or "channel quarantined").strip()
+            stages = sorted(quarantine_stages_from_payload(payload))
+            stage_note = f" for stage(s) {','.join(stages)}" if stages else ""
+            blockers.append(
+                {
+                    "type": "quarantine",
+                    "key": f"quarantine:channel:{channel_id}",
+                    "reason": reason,
+                    "channel_id": channel_id,
+                    "stages": stages,
+                    "message": f"channel {channel_id} quarantined{stage_note}: {reason}",
+                }
+            )
 
     return blockers
 
