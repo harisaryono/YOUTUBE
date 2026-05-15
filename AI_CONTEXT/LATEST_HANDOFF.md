@@ -1,6 +1,6 @@
 # AI_CONTEXT Handoff
 
-Generated: `2026-05-15T06:20:17+07:00`
+Generated: `2026-05-15T08:23:57+07:00`
 
 ## What to open first
 
@@ -29,6 +29,11 @@ Generated: `2026-05-15T06:20:17+07:00`
 - Stage 10 adds web admin integration:
   - `/admin/orchestrator`
   - dashboard actions for doctor/explain/validate/reconcile/pause/resume/cancel
+- Stage 11 adds safe control actions:
+  - `pause-stage`, `resume-stage`, `pause-group`, `resume-group`
+  - `retry-failed --dry-run`
+  - `quarantine-channel`, `unquarantine-channel`
+  - dashboard now shows pause/quarantine/control-action snapshots
 
 ## Important constraints
 
@@ -44,5 +49,5 @@ Generated: `2026-05-15T06:20:17+07:00`
 - Use `docs/README.md` as the index, then `docs/WORKFLOWS.md` for operational flow.
 - Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`
 - Validate before patching when stage 8 changes touch orchestrator control plane.
-- Use `doctor` for quick operational diagnosis before reading long logs.
+- Use `doctor` for quick operational diagnosis before reading long logs; `--show-errors` helps when cycle failures need more detail.
 - Use the web dashboard when you want the same snapshot without switching to terminal.

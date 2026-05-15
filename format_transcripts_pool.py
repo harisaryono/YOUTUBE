@@ -51,6 +51,25 @@ NVIDIA_BASELINE_PROVIDER = "nvidia"
 NVIDIA_BASELINE_MODEL = "openai/gpt-oss-120b"
 
 
+def _increase_csv_field_limit() -> None:
+    """Raise the CSV parser field limit so long transcript rows do not fail."""
+    try:
+        csv.field_size_limit(sys.maxsize)
+    except OverflowError:
+        limit = sys.maxsize
+        while limit > 0:
+            try:
+                csv.field_size_limit(limit)
+                return
+            except OverflowError:
+                limit //= 10
+    except Exception:
+        pass
+
+
+_increase_csv_field_limit()
+
+
 def provider_plan_order(plan: str) -> list[dict[str, object]]:
     """Return provider order for a given plan.
 

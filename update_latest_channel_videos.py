@@ -1105,30 +1105,30 @@ def main() -> int:
     stopped_early = False
 
     report_path = run_dir / "report.csv"
-    with report_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=[
-                "channel_name",
-                "channel_id",
-                "video_id",
-                "video_title",
-                "video_url",
-                "upload_date",
-                "duration",
-                "view_count",
-                "thumbnail_url",
-                "discovery_status",
-                "transcript_status",
-                "resume_status",
-                "transcript_file_path",
-                "summary_file_path",
-                "scanned_entries",
-                "scan_scope",
-                "note",
-            ],
-        )
-        writer.writeheader()
+    report_fp = report_path.open("w", encoding="utf-8", newline="")
+    writer = csv.DictWriter(
+        report_fp,
+        fieldnames=[
+            "channel_name",
+            "channel_id",
+            "video_id",
+            "video_title",
+            "video_url",
+            "upload_date",
+            "duration",
+            "view_count",
+            "thumbnail_url",
+            "discovery_status",
+            "transcript_status",
+            "resume_status",
+            "transcript_file_path",
+            "summary_file_path",
+            "scanned_entries",
+            "scan_scope",
+            "note",
+        ],
+    )
+    writer.writeheader()
 
     for ch_index, channel in enumerate(channels, start=1):
         channel_name = str(channel["channel_name"])
@@ -1419,6 +1419,8 @@ def main() -> int:
         if channel_delay_seconds > 0 and ch_index < len(channels):
             log(f"  sleeping {channel_delay_seconds:.1f}s before next channel")
             time.sleep(channel_delay_seconds)
+
+    report_fp.close()
 
     if stopped_early:
         log("🛑 Batch discovery/transcript dihentikan lebih awal karena hard block berulang.")

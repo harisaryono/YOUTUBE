@@ -291,6 +291,77 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
     </div>
   </div>
 
+  <div class="grid-two">
+    <div class="panel">
+      <h2>Active Pauses</h2>
+      {% if report.pauses %}
+      <div class="list">
+        {% for item in report.pauses %}
+        <div class="list-item">
+          <strong>{{ item.pause_key or item.scope }}</strong>
+          <div class="small">
+            {% if item.until %}until {{ item.until }}{% endif %}
+            {% if item.actor %}by {{ item.actor }}{% endif %}
+          </div>
+          <div class="small">{{ item.reason }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="small">Tidak ada pause aktif.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h2>Quarantined Channels</h2>
+      {% if report.quarantined_channels %}
+      <div class="list">
+        {% for item in report.quarantined_channels %}
+        <div class="list-item">
+          <strong>{{ item.channel_id }}</strong>
+          <div class="small">{% if item.actor %}by {{ item.actor }}{% endif %}</div>
+          <div class="small">{{ item.reason }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="small">Tidak ada channel yang dikarantina.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid-two">
+    <div class="panel">
+      <h2>Policy Blockers</h2>
+      {% if report.policy_blockers %}
+      <div class="list">
+        {% for item in report.policy_blockers %}
+        <div class="list-item">{{ item }}</div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="small">Tidak ada policy blocker aktif.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h2>Recent Control Actions</h2>
+      {% if report.recent_control_actions %}
+      <div class="list">
+        {% for item in report.recent_control_actions %}
+        <div class="list-item">
+          <strong>{{ item.event_type }}</strong>
+          <div class="small">{{ item.created_at }}</div>
+          <div class="small">{{ item.message }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="small">Belum ada control action terbaru.</p>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="panel">
     <h2>Active Jobs</h2>
     {% if active_jobs %}

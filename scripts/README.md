@@ -12,7 +12,7 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
 ## Entry Point Utama
 
 - [orchestrator.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/orchestrator.sh)
-  - Control-plane utama: `once`, `run`, `status`, `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, `reconcile`, `explain`, `validate`, `doctor`, `report`, `stop`.
+  - Control-plane utama: `once`, `run`, `status`, `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, `reconcile`, `explain`, `validate`, `doctor`, `pause-stage`, `resume-stage`, `pause-group`, `resume-group`, `retry-failed`, `quarantine-channel`, `unquarantine-channel`, `report`, `stop`.
 - [run_pipeline.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_pipeline.sh)
   - Orchestrator utama: discovery, transcript, resume, format.
 - [run_flask.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_flask.sh)

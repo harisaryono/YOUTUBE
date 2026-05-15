@@ -4,12 +4,14 @@ Safety Gate — System health checks and job safety decisions.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .policies import policy_blockers_for_job
 from .state import OrchestratorState
 
 
@@ -141,7 +143,18 @@ def _is_idle_hours(config: dict[str, Any]) -> bool:
 
 def _pause_reason(state: OrchestratorState, key: str) -> str:
     """Return the pause reason for a pause key, if any."""
-    return str(state.get(f"pause:{key}", "") or "").strip()
+    raw = str(state.get(f"pause:{key}", "") or "").strip()
+    if not raw:
+        return ""
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return raw
+    if isinstance(payload, dict):
+        reason = str(payload.get("reason") or "").strip()
+        if reason:
+            return reason
+    return raw
 
 
 # --- Health Checkers ---
@@ -295,17 +308,8 @@ def safety_gate_for_job(
         )
 
     # Pause controls
-    pause_reasons = [
-        _pause_reason(state, "scope:all"),
-        _pause_reason(state, f"stage:{stage}"),
-    ]
-    if stage in ("discovery", "transcript", "audio_download"):
-        pause_reasons.append(_pause_reason(state, "scope:youtube"))
-    if stage in ("resume", "format", "asr"):
-        pause_reasons.append(_pause_reason(state, "scope:provider"))
-    if scope:
-        pause_reasons.append(_pause_reason(state, f"scope:{scope}"))
-    pause_reason = next((reason for reason in pause_reasons if reason), "")
+    blockers = policy_blockers_for_job(state, stage=stage, scope=scope)
+    pause_reason = next((str(item.get("reason") or "").strip() for item in blockers if item.get("type") in {"pause", "quarantine"} and str(item.get("reason") or "").strip()), "")
     if pause_reason:
         return SafetyDecision.wait(
             f"Paused: {pause_reason}",

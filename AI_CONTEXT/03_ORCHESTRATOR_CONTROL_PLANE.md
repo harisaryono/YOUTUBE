@@ -15,6 +15,13 @@
 - `./scripts/orchestrator.sh doctor`
 - `./scripts/orchestrator.sh report`
 - `./scripts/orchestrator.sh validate`
+- `./scripts/orchestrator.sh pause-stage <stage> --minutes N --reason ...`
+- `./scripts/orchestrator.sh resume-stage <stage>`
+- `./scripts/orchestrator.sh pause-group <group> --minutes N --reason ...`
+- `./scripts/orchestrator.sh resume-group <group>`
+- `./scripts/orchestrator.sh retry-failed --stage <stage> --limit N --dry-run`
+- `./scripts/orchestrator.sh quarantine-channel <CHANNEL_ID> --reason ...`
+- `./scripts/orchestrator.sh unquarantine-channel <CHANNEL_ID>`
 
 ## Invariants
 
@@ -23,6 +30,7 @@
 - `reconcile` harus bisa memulihkan job stale setelah restart/crash.
 - `timeout` harus menutup job yang terlalu lama.
 - `cancel` harus melepaskan lock.
+- pause/quarantine harus tercermin di doctor dan dashboard snapshot.
 
 ## Scope
 

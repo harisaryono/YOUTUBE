@@ -156,7 +156,7 @@ def count_videos_need_audio_download(
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
     row = conn.execute(
-        """
+        f"""
         SELECT COUNT(*) as cnt
         FROM videos v
         LEFT JOIN video_audio_assets a ON a.video_id = v.video_id

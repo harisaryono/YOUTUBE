@@ -13,6 +13,11 @@
 #   ./scripts/orchestrator.sh explain       # Explain why jobs are/aren't running
 #   ./scripts/orchestrator.sh validate      # Validate config + AI_CONTEXT
 #   ./scripts/orchestrator.sh doctor        # Diagnose backlog, cooldown, and failures
+#   ./scripts/orchestrator.sh pause-stage transcript --minutes 60
+#   ./scripts/orchestrator.sh resume-stage transcript
+#   ./scripts/orchestrator.sh pause-group youtube --minutes 60
+#   ./scripts/orchestrator.sh retry-failed --stage transcript --dry-run
+#   ./scripts/orchestrator.sh quarantine-channel UCxxxx
 #   ./scripts/orchestrator.sh report        # Show latest report JSON
 #   ./scripts/orchestrator.sh stop          # Stop running daemon (via PID file)
 
@@ -150,6 +155,34 @@ case "$MODE" in
         exec "$VENV_PYTHON" -m orchestrator.doctor "$@"
         ;;
 
+    pause-stage)
+        exec "$VENV_PYTHON" -m orchestrator.actions pause-stage "$@"
+        ;;
+
+    resume-stage)
+        exec "$VENV_PYTHON" -m orchestrator.actions resume-stage "$@"
+        ;;
+
+    pause-group)
+        exec "$VENV_PYTHON" -m orchestrator.actions pause-group "$@"
+        ;;
+
+    resume-group)
+        exec "$VENV_PYTHON" -m orchestrator.actions resume-group "$@"
+        ;;
+
+    retry-failed)
+        exec "$VENV_PYTHON" -m orchestrator.actions retry-failed "$@"
+        ;;
+
+    quarantine-channel)
+        exec "$VENV_PYTHON" -m orchestrator.actions quarantine-channel "$@"
+        ;;
+
+    unquarantine-channel)
+        exec "$VENV_PYTHON" -m orchestrator.actions unquarantine-channel "$@"
+        ;;
+
     explain)
         exec "$VENV_PYTHON" -m orchestrator.daemon explain "$@"
         ;;
@@ -185,7 +218,7 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|doctor|explain|report|stop} [options]"
+        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|doctor|pause-stage|resume-stage|pause-group|resume-group|retry-failed|quarantine-channel|unquarantine-channel|explain|report|stop} [options]"
         echo ""
         echo "Commands:"
         echo "  once              Run one orchestrator cycle and exit"
@@ -199,6 +232,13 @@ case "$MODE" in
         echo "  reconcile         Reconcile stale running jobs"
         echo "  validate          Validate config + AI_CONTEXT"
         echo "  doctor            Diagnose backlog, cooldown, and failures"
+        echo "  pause-stage       Pause a stage for a number of minutes"
+        echo "  resume-stage      Resume a paused stage"
+        echo "  pause-group       Pause a control group"
+        echo "  resume-group      Resume a paused control group"
+        echo "  retry-failed      Show retry candidates for failed jobs"
+        echo "  quarantine-channel Quarantine a channel"
+        echo "  unquarantine-channel Release a channel from quarantine"
         echo "  explain           Explain current work inventory and blockers"
         echo "  report            Show latest report as JSON"
         echo "  stop              Stop running daemon"

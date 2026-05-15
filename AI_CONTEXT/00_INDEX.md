@@ -14,14 +14,17 @@ Tujuan folder ini:
 
 ## Objective Saat Ini
 
-- Stage 9: observability operasional dan recovery dashboard.
+- Stage 11: safe control actions dan recovery policy.
 - Fokus:
   - context kecil per tugas,
   - validate command sebelum patch,
   - lifecycle daemon bersih,
   - report hook async,
   - scope lock opsional untuk stage YouTube sensitif,
-  - `doctor` command untuk backlog, cooldown, failures, dan rekomendasi.
+  - `doctor` command untuk backlog, cooldown, failures, cycle-failure, dan rekomendasi,
+  - pause/resume stage/group,
+  - quarantine/unquarantine channel,
+  - retry-failed dry-run.
 
 ## Source of Truth
 

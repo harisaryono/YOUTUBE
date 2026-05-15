@@ -151,6 +151,29 @@ class OrchestratorState:
     def set_int(self, key: str, value: int) -> None:
         self.set(key, str(value))
 
+    def record_event(
+        self,
+        event_type: str,
+        message: str,
+        stage: str = "",
+        scope: str = "",
+        severity: str = "info",
+        recommendation: str = "",
+        reason_code: str = "",
+        payload: dict[str, Any] | None = None,
+    ) -> int:
+        """Compatibility wrapper for add_event()."""
+        return self.add_event(
+            event_type=event_type,
+            message=message,
+            stage=stage,
+            scope=scope,
+            severity=severity,
+            recommendation=recommendation,
+            reason_code=reason_code,
+            payload=payload,
+        )
+
     # --- Cooldowns ---
 
     def set_cooldown(
@@ -216,6 +239,31 @@ class OrchestratorState:
                ORDER BY cooldown_until ASC""",
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def _state_rows_like(self, pattern: str) -> list[dict[str, Any]]:
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT key, value, updated_at
+               FROM orchestrator_state
+               WHERE key LIKE ?
+               ORDER BY key ASC""",
+            (pattern,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def _decode_control_payload(raw: str) -> dict[str, Any]:
+        text = str(raw or "").strip()
+        if not text:
+            return {}
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return {"reason": text, "raw_value": text}
+        if isinstance(payload, dict):
+            payload.setdefault("raw_value", text)
+            return payload
+        return {"reason": text, "raw_value": text}
 
     # --- Events ---
 
@@ -374,6 +422,28 @@ class OrchestratorState:
         pause_key = self._pause_key(key)
         self.set(pause_key, reason or "1")
 
+    def set_pause_details(
+        self,
+        key: str,
+        reason: str = "",
+        *,
+        until: str = "",
+        actor: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist a pause entry with structured metadata."""
+        pause_key = self._pause_key(key)
+        payload: dict[str, Any] = {
+            "reason": reason or "",
+            "until": until or "",
+            "actor": actor or "",
+            "active": True,
+            "pause_key": pause_key,
+        }
+        if metadata:
+            payload.update(metadata)
+        self.set(pause_key, json.dumps(payload, ensure_ascii=False))
+
     def clear_pause(self, key: str) -> None:
         """Clear a pause key."""
         pause_key = self._pause_key(key)
@@ -389,19 +459,20 @@ class OrchestratorState:
 
     def list_pauses(self) -> list[dict[str, Any]]:
         """List all active pause keys."""
-        conn = self._connect()
-        rows = conn.execute(
-            """SELECT key, value, updated_at
-               FROM orchestrator_state
-               WHERE key LIKE 'pause:%'
-               ORDER BY key ASC""",
-        ).fetchall()
         result = []
-        for row in rows:
+        for row in self._state_rows_like("pause:%"):
             item = dict(row)
-            item["pause_key"] = str(item.get("key", "")).replace("pause:", "", 1)
+            payload = self._decode_control_payload(str(item.get("value", "") or ""))
+            pause_key = str(item.get("key", "")).replace("pause:", "", 1)
+            item["pause_key"] = pause_key
+            item["scope"] = pause_key
+            item["reason"] = str(payload.get("reason") or item.get("value") or "").strip()
+            item["actor"] = str(payload.get("actor") or "").strip()
+            item["until"] = str(payload.get("until") or "").strip()
+            item["active"] = bool(payload.get("active", True))
+            item["payload"] = payload
             result.append(item)
-        return result
+        return [item for item in result if item.get("active", True)]
 
     @staticmethod
     def _pause_key(key: str) -> str:
@@ -411,6 +482,83 @@ class OrchestratorState:
         if value.startswith("pause:"):
             return value
         return f"pause:{value}"
+
+    def quarantine_channel(
+        self,
+        channel_id: str,
+        reason: str = "",
+        *,
+        actor: str = "",
+        until: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        channel_id = str(channel_id or "").strip()
+        if not channel_id:
+            return
+        key = f"quarantine:channel:{channel_id}"
+        payload: dict[str, Any] = {
+            "channel_id": channel_id,
+            "reason": reason or "",
+            "actor": actor or "",
+            "until": until or "",
+            "active": True,
+            "quarantine_key": key,
+        }
+        if metadata:
+            payload.update(metadata)
+        self.set(key, json.dumps(payload, ensure_ascii=False))
+
+    def unquarantine_channel(
+        self,
+        channel_id: str,
+        *,
+        actor: str = "",
+        reason: str = "",
+    ) -> None:
+        channel_id = str(channel_id or "").strip()
+        if not channel_id:
+            return
+        key = f"quarantine:channel:{channel_id}"
+        existing = self.get(key, "")
+        payload = self._decode_control_payload(existing)
+        payload.update(
+            {
+                "channel_id": channel_id,
+                "reason": reason or str(payload.get("reason") or ""),
+                "actor": actor or str(payload.get("actor") or ""),
+                "active": False,
+                "released_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "quarantine_key": key,
+            }
+        )
+        self.set(key, json.dumps(payload, ensure_ascii=False))
+
+    def is_quarantined_channel(self, channel_id: str) -> bool:
+        channel_id = str(channel_id or "").strip()
+        if not channel_id:
+            return False
+        key = f"quarantine:channel:{channel_id}"
+        payload = self._decode_control_payload(self.get(key, ""))
+        return bool(payload.get("active", True)) and bool(self.get(key, "").strip())
+
+    def list_quarantined_channels(self) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for row in self._state_rows_like("quarantine:channel:%"):
+            item = dict(row)
+            payload = self._decode_control_payload(str(item.get("value", "") or ""))
+            channel_id = str(payload.get("channel_id") or "").strip()
+            if not channel_id:
+                channel_id = str(item.get("key", "")).rsplit(":", 1)[-1]
+            item["channel_id"] = channel_id
+            item["reason"] = str(payload.get("reason") or "").strip()
+            item["actor"] = str(payload.get("actor") or "").strip()
+            item["until"] = str(payload.get("until") or "").strip()
+            item["active"] = bool(payload.get("active", True))
+            item["payload"] = payload
+            item["quarantine_key"] = str(item.get("key", "")).replace("quarantine:", "", 1)
+            if item["active"]:
+                result.append(item)
+        return result
 
     # --- Inventory snapshots ---
 

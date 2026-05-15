@@ -30,6 +30,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database_optimized import OptimizedDatabase
 from orchestrator.config import load_config
+from orchestrator.actions import (
+    pause_stage as orch_pause_stage,
+    resume_stage as orch_resume_stage,
+    pause_group as orch_pause_group,
+    resume_group as orch_resume_group,
+    pause_target as orch_pause_target,
+    resume_target as orch_resume_target,
+    quarantine_channel as orch_quarantine_channel,
+    unquarantine_channel as orch_unquarantine_channel,
+    retry_failed as orch_retry_failed,
+)
 from orchestrator.doctor import build_doctor_report
 from orchestrator.state import OrchestratorState
 
@@ -1994,6 +2005,7 @@ def admin_orchestrator_action():
     args: list[str]
     timeout = 180
     redirect_args: dict[str, str] = {}
+    action_state = OrchestratorState()
 
     try:
         if action == 'doctor':
@@ -2013,14 +2025,85 @@ def admin_orchestrator_action():
             reason = (request.form.get('reason') or '').strip()
             if not target:
                 return redirect(url_for('admin_orchestrator_page', error='Target pause kosong'))
-            args = ['pause', '--target', target]
-            if reason:
-                args.extend(['--reason', reason])
+            pause_result = orch_pause_target(action_state, target, int(request.form.get('minutes', 60) or 60), reason, actor='web')
+            if pause_result.ok:
+                redirect_args['flash'] = pause_result.message
+            else:
+                redirect_args['error'] = pause_result.message
+            args = []
+        elif action == 'pause_stage':
+            stage = (request.form.get('stage') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            minutes = int(request.form.get('minutes', 60) or 60)
+            pause_result = orch_pause_stage(action_state, stage, minutes, reason, actor='web')
+            if pause_result.ok:
+                redirect_args['flash'] = pause_result.message
+            else:
+                redirect_args['error'] = pause_result.message
+            args = []
+        elif action == 'pause_group':
+            group = (request.form.get('group') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            minutes = int(request.form.get('minutes', 60) or 60)
+            pause_result = orch_pause_group(action_state, group, minutes, reason, actor='web')
+            if pause_result.ok:
+                redirect_args['flash'] = pause_result.message
+            else:
+                redirect_args['error'] = pause_result.message
+            args = []
         elif action == 'resume':
             target = (request.form.get('target') or '').strip()
             if not target:
                 return redirect(url_for('admin_orchestrator_page', error='Target resume kosong'))
-            args = ['resume', '--target', target]
+            resume_result = orch_resume_target(action_state, target, actor='web')
+            if resume_result.ok:
+                redirect_args['flash'] = resume_result.message
+            else:
+                redirect_args['error'] = resume_result.message
+            args = []
+        elif action == 'resume_stage':
+            stage = (request.form.get('stage') or '').strip()
+            resume_result = orch_resume_stage(action_state, stage, actor='web')
+            if resume_result.ok:
+                redirect_args['flash'] = resume_result.message
+            else:
+                redirect_args['error'] = resume_result.message
+            args = []
+        elif action == 'resume_group':
+            group = (request.form.get('group') or '').strip()
+            resume_result = orch_resume_group(action_state, group, actor='web')
+            if resume_result.ok:
+                redirect_args['flash'] = resume_result.message
+            else:
+                redirect_args['error'] = resume_result.message
+            args = []
+        elif action == 'quarantine_channel':
+            channel_id = (request.form.get('channel_id') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            quarantine_result = orch_quarantine_channel(action_state, channel_id, reason, actor='web')
+            if quarantine_result.ok:
+                redirect_args['flash'] = quarantine_result.message
+            else:
+                redirect_args['error'] = quarantine_result.message
+            args = []
+        elif action == 'unquarantine_channel':
+            channel_id = (request.form.get('channel_id') or '').strip()
+            quarantine_result = orch_unquarantine_channel(action_state, channel_id, actor='web')
+            if quarantine_result.ok:
+                redirect_args['flash'] = quarantine_result.message
+            else:
+                redirect_args['error'] = quarantine_result.message
+            args = []
+        elif action == 'retry_failed':
+            stage = (request.form.get('stage') or '').strip()
+            limit = int(request.form.get('limit', 20) or 20)
+            dry_run = request.form.get('dry_run', '1') not in {'0', 'false', 'no', 'off'}
+            retry_result = orch_retry_failed(action_state, stage=stage, limit=limit, dry_run=dry_run, actor='web')
+            if retry_result.ok:
+                redirect_args['flash'] = retry_result.message
+            else:
+                redirect_args['error'] = retry_result.message
+            args = []
         elif action == 'cancel':
             job_id = (request.form.get('job_id') or '').strip()
             if not job_id:
@@ -2054,20 +2137,23 @@ def admin_orchestrator_action():
         else:
             return redirect(url_for('admin_orchestrator_page', error=f'Aksi tidak dikenal: {action or "empty"}'))
 
-        rc, stdout, stderr = _run_orchestrator_command(args, timeout=timeout)
-        output = '\n'.join(part for part in [stdout.strip(), stderr.strip()] if part)
-        if rc == 0:
-            flash_text = f"Command {' '.join(args)} berhasil."
-            if output:
-                flash_text += f" { _shorten_control_output(output) }"
-            redirect_args['flash'] = flash_text
-        else:
-            error_text = f"Command {' '.join(args)} gagal (rc={rc})."
-            if output:
-                error_text += f" { _shorten_control_output(output) }"
-            redirect_args['error'] = error_text
+        if args:
+            rc, stdout, stderr = _run_orchestrator_command(args, timeout=timeout)
+            output = '\n'.join(part for part in [stdout.strip(), stderr.strip()] if part)
+            if rc == 0:
+                flash_text = f"Command {' '.join(args)} berhasil."
+                if output:
+                    flash_text += f" { _shorten_control_output(output) }"
+                redirect_args['flash'] = flash_text
+            else:
+                error_text = f"Command {' '.join(args)} gagal (rc={rc})."
+                if output:
+                    error_text += f" { _shorten_control_output(output) }"
+                redirect_args['error'] = error_text
     except Exception as exc:
         redirect_args['error'] = str(exc)
+    finally:
+        action_state.close()
 
     return redirect(url_for('admin_orchestrator_page', **redirect_args))
 

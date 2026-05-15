@@ -75,7 +75,7 @@ for _candidate in (Path(__file__).resolve().parent / ".env", Path(__file__).reso
         load_dotenv(_candidate, override=False)
 
 from database_optimized import OptimizedDatabase
-from orchestrator.video_claims import claim_rows_by_query, release_claims
+from orchestrator.video_claims import active_video_claim_clause, claim_rows_by_query, release_claims
 from local_services import (
     coordinator_acquire_accounts,
     coordinator_heartbeat_lease,

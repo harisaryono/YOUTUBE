@@ -101,6 +101,38 @@ def _recent_failure_summary(state: OrchestratorState, limit: int = 50) -> list[d
     return failures
 
 
+def _recent_control_actions(state: OrchestratorState, limit: int = 20) -> list[dict[str, Any]]:
+    rows = state.get_recent_events(limit=max(limit, 50))
+    actions: list[dict[str, Any]] = []
+    for row in rows:
+        event_type = str(row.get("event_type") or "")
+        if not event_type.startswith("control"):
+            continue
+        actions.append(dict(row))
+    return actions[:limit]
+
+
+def _cycle_failure_summary(recent_events: list[dict[str, Any]]) -> dict[str, Any]:
+    cycle_events = []
+    for row in recent_events:
+        event_type = str(row.get("event_type") or "")
+        message = str(row.get("message") or "")
+        if event_type == "error" and "cycle failed" in message.lower():
+            cycle_events.append(dict(row))
+    if not cycle_events:
+        return {"count": 0, "latest": None, "latest_message": "", "repeated": False, "events": []}
+    latest = cycle_events[0]
+    latest_created = str(latest.get("created_at") or "")
+    latest_message = str(latest.get("message") or "")
+    return {
+        "count": len(cycle_events),
+        "latest": latest_created,
+        "latest_message": latest_message,
+        "repeated": len(cycle_events) > 1,
+        "events": cycle_events,
+    }
+
+
 def _count_by_key(items: list[dict[str, Any]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
@@ -119,6 +151,7 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
     failure_codes = [str(item.get("reason_code") or "").lower() for item in failures]
     failure_stages = [str(item.get("stage") or "").lower() for item in failures]
     backlog = report.get("backlog", {})
+    policy_blockers = report.get("policy_blockers", [])
 
     if "youtube" in cooldown_scopes:
         recs.append("YouTube global cooldown aktif; tahan transcript/audio_download sampai cooldown selesai.")
@@ -141,19 +174,32 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
     if any(stage == "daemon" for stage in failure_stages):
         recs.append("Ada error daemon terakhir; cek logs orchestrator dan jalankan explain/reconcile.")
 
+    if policy_blockers:
+        recs.append(f"Ada {len(policy_blockers)} policy blocker aktif; cek pause/quarantine sebelum retry.")
+
     if not recs:
         recs.append("Tidak ada anomali besar yang terdeteksi.")
 
     return recs
 
 
-def build_doctor_report(config: dict[str, Any]) -> dict[str, Any]:
+def build_doctor_report(
+    config: dict[str, Any],
+    *,
+    recent_events_limit: int = 20,
+    show_errors: bool = False,
+) -> dict[str, Any]:
     state = OrchestratorState()
     try:
         inventory = build_inventory_snapshot(config, state, None)
         active_jobs = inventory.get("active_jobs", {}).get("details", [])
         cooldowns = inventory.get("cooldowns", {}).get("details", [])
+        pauses = inventory.get("pauses", [])
+        quarantined_channels = inventory.get("quarantined_channels", [])
+        recent_events = state.get_recent_events(limit=max(50, recent_events_limit))
         failures = _recent_failure_summary(state, limit=50)
+        control_actions = _recent_control_actions(state, limit=recent_events_limit)
+        cycle_failures = _cycle_failure_summary(recent_events)
 
         parallel = config.get("parallel", {}) or {}
         groups = parallel.get("groups", {}) or {}
@@ -193,6 +239,16 @@ def build_doctor_report(config: dict[str, Any]) -> dict[str, Any]:
             "system": inventory.get("system", {}),
             "backlog": work_remaining,
             "blocked": inventory.get("blocked", {}),
+            "pauses": pauses,
+            "quarantined_channels": quarantined_channels,
+            "policy_blockers": [
+                f"{str(item.get('pause_key') or item.get('scope') or '')} paused: {str(item.get('reason') or '').strip()}"
+                for item in pauses
+            ]
+            + [
+                f"channel {str(item.get('channel_id') or '')} quarantined: {str(item.get('reason') or '').strip()}"
+                for item in quarantined_channels
+            ],
             "cooldowns": {
                 "active_count": len(cooldowns),
                 "details": [
@@ -208,12 +264,23 @@ def build_doctor_report(config: dict[str, Any]) -> dict[str, Any]:
             "stage_usage": stage_usage,
             "recent_failures": failures[:10],
             "recent_failure_counts": _count_by_key(failures, "reason_code"),
-            "recent_events": state.get_recent_events(limit=10),
+            "recent_events": recent_events[:recent_events_limit],
+            "recent_control_actions": control_actions,
+            "cycle_failures": cycle_failures,
+            "show_errors": bool(show_errors),
             "recommendations": _build_recommendations(
                 {
                     "cooldowns": {"details": cooldowns},
                     "recent_failures": failures,
                     "backlog": work_remaining,
+                    "policy_blockers": [
+                        f"{str(item.get('pause_key') or item.get('scope') or '')} paused: {str(item.get('reason') or '').strip()}"
+                        for item in pauses
+                    ]
+                    + [
+                        f"channel {str(item.get('channel_id') or '')} quarantined: {str(item.get('reason') or '').strip()}"
+                        for item in quarantined_channels
+                    ],
                 }
             ),
         }
@@ -230,6 +297,11 @@ def render_doctor_text(report: dict[str, Any]) -> str:
     group_usage = report.get("group_usage", [])
     stage_usage = report.get("stage_usage", [])
     failures = report.get("recent_failures", [])
+    pauses = report.get("pauses", [])
+    quarantined_channels = report.get("quarantined_channels", [])
+    control_actions = report.get("recent_control_actions", [])
+    cycle_failures = report.get("cycle_failures", {})
+    policy_blockers = report.get("policy_blockers", [])
 
     lines.append("ORCHESTRATOR DOCTOR")
     lines.append("")
@@ -265,6 +337,26 @@ def render_doctor_text(report: dict[str, Any]) -> str:
     else:
         lines.append("  - none")
     lines.append("")
+    lines.append("Pauses:")
+    if pauses:
+        for item in pauses:
+            key = str(item.get("pause_key") or item.get("scope") or "").strip()
+            reason = str(item.get("reason") or "").strip()
+            until = str(item.get("until") or "").strip()
+            extra = f" until {until}" if until else ""
+            lines.append(f"  - {key}{extra}: {reason}")
+    else:
+        lines.append("  - none")
+    lines.append("")
+    lines.append("Quarantined channels:")
+    if quarantined_channels:
+        for item in quarantined_channels:
+            lines.append(
+                f"  - {item.get('channel_id', '')}: {item.get('reason', '')}"
+            )
+    else:
+        lines.append("  - none")
+    lines.append("")
     lines.append("Backlog:")
     for key in sorted(backlog):
         lines.append(f"  - {key}: {backlog[key]}")
@@ -275,6 +367,40 @@ def render_doctor_text(report: dict[str, Any]) -> str:
             lines.append(f"  - {item['stage']}: {item['reason_code']} ({item['severity']})")
     else:
         lines.append("  - none")
+    lines.append("")
+    lines.append("Policy blockers:")
+    if policy_blockers:
+        for item in policy_blockers:
+            lines.append(f"  - {item}")
+    else:
+        lines.append("  - none")
+    lines.append("")
+    lines.append("Recent control actions:")
+    if control_actions:
+        for item in control_actions[:5]:
+            lines.append(
+                f"  - {item.get('event_type', '')}: {item.get('message', '')}"
+            )
+    else:
+        lines.append("  - none")
+    lines.append("")
+    lines.append("Cycle failures:")
+    if cycle_failures.get("count", 0):
+        lines.append(
+            f"  - count: {cycle_failures.get('count', 0)}"
+            + (f", latest: {cycle_failures.get('latest', '')}" if cycle_failures.get("latest") else "")
+        )
+        if cycle_failures.get("latest_message"):
+            lines.append(f"  - latest_message: {cycle_failures.get('latest_message', '')}")
+    else:
+        lines.append("  - none")
+    if report.get("show_errors"):
+        lines.append("")
+        lines.append("Recent events:")
+        for item in report.get("recent_events", [])[:10]:
+            lines.append(
+                f"  - {item.get('created_at', '')} {item.get('event_type', '')}: {item.get('message', '')}"
+            )
     lines.append("")
     lines.append("Recommendations:")
     for rec in report.get("recommendations", []):
@@ -294,10 +420,25 @@ def main() -> None:
         action="store_true",
         help="Emit machine-readable JSON output",
     )
+    parser.add_argument(
+        "--recent-events",
+        type=int,
+        default=20,
+        help="Number of recent events to include in the report",
+    )
+    parser.add_argument(
+        "--show-errors",
+        action="store_true",
+        help="Include recent error events in the text output",
+    )
     args = parser.parse_args()
 
     config = load_config(Path(args.config) if args.config else DEFAULT_CONFIG_PATH)
-    report = build_doctor_report(config)
+    report = build_doctor_report(
+        config,
+        recent_events_limit=max(1, int(args.recent_events or 20)),
+        show_errors=bool(args.show_errors),
+    )
     if args.json:
         print(json.dumps(report, indent=2, default=str))
     else:

@@ -1,6 +1,6 @@
 # Project State
 
-- generated_at: `2026-05-15T06:20:17+07:00`
+- generated_at: `2026-05-15T08:23:57+07:00`
 - repo_type: YouTube transcript / resume / format / ASR pipeline
 - active web app: Flask under `flask_app/app.py`
 - database layout: active DBs are under `db/` with root symlinks for compat
@@ -12,6 +12,7 @@
 - stage 8 hardening: AI_CONTEXT working files, `validate` command, PID cleanup, async report hooks, scope lock
 - stage 9 observability: `doctor` command for backlog/cooldown/failure diagnosis
 - stage 10 web integration: `/admin/orchestrator` dashboard + actions
+- stage 11 safe actions: `orchestrator/actions.py`, pause/resume stage/group, quarantine/unquarantine channel, retry-failed dry-run
 
 ## Directory Snapshot
 - `docs`: 18 files
@@ -51,5 +52,6 @@
 - auto cooldown berdasarkan klasifikasi error
 - report Markdown + JSON di runs/orchestrator/reports/
 - control-plane hardening: `active`, `logs`, `cancel`, `reconcile`, `validate`, timeout, scope lock, async report analysis
-- operational observability: `doctor` summary and recommendations
-- web observability: dashboard actions for doctor/explain/reconcile/pause/resume/cancel
+- operational observability: `doctor` summary, cycle-failure diagnosis, recommendations
+- safe actions: pause/resume stage/group, quarantine/unquarantine channel, retry-failed dry-run
+- web observability: dashboard snapshot for pauses, quarantines, control actions, and cancel/diagnosis commands

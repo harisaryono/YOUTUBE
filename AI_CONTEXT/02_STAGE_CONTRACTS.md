@@ -104,3 +104,26 @@ Output:
 Group:
 - `local`
 
+## safe_control_actions
+
+Input:
+- `stage`
+- `group`
+- `channel_id`
+- `reason`
+- `minutes`
+- `dry_run`
+
+Output:
+- pause/resume state tersimpan
+- quarantine state tersimpan
+- audit event masuk ke `orchestrator_events`
+- retry candidate report untuk dry-run
+
+Group:
+- `control-plane`
+
+Notes:
+- action harus lewat `orchestrator/actions.py`
+- retry default harus dry-run
+- web dashboard hanya membaca snapshot / memanggil action helper, bukan menyusun policy sendiri

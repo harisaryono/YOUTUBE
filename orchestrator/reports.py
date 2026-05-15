@@ -37,6 +37,7 @@ def build_inventory_snapshot(
     active_jobs = state.list_running_jobs()
     recent_events = state.get_recent_events(limit=50)
     pauses = state.list_pauses()
+    quarantined_channels = state.list_quarantined_channels()
     sys_health = None
     try:
         sys_health = check_system_health(config)
@@ -49,6 +50,8 @@ def build_inventory_snapshot(
         "youtube_content": any(cd_entry["scope"] == "youtube:content" for cd_entry in active_cooldowns),
         "provider": any(cd_entry["scope"].startswith("provider:") for cd_entry in active_cooldowns),
         "channel": any(cd_entry["scope"].startswith("channel:") for cd_entry in active_cooldowns),
+        "pauses": bool(pauses),
+        "quarantine": bool(quarantined_channels),
     }
 
     work_remaining = {
@@ -106,6 +109,11 @@ def build_inventory_snapshot(
             "details": active_jobs,
         },
         "pauses": pauses,
+        "quarantined_channels": quarantined_channels,
+        "control_actions": [
+            event for event in recent_events
+            if str(event.get("event_type") or "").startswith("control")
+        ],
         "defer_reasons": defer_reasons,
         "cycle_result": cycle_result or {},
     }

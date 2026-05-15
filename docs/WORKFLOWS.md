@@ -291,12 +291,16 @@ Mode penting:
 - `validate` untuk cek control-plane dan AI context
 - `reconcile` untuk membersihkan state stale
 - `once --dry-run` untuk cek planner tanpa job nyata
+- `pause-stage`, `pause-group`, `resume-stage`, `resume-group`, `quarantine-channel`, `unquarantine-channel`, dan `retry-failed --dry-run` untuk control action aman
 
 Kontrol web:
 - pause/resume target
+- pause/resume stage/group
+- quarantine/unquarantine channel
 - cancel job / stage / group
 - view log job orchestrator
 - JSON snapshot via `?format=json`
+- snapshot juga menampilkan active pauses, quarantines, policy blockers, dan recent control actions
 
 ## Urutan Praktis
 

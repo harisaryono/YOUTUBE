@@ -74,6 +74,18 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] Dashboard menampilkan backlog, group usage, stage usage, recent failures, dan recommendations.
 - [ ] Link log job pada dashboard membuka log orchestrator yang benar.
 
+## Stage 11 Safe Actions Validation
+
+- [ ] `./scripts/orchestrator.sh pause-stage transcript --minutes 5 --reason test --json` berhasil dan mencatat event control.
+- [ ] `./scripts/orchestrator.sh resume-stage transcript --json` menghapus pause stage tadi.
+- [ ] `./scripts/orchestrator.sh pause-group youtube --minutes 5 --reason test --json` berhasil dan terlihat di doctor.
+- [ ] `./scripts/orchestrator.sh resume-group youtube --json` menghapus pause group tadi.
+- [ ] `./scripts/orchestrator.sh quarantine-channel UC_TEST --reason test --json` berhasil dan terlihat di doctor.
+- [ ] `./scripts/orchestrator.sh unquarantine-channel UC_TEST --json` menghapus quarantine tadi.
+- [ ] `./scripts/orchestrator.sh retry-failed --stage transcript --limit 5 --dry-run --json` mengeluarkan kandidat retry tanpa requeue nyata.
+- [ ] `./scripts/orchestrator.sh doctor` menampilkan active pauses, quarantined channels, policy blockers, recent control actions, dan cycle failure summary.
+- [ ] `/admin/orchestrator` menampilkan pause/quarantine/control-action snapshot tanpa error.
+
 ## Batch Validations
 - **Phase 1 Validation**:
   - [ ] 5 videos processed.

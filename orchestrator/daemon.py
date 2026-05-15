@@ -25,6 +25,7 @@ from .safety import (
     check_youtube_health,
     safety_gate_for_job,
 )
+from .policies import policy_blockers_for_job
 from .planner import plan_jobs
 from .dispatcher import launch_job
 from .cooldown import clear_all_cooldowns, get_next_wakeup
@@ -1590,7 +1591,8 @@ def main() -> None:
         max_total_jobs = _max_total_jobs(config)
         for label, stage_key, dep in stage_defs:
             work_count = int(work_remaining.get(stage_key, 0) or 0)
-            if pauses.get(f"pause:stage:{stage_key}") or pauses.get("pause:scope:all") or (dep == "youtube" and pauses.get("pause:scope:youtube")) or (dep == "provider" and pauses.get("pause:scope:provider")):
+            stage_blockers = policy_blockers_for_job(state, stage=stage_key)
+            if stage_blockers:
                 stage_decisions.append((label, "PAUSED"))
                 continue
             if work_count <= 0:

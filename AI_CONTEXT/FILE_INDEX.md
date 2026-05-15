@@ -6,6 +6,7 @@
 - `AI_CONTEXT/02_STAGE_CONTRACTS.md`
 - `AI_CONTEXT/03_ORCHESTRATOR_CONTROL_PLANE.md`
 - `AI_CONTEXT/05_SAFE_PATCH_RULES.md`
+- `AI_CONTEXT/06_STAGE11_SAFE_ACTIONS.md`
 - `AI_CONTEXT/LATEST_HANDOFF.md`
 - `AI_CONTEXT/PROJECT_STATE.md`
 - `AI_CONTEXT/FILE_INDEX.md`
@@ -101,6 +102,8 @@
 - `orchestrator/config.py` (8850 bytes)
 - `orchestrator/cooldown.py` (3747 bytes)
 - `orchestrator/doctor.py`
+- `orchestrator/actions.py`
+- `orchestrator/policies.py`
 - `orchestrator/daemon.py` (33074 bytes)
 - `orchestrator/db_queries.py` (16680 bytes)
 - `orchestrator/dispatcher.py` (23420 bytes)

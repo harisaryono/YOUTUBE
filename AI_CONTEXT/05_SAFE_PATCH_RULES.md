@@ -8,6 +8,7 @@
 - Jangan menambah provider/model baru dalam patch kontrol-plane.
 - Jangan mengandalkan cache startup jika status harus fresh.
 - Jika job async selesai, release lock dulu, baru import/analisis tambahan.
+- Untuk Stage 11, control actions harus lewat `orchestrator/actions.py`, bukan logic ad-hoc di UI.
 
 ## Before Editing
 
@@ -20,4 +21,4 @@
 - `python3 -m py_compile orchestrator/*.py`
 - `bash -n scripts/orchestrator.sh`
 - `./scripts/orchestrator.sh validate`
-
+- `./scripts/orchestrator.sh doctor --json`

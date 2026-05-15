@@ -7,6 +7,8 @@
 - `orchestrator/planner.py`
 - `orchestrator/dispatcher.py`
 - `orchestrator/safety.py`
+- `orchestrator/policies.py`
+- `orchestrator/actions.py`
 - `orchestrator/state.py`
 - `orchestrator/db_queries.py`
 - `orchestrator/error_analyzer.py`
