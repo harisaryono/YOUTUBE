@@ -13,10 +13,11 @@ Tujuan folder ini:
 4. [05_SAFE_PATCH_RULES.md](05_SAFE_PATCH_RULES.md)
 5. [06_STAGE11_SAFE_ACTIONS.md](06_STAGE11_SAFE_ACTIONS.md)
 6. [07_STAGE12_POLICY_REQUEUE.md](07_STAGE12_POLICY_REQUEUE.md)
+7. [08_STAGE13_RETRY_EXECUTOR.md](08_STAGE13_RETRY_EXECUTOR.md)
 
 ## Objective Saat Ini
 
-- Stage 12: policy requeue dan enforcement.
+- Stage 13: retry executor dan controlled recovery.
 - Fokus:
   - context kecil per tugas,
   - validate command sebelum patch,
@@ -29,7 +30,8 @@ Tujuan folder ini:
   - retry-failed dry-run,
   - retry queue persisten untuk safe requeue,
   - policy blocker dicek sebelum launch retry,
-  - `doctor`/dashboard menampilkan retry queue ringkas.
+  - `doctor`/dashboard menampilkan retry queue ringkas,
+  - `retry-queue` command untuk stats/list/drain retry queue.
 
 ## Source of Truth
 

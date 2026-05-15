@@ -81,6 +81,7 @@ def validate_ai_context() -> list[str]:
         AI_CONTEXT_DIR / "05_SAFE_PATCH_RULES.md",
         AI_CONTEXT_DIR / "06_STAGE11_SAFE_ACTIONS.md",
         AI_CONTEXT_DIR / "07_STAGE12_POLICY_REQUEUE.md",
+        AI_CONTEXT_DIR / "08_STAGE13_RETRY_EXECUTOR.md",
     ]
     for path in required:
         if not path.exists():

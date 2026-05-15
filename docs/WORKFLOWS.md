@@ -291,7 +291,7 @@ Mode penting:
 - `validate` untuk cek control-plane dan AI context
 - `reconcile` untuk membersihkan state stale
 - `once --dry-run` untuk cek planner tanpa job nyata
-- `pause-stage`, `pause-group`, `resume-stage`, `resume-group`, `quarantine-channel`, `unquarantine-channel`, dan `retry-failed --dry-run` untuk control action aman
+- `pause-stage`, `pause-group`, `resume-stage`, `resume-group`, `quarantine-channel`, `unquarantine-channel`, `retry-failed --dry-run`, dan `retry-queue stats/list/drain` untuk control action aman
 
 Kontrol web:
 - pause/resume target

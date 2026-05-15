@@ -533,6 +533,31 @@ PY
     else
         echo "❌ Parallel transcript failed with exit code: $WORKER_EXIT"
     fi
+    echo "📄 Merged report: $JOB_RUN_DIR/recover_report.csv"
+    echo "📄 Retry-later report: $JOB_RUN_DIR/retry_later.csv"
+    "$VENV_PYTHON" - <<'PY'
+import csv
+import os
+from pathlib import Path
+
+run_dir = Path(os.environ["JOB_RUN_DIR"])
+report_path = run_dir / "recover_report.csv"
+retry_path = run_dir / "retry_later.csv"
+
+def count_rows(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with path.open("r", encoding="utf-8", newline="") as fp:
+        reader = csv.reader(fp)
+        try:
+            next(reader)
+        except StopIteration:
+            return 0
+        return sum(1 for _ in reader)
+
+print(f"  completed_rows={count_rows(report_path)}")
+print(f"  retry_rows={count_rows(retry_path)}")
+PY
     echo "============================================="
     echo "📦 Releasing transcript claims..."
     "$VENV_PYTHON" - <<'PY' || true

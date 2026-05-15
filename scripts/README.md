@@ -12,7 +12,7 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
 ## Entry Point Utama
 
 - [orchestrator.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/orchestrator.sh)
-  - Control-plane utama: `once`, `run`, `status`, `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, `reconcile`, `explain`, `validate`, `doctor`, `pause-stage`, `resume-stage`, `pause-group`, `resume-group`, `retry-failed`, `quarantine-channel`, `unquarantine-channel`, `report`, `stop`.
+  - Control-plane utama: `once`, `run`, `status`, `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, `reconcile`, `explain`, `validate`, `doctor`, `pause-stage`, `resume-stage`, `pause-group`, `resume-group`, `retry-failed`, `retry-queue`, `quarantine-channel`, `unquarantine-channel`, `report`, `stop`.
 - [run_pipeline.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_pipeline.sh)
   - Orchestrator utama: discovery, transcript, resume, format.
 - [run_flask.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_flask.sh)
@@ -45,7 +45,7 @@ Gunakan direktori ini sebagai pintu masuk utama untuk entrypoint shell dan utili
 - [asr.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/asr.sh)
   - Jalankan ASR fallback via lease coordinator.
 - [app.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/app.sh)
-  - Entrypoint web legacy / compat.
+  - Entrypoint web legacy / compat untuk `webapp/`; jalur resmi web sekarang ada di `run_flask.sh` dan `flask_app/`.
 
 ## Utility Pendukung
 

@@ -206,13 +206,18 @@ State dan log:
 - State PID: `.resume_agents/`
 - Log agent: `out/agent_logs/`
 
-### 3.10 `run_web.py`, `wsgi.py`, `passenger_wsgi.py` (entrypoint web)
+### 3.10 `run_web.py`, `wsgi.py`, `passenger_wsgi.py` (entrypoint web legacy)
 
 Perilaku:
 
 - `run_web.py`: start Flask lokal cepat, startup check berat dimatikan default.
 - `wsgi.py`: bootstrap untuk deployment WSGI/Passenger, set env safety, load external venv bila ada.
 - `passenger_wsgi.py`: loader wrapper untuk Passenger.
+
+Catatan:
+
+- Jalur web resmi saat ini ada di [flask_app/](../flask_app/app.py).
+- `webapp/` hanya dipertahankan untuk kompatibilitas lama.
 
 ### 3.11 `down_all.py` dan `clean.py` (legacy utilities)
 
@@ -250,9 +255,11 @@ Safety behaviour:
 - Validasi offset/length terhadap ukuran shard agar tidak baca data korup.
 - Fallback dekompresi zstd via python bridge jika modul tidak tersedia.
 
-## 5. Behaviour Web App (`webapp/`)
+## 5. Behaviour Web App Legacy (`webapp/`)
 
-Aplikasi Flask (`webapp/app.py`) melakukan:
+`webapp/` dipertahankan sebagai jalur legacy/compatibility saja. Jalur web resmi saat ini ada di `flask_app/`.
+
+Aplikasi Flask legacy (`webapp/app.py`) melakukan:
 
 1. Dashboard channel/video/search.
 2. CRUD kategori.

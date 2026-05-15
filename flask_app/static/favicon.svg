@@ -1,12 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- Background rounded rect -->
-  <rect x="2" y="2" width="60" height="60" rx="10" ry="10" fill="#FF2A00"/>
-  <!-- Document outline (white) -->
-  <rect x="14" y="6" width="40" height="52" rx="4" ry="4" fill="none" stroke="white" stroke-width="2.5"/>
-  <!-- Fold corner -->
-  <polygon points="38,6 38,22 54,22" fill="#FF2A00" stroke="white" stroke-width="2"/>
-  <line x1="38" y1="6" x2="38" y2="22" stroke="white" stroke-width="2"/>
-  <line x1="38" y1="22" x2="54" y2="22" stroke="white" stroke-width="2"/>
-  <!-- Play triangle -->
-  <polygon points="27,22 27,44 46,33" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#FF2A00"/>
+  <polygon points="14,10 14,22 22,16" fill="white"/>
 </svg>

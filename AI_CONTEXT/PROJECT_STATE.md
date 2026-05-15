@@ -13,6 +13,8 @@
 - stage 9 observability: `doctor` command for backlog/cooldown/failure diagnosis
 - stage 10 web integration: `/admin/orchestrator` dashboard + actions
 - stage 11 safe actions: `orchestrator/actions.py`, pause/resume stage/group, quarantine/unquarantine channel, retry-failed dry-run
+- stage 12 policy requeue: retry queue persistence, retry-failed enqueue mode, policy blocker gating
+- stage 13 retry executor: `orchestrator/retry_executor.py`, `retry-queue stats/list/drain`, claim-before-launch
 
 ## Directory Snapshot
 - `docs`: 18 files
@@ -54,4 +56,5 @@
 - control-plane hardening: `active`, `logs`, `cancel`, `reconcile`, `validate`, timeout, scope lock, async report analysis
 - operational observability: `doctor` summary, cycle-failure diagnosis, recommendations
 - safe actions: pause/resume stage/group, quarantine/unquarantine channel, retry-failed dry-run
+- retry recovery: retry queue summary, retry queue claim/release, retry-queue drain
 - web observability: dashboard snapshot for pauses, quarantines, control actions, and cancel/diagnosis commands

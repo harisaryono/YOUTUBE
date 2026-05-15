@@ -30,6 +30,8 @@ from local_services import (
     coordinator_acquire_accounts,
     coordinator_release_lease,
     coordinator_report_provider_event,
+    CoordinatorUnavailable,
+    CoordinatorResponseError,
     is_provider_blocking_enabled as provider_blocking_enabled,
     is_transient_provider_limit_error,
 )
@@ -368,6 +370,10 @@ def acquire_account_from_coordinator(
                     model_limits=dict(lease.get("model_limits") or {}),
                 )
             last_error = f"No accounts for {provider}/{model_name}"
+        except CoordinatorUnavailable:
+            raise
+        except CoordinatorResponseError as exc:
+            raise
         except Exception as exc:
             last_error = str(exc).strip() or repr(exc)
         raise LeaseUnavailable(last_error or f"No lease available for {provider}/{model_name}")
@@ -407,6 +413,10 @@ def acquire_account_from_coordinator(
                     model_limits=dict(lease.get("model_limits") or {}),
                 )
             last_error = f"No accounts for {provider}/{model_name}"
+        except CoordinatorUnavailable:
+            raise
+        except CoordinatorResponseError as exc:
+            raise
         except Exception as exc:
             last_error = str(exc).strip() or repr(exc)
 
@@ -741,6 +751,7 @@ def main():
         last_reason = ""
         last_account_label = ""
         requeue_to_nvidia = False
+        coordinator_unreachable = False
         
         for attempt in range(args.max_attempts):
             try:
@@ -770,9 +781,20 @@ def main():
                             holder=socket.gethostname(),
                             pid=os.getpid(),
                             eligible_account_ids=candidate_ids,
-                            immediate=True,
+                            immediate=False,
+                            timeout_seconds=max(60, ACQUIRE_WAIT_TIMEOUT_SECONDS),
                         )
                         provider_used = candidate_provider
+                        break
+                    except CoordinatorUnavailable as coord_exc:
+                        last_reason = str(coord_exc).strip() or repr(coord_exc)
+                        coordinator_unreachable = True
+                        log(f"[COORDINATOR-UNREACHABLE] {candidate_provider}/{args.model}: {last_reason}")
+                        break
+                    except CoordinatorResponseError as coord_exc:
+                        last_reason = str(coord_exc).strip() or repr(coord_exc)
+                        coordinator_unreachable = True
+                        log(f"[COORDINATOR-RESPONSE-ERROR] {candidate_provider}/{args.model}: {last_reason}")
                         break
                     except LeaseUnavailable as lease_exc:
                         acquire_errors.append(f"{candidate_provider}:{lease_exc}")
@@ -781,7 +803,15 @@ def main():
 
                 if account is None:
                     last_reason = acquire_errors[-1] if acquire_errors else "lease_unavailable"
+                    if coordinator_unreachable and not acquire_errors:
+                        last_reason = last_reason or f"Coordinator unavailable for {provider_used or args.provider}/{args.model}"
                     log(f"[LEASE-UNAVAILABLE] {v.video_id}: {last_reason}")
+                    if coordinator_unreachable:
+                        append_report(
+                            args.report_csv,
+                            [v.video_id, v.slug, "retry", last_reason[:500], last_account_label or f"{provider_used or args.provider}:{args.model}", args.model, v.link_file, ""],
+                        )
+                        break
                     break
 
                 last_account_label = account.label
@@ -928,7 +958,7 @@ def main():
             if requeue_to_nvidia and not success:
                 return 0
 
-        if not success:
+        if not success and not coordinator_unreachable:
             append_report(
                 args.report_csv,
                 [v.video_id, v.slug, "failed", last_reason[:500], last_account_label, args.model, v.link_file, ""],

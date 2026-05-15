@@ -68,6 +68,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
       <a href="{{ url_for('admin_data_page') }}" class="btn btn-muted btn-sm">← Admin</a>
       <a href="{{ url_for('admin_orchestrator_page') }}" class="btn btn-muted btn-sm">Refresh</a>
       <a href="{{ url_for('admin_orchestrator_page', format='json') }}" class="btn btn-muted btn-sm">JSON</a>
+      <a href="{{ url_for('admin_retry_queue_page') }}" class="btn btn-muted btn-sm">Retry Queue</a>
       <form method="post" action="{{ url_for('admin_orchestrator_action') }}" style="display:inline;">
         <input type="hidden" name="action" value="validate">
         <button class="btn btn-muted btn-sm" type="submit">Validate</button>
@@ -373,9 +374,17 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
       {% set retry_queue = report.retry_queue or {} %}
       <div class="list">
         <div class="list-item"><strong>Pending</strong><span style="float:right;">{{ retry_queue.pending or 0 }}</span></div>
+        <div class="list-item"><strong>Claimed</strong><span style="float:right;">{{ retry_queue.claimed or 0 }}</span></div>
         <div class="list-item"><strong>Running</strong><span style="float:right;">{{ retry_queue.running or 0 }}</span></div>
         <div class="list-item"><strong>Completed</strong><span style="float:right;">{{ retry_queue.completed or 0 }}</span></div>
         <div class="list-item"><strong>Failed</strong><span style="float:right;">{{ retry_queue.failed or 0 }}</span></div>
+        <div class="list-item"><strong>Blocked pending</strong><span style="float:right;">{{ retry_queue.blocked_pending or 0 }}</span></div>
+        {% if retry_queue.oldest_pending %}
+        <div class="list-item">
+          <strong>Oldest pending</strong>
+          <div class="small">{{ retry_queue.oldest_pending.source_job_id }} · {{ retry_queue.oldest_pending.stage }} · {{ retry_queue.oldest_pending.scope }}</div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>

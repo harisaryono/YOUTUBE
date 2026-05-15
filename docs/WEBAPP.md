@@ -1,4 +1,8 @@
-# Flask Dashboard untuk `channels.db`
+# Legacy Web Dashboard untuk `channels.db`
+
+> Status: `webapp/` dipertahankan hanya sebagai compatibility layer.
+> Jalur web resmi sekarang adalah [flask_app](../flask_app/app.py) via [scripts/run_flask.sh](../scripts/run_flask.sh).
+> Kalau tidak sedang memelihara kompatibilitas lama, gunakan `flask_app/` saja.
 
 ## Install
 
@@ -12,7 +16,7 @@ Catatan:
 - Untuk fitur update channel (job background), server butuh `yt-dlp` (sudah masuk `requirements-web.txt`).
 - Disarankan Python `3.9+`.
 
-## Jalankan Web
+## Jalankan Web Legacy
 
 ```bash
 source /media/harry/DATA120B/venv_youtube/bin/activate
@@ -20,6 +24,14 @@ python3 run_web.py
 ```
 
 Buka: `http://127.0.0.1:5000`
+
+Catatan:
+- Ini hanya untuk kompatibilitas lama.
+- Untuk jalur resmi, pakai:
+
+```bash
+./scripts/run_flask.sh
+```
 
 ## Fitur Yang Sudah Diimplementasikan
 

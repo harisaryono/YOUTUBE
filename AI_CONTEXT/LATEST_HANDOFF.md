@@ -32,6 +32,7 @@ Generated: `2026-05-15T08:23:57+07:00`
 - Stage 11 adds safe control actions:
   - `pause-stage`, `resume-stage`, `pause-group`, `resume-group`
   - `retry-failed --dry-run`
+  - `retry-queue stats/list/drain`
   - `quarantine-channel`, `unquarantine-channel`
   - dashboard now shows pause/quarantine/control-action snapshots
 
@@ -50,4 +51,5 @@ Generated: `2026-05-15T08:23:57+07:00`
 - Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`
 - Validate before patching when stage 8 changes touch orchestrator control plane.
 - Use `doctor` for quick operational diagnosis before reading long logs; `--show-errors` helps when cycle failures need more detail.
+- Use `retry-queue stats` / `retry-queue list` / `retry-queue drain` for controlled recovery of queued retries.
 - Use the web dashboard when you want the same snapshot without switching to terminal.

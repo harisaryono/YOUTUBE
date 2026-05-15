@@ -17,6 +17,7 @@
 #   ./scripts/orchestrator.sh resume-stage transcript
 #   ./scripts/orchestrator.sh pause-group youtube --minutes 60
 #   ./scripts/orchestrator.sh retry-failed --stage transcript --dry-run
+#   ./scripts/orchestrator.sh retry-queue stats
 #   ./scripts/orchestrator.sh quarantine-channel UCxxxx
 #   ./scripts/orchestrator.sh report        # Show latest report JSON
 #   ./scripts/orchestrator.sh stop          # Stop running daemon (via PID file)
@@ -175,6 +176,10 @@ case "$MODE" in
         exec "$VENV_PYTHON" -m orchestrator.actions retry-failed "$@"
         ;;
 
+    retry-queue)
+        exec "$VENV_PYTHON" -m orchestrator.retry_executor "$@"
+        ;;
+
     quarantine-channel)
         exec "$VENV_PYTHON" -m orchestrator.actions quarantine-channel "$@"
         ;;
@@ -218,7 +223,7 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|doctor|pause-stage|resume-stage|pause-group|resume-group|retry-failed|quarantine-channel|unquarantine-channel|explain|report|stop} [options]"
+        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|doctor|pause-stage|resume-stage|pause-group|resume-group|retry-failed|retry-queue|quarantine-channel|unquarantine-channel|explain|report|stop} [options]"
         echo ""
         echo "Commands:"
         echo "  once              Run one orchestrator cycle and exit"
@@ -237,6 +242,7 @@ case "$MODE" in
         echo "  pause-group       Pause a control group"
         echo "  resume-group      Resume a paused control group"
         echo "  retry-failed      Show or enqueue retry candidates for failed jobs"
+        echo "  retry-queue       Inspect or drain the retry queue"
         echo "  quarantine-channel Quarantine a channel"
         echo "  unquarantine-channel Release a channel from quarantine"
         echo "  explain           Explain current work inventory and blockers"

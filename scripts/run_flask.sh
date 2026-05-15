@@ -34,17 +34,19 @@ echo "✅ Starting Flask server using external venv..."
 echo ""
 echo "📊 Database Statistics:"
 cd "$REPO_DIR"
+YOUTUBE_DB_PATH="${YOUTUBE_DB_PATH:-$REPO_DIR/db/youtube_transcripts.db}"
 "$VENV_PYTHON" -c "
 import sys
+import os
 sys.path.insert(0, '.')
 from database_optimized import OptimizedDatabase
-db = OptimizedDatabase()
+db = OptimizedDatabase(os.environ.get('YOUTUBE_DB_PATH', '$YOUTUBE_DB_PATH'))
 stats = db.get_statistics()
 print(f'   📺 Channels: {stats[\"total_channels\"]:,}')
 print(f'   📹 Videos: {stats[\"total_videos\"]:,}')
 print(f'   ✅ With Transcript: {stats[\"videos_with_transcript\"]:,}')
 print(f'   ❌ Without Transcript: {stats[\"videos_without_transcript\"]:,}')
-"
+" 
 
 echo ""
 echo "🌐 Server running at: http://localhost:5000"

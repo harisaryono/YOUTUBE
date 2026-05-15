@@ -318,6 +318,13 @@ def safety_gate_for_job(
             reason_code="DEFER_STAGE_PAUSED",
         )
 
+    def _trim_channel_cooldown_reason(value: str) -> str:
+        text = str(value or "").strip()
+        prefix = "Channel cooldown: "
+        while text.startswith(prefix):
+            text = text[len(prefix) :].strip()
+        return text
+
     # --- Stage-specific checks ---
 
     if stage in ("discovery", "transcript", "audio_download"):
@@ -358,7 +365,7 @@ def safety_gate_for_job(
         if scope and scope.startswith("channel:") and state.is_cooldown_active(scope):
             cd = state.get_cooldown(scope)
             return SafetyDecision.wait(
-                f"Channel cooldown: {cd['reason']}",
+                f"Channel cooldown: {_trim_channel_cooldown_reason(cd['reason'])}",
                 recommendation=cd.get("recommendation", ""),
                 reason_code="DEFER_CHANNEL_COOLDOWN",
             )

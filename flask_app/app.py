@@ -49,9 +49,13 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 
 # Database configuration
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'youtube_transcripts.db')
-BASE_DIR = os.path.join(os.path.dirname(__file__), '..', 'uploads')
 REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DB_PATH = REPO_ROOT / "db" / "youtube_transcripts.db"
+FALLBACK_DB_PATH = REPO_ROOT / "youtube_transcripts.db"
+DB_PATH = os.environ.get("YOUTUBE_DB_PATH", str(DEFAULT_DB_PATH))
+if not Path(DB_PATH).exists() and FALLBACK_DB_PATH.exists():
+    DB_PATH = str(FALLBACK_DB_PATH)
+BASE_DIR = os.path.join(os.path.dirname(__file__), '..', 'uploads')
 LOGS_DIR = REPO_ROOT / 'logs'
 ADMIN_JOB_LIST_LIMIT = 20
 ADMIN_RECENT_JOB_DAYS = int(os.getenv("WEBAPP_ADMIN_RECENT_JOB_DAYS", "2"))
@@ -809,7 +813,39 @@ def _job_log_entries(limit: int = ADMIN_JOB_LIST_LIMIT) -> list[dict[str, object
 
 
 def _admin_channel_stats_cached():
-    return _cache_get(("admin_channel_stats",), ADMIN_DATA_CACHE_TTL_S, _admin_channel_stats)
+    signature = _admin_channel_stats_signature()
+    return _cache_get(("admin_channel_stats", signature), ADMIN_DATA_CACHE_TTL_S, _admin_channel_stats)
+
+
+def _admin_channel_stats_signature() -> tuple[object, ...]:
+    db = get_db()
+    con = db.conn
+    row = con.execute(
+        """
+        SELECT
+            COUNT(*) AS channel_count,
+            COALESCE(MAX(updated_at), '') AS latest_updated_at
+        FROM channels
+        """
+    ).fetchone()
+    alias_row = con.execute(
+        """
+        SELECT COUNT(*) AS alias_count
+        FROM channel_aliases
+        """
+    ).fetchone()
+    runtime_row = con.execute(
+        """
+        SELECT COALESCE(MAX(updated_at), '') AS latest_runtime_update
+        FROM channel_runtime_state
+        """
+    ).fetchone()
+    return (
+        int(row["channel_count"]) if row else 0,
+        str(row["latest_updated_at"] or "") if row else "",
+        int(alias_row["alias_count"]) if alias_row else 0,
+        str(runtime_row["latest_runtime_update"] or "") if runtime_row else "",
+    )
 
 
 def _admin_recent_jobs_cached(limit: int = ADMIN_JOB_LIST_LIMIT):
@@ -831,8 +867,9 @@ def _job_log_entries_cached(limit: int = ADMIN_JOB_LIST_LIMIT) -> list[dict[str,
 
 
 def _render_admin_channels_fragment():
+    signature = _admin_channel_stats_signature()
     return _render_cached_page(
-        ("admin_channels_fragment",),
+        ("admin_channels_fragment", signature),
         ADMIN_DATA_CACHE_TTL_S,
         lambda: render_template('admin_data_channels_fragment.html', channels=_admin_channel_stats_cached()),
     )
@@ -1952,6 +1989,7 @@ def admin_data_page():
     summary = _admin_summary(channels)
     flash = request.args.get('flash', '')
     error_flash = request.args.get('error', '')
+    channels_signature = _admin_channel_stats_signature()
     
     # Create channels_json for combobox
     channels_json = json.dumps(
@@ -1959,7 +1997,7 @@ def admin_data_page():
     )
     
     html_output = _render_cached_page(
-        ("admin_data_page", flash, error_flash),
+        ("admin_data_page", flash, error_flash, channels_signature),
         ADMIN_DATA_CACHE_TTL_S,
         lambda: render_template(
             'admin_data.html',
@@ -2156,6 +2194,161 @@ def admin_orchestrator_action():
         action_state.close()
 
     return redirect(url_for('admin_orchestrator_page', **redirect_args))
+
+
+@app.route('/admin/orchestrator/retry-queue', methods=['GET'], strict_slashes=False)
+def admin_retry_queue_page():
+    if not _admin_authenticated():
+        return redirect(url_for('admin_data_page'))
+
+    from orchestrator.retry_executor import build_retry_queue_summary
+    from orchestrator.state import OrchestratorState
+
+    state = OrchestratorState()
+    try:
+        retry_stats = build_retry_queue_summary(state)
+        pending_items = state.list_retry_queue(status="pending", limit=100)
+        blocked = state.list_retry_queue(status="blocked", limit=100)
+        check_state = OrchestratorState()
+        try:
+            from orchestrator.policies import policy_blockers_for_job
+            from orchestrator.config import load_config
+            cfg = load_config()
+            blocked_items = []
+            for b in blocked:
+                blockers = policy_blockers_for_job(check_state, cfg, stage=b.get("stage", ""), scope=b.get("scope", ""), channel_id=b.get("channel_id", ""))
+                b["blocked_by"] = ", ".join(blockers) if blockers else "policy"
+                blocked_items.append(b)
+        finally:
+            check_state.close()
+
+        pauses = state.get_pauses()
+        policy_blockers = []
+        try:
+            from orchestrator.policies import policy_blockers_for_job
+            policy_blockers = policy_blockers_for_job(state, cfg, stage="", scope="", channel_id="")
+        except Exception:
+            policy_blockers = []
+    finally:
+        state.close()
+
+    if (request.args.get('format') or '').strip().lower() == 'json':
+        return jsonify({
+            "stats": retry_stats,
+            "pending": pending_items,
+            "blocked": blocked_items,
+            "pauses": pauses,
+            "policy_blockers": policy_blockers,
+        })
+
+    return render_template(
+        'admin_retry_queue.html',
+        retry_stats=retry_stats,
+        pending_items=pending_items,
+        blocked_items=blocked_items,
+        pauses=pauses,
+        policy_blockers=policy_blockers,
+        flash=request.args.get('flash', ''),
+        error_flash=request.args.get('error', ''),
+    )
+
+
+@app.route('/admin/orchestrator/retry-queue/action', methods=['POST'])
+def admin_retry_queue_action():
+    if not _admin_authenticated():
+        return redirect(url_for('admin_data_page'))
+
+    action = (request.form.get('action') or '').strip().lower()
+    redirect_args: dict[str, str] = {}
+    action_state = OrchestratorState()
+
+    try:
+        from orchestrator.retry_executor import drain_retry_queue
+        from orchestrator.config import load_config
+
+        cfg = load_config()
+
+        if action == 'drain_retry':
+            limit = int(request.form.get('limit', 1) or 1)
+            dry_run = request.form.get('dry_run', '1') not in {'0', 'false', 'no', 'off'}
+            result = drain_retry_queue(
+                cfg, action_state,
+                limit=limit,
+                dry_run=dry_run,
+                actor="web",
+            )
+            if result.get("ok"):
+                msg_parts = [f"Drain {'dry-run ' if dry_run else ''}sukses"]
+                for k in ("claimed", "launched", "blocked", "deferred"):
+                    v = result.get(k, 0)
+                    if v:
+                        msg_parts.append(f"{k}={v}")
+                if dry_run:
+                    msg_parts.append("(no actual launch)")
+                redirect_args['flash'] = " · ".join(msg_parts)
+            else:
+                redirect_args['error'] = result.get("message", "Drain gagal")
+        elif action == 'pause_stage':
+            stage = (request.form.get('stage') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            minutes = int(request.form.get('minutes', 10) or 10)
+            from orchestrator.actions import pause_stage as orch_pause_stage
+            pause_result = orch_pause_stage(action_state, stage, minutes, reason, actor='web')
+            if pause_result.ok:
+                redirect_args['flash'] = pause_result.message
+            else:
+                redirect_args['error'] = pause_result.message
+        elif action == 'resume_stage':
+            stage = (request.form.get('stage') or '').strip()
+            from orchestrator.actions import resume_stage as orch_resume_stage
+            resume_result = orch_resume_stage(action_state, stage, actor='web')
+            if resume_result.ok:
+                redirect_args['flash'] = resume_result.message
+            else:
+                redirect_args['error'] = resume_result.message
+        elif action == 'pause_group':
+            group = (request.form.get('group') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            minutes = int(request.form.get('minutes', 10) or 10)
+            from orchestrator.actions import pause_group as orch_pause_group
+            pause_result = orch_pause_group(action_state, group, minutes, reason, actor='web')
+            if pause_result.ok:
+                redirect_args['flash'] = pause_result.message
+            else:
+                redirect_args['error'] = pause_result.message
+        elif action == 'resume_group':
+            group = (request.form.get('group') or '').strip()
+            from orchestrator.actions import resume_group as orch_resume_group
+            resume_result = orch_resume_group(action_state, group, actor='web')
+            if resume_result.ok:
+                redirect_args['flash'] = resume_result.message
+            else:
+                redirect_args['error'] = resume_result.message
+        elif action == 'quarantine_channel':
+            channel_id = (request.form.get('channel_id') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            from orchestrator.actions import quarantine_channel as orch_quarantine_channel
+            q_result = orch_quarantine_channel(action_state, channel_id, reason, actor='web')
+            if q_result.ok:
+                redirect_args['flash'] = q_result.message
+            else:
+                redirect_args['error'] = q_result.message
+        elif action == 'unquarantine_channel':
+            channel_id = (request.form.get('channel_id') or '').strip()
+            from orchestrator.actions import unquarantine_channel as orch_unquarantine_channel
+            uq_result = orch_unquarantine_channel(action_state, channel_id, actor='web')
+            if uq_result.ok:
+                redirect_args['flash'] = uq_result.message
+            else:
+                redirect_args['error'] = uq_result.message
+        else:
+            redirect_args['error'] = f'Aksi tidak dikenal: {action or "empty"}'
+    except Exception as exc:
+        redirect_args['error'] = str(exc)
+    finally:
+        action_state.close()
+
+    return redirect(url_for('admin_retry_queue_page', **redirect_args))
 
 
 @app.route('/admin/orchestrator/job/<job_id>/log', methods=['GET'], strict_slashes=False)

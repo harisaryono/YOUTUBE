@@ -290,7 +290,6 @@ class OptimizedDatabase:
                 CREATE INDEX IF NOT EXISTS idx_channel_aliases_channel_db_id
                 ON channel_aliases(channel_db_id)
             """)
-
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS admin_jobs (
                     job_id TEXT PRIMARY KEY,
@@ -493,6 +492,12 @@ class OptimizedDatabase:
             """)
 
             self._backfill_channel_aliases(cursor)
+            self._dedupe_channels_by_alias(cursor)
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_aliases_strong_unique
+                ON channel_aliases(alias_key, alias_kind)
+                WHERE alias_kind IN ('channel_id', 'channel_handle')
+            """)
             
             self.conn.commit()
         except Exception as e:
@@ -601,6 +606,215 @@ class OptimizedDatabase:
                 str(row["channel_name"] or ""),
                 str(row["channel_url"] or ""),
             )
+
+    def _strong_channel_merge_key(self, row: sqlite3.Row) -> str:
+        channel_id = str(row["channel_id"] or "").strip()
+        channel_name = str(row["channel_name"] or "").strip()
+        channel_handle = str(row["channel_handle"] or "").strip()
+        channel_url = str(row["channel_url"] or "").strip()
+
+        handle = _extract_channel_handle(channel_url) or channel_handle
+        if handle:
+            return f"handle:{_normalize_channel_token(handle)}"
+        if channel_id.startswith("@"):
+            return f"handle:{_normalize_channel_token(channel_id.lstrip('@'))}"
+        if channel_id and not channel_id.startswith("UC"):
+            return f"handle:{_normalize_channel_token(channel_id)}"
+        if channel_id.startswith("UC"):
+            return f"id:{channel_id.lower()}"
+        if channel_name:
+            return f"name:{_normalize_channel_token(channel_name)}"
+        return ""
+
+    def _merge_channel_runtime_state(self, cursor, keep_channel_id: str, merge_channel_id: str) -> None:
+        keep_state = cursor.execute(
+            "SELECT * FROM channel_runtime_state WHERE channel_id = ? LIMIT 1",
+            (keep_channel_id,),
+        ).fetchone()
+        merge_state = cursor.execute(
+            "SELECT * FROM channel_runtime_state WHERE channel_id = ? LIMIT 1",
+            (merge_channel_id,),
+        ).fetchone()
+        if merge_state is None:
+            return
+        if keep_state is None:
+            cursor.execute(
+                """
+                UPDATE channel_runtime_state
+                   SET channel_id = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE channel_id = ?
+                """,
+                (keep_channel_id, merge_channel_id),
+            )
+            return
+
+        merged_scan_enabled = int(min(int(keep_state["scan_enabled"]), int(merge_state["scan_enabled"])))
+        merged_skip_reason = str(keep_state["skip_reason"] or "").strip() or str(merge_state["skip_reason"] or "").strip()
+        merged_source_status = str(keep_state["source_status"] or "").strip() or str(merge_state["source_status"] or "").strip()
+        merged_last_scope = str(keep_state["last_discovery_scope"] or "").strip() or str(merge_state["last_discovery_scope"] or "").strip()
+        merged_full_history = str(keep_state["full_history_scanned_at"] or "").strip() or str(merge_state["full_history_scanned_at"] or "").strip()
+        cursor.execute(
+            """
+            UPDATE channel_runtime_state
+               SET scan_enabled = ?,
+                   skip_reason = ?,
+                   source_status = ?,
+                   last_discovery_scope = ?,
+                   full_history_scanned_at = ?,
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE channel_id = ?
+            """,
+            (
+                merged_scan_enabled,
+                merged_skip_reason,
+                merged_source_status,
+                merged_last_scope,
+                merged_full_history or None,
+                keep_channel_id,
+            ),
+        )
+        cursor.execute(
+            "DELETE FROM channel_runtime_state WHERE channel_id = ?",
+            (merge_channel_id,),
+        )
+
+    def _merge_channel_rows(self, cursor, keep_row: sqlite3.Row, merge_row: sqlite3.Row) -> None:
+        keep_id = int(keep_row["id"])
+        merge_id = int(merge_row["id"])
+        keep_channel_id = str(keep_row["channel_id"] or "").strip()
+        merge_channel_id = str(merge_row["channel_id"] or "").strip()
+
+        cursor.execute(
+            "UPDATE videos SET channel_id = ? WHERE channel_id = ?",
+            (keep_id, merge_id),
+        )
+        self._merge_channel_runtime_state(cursor, keep_channel_id, merge_channel_id)
+
+        cursor.execute(
+            """
+            DELETE FROM channel_aliases
+             WHERE channel_db_id = ?
+               AND EXISTS (
+                   SELECT 1
+                     FROM channel_aliases keep_alias
+                    WHERE keep_alias.channel_db_id = ?
+                      AND keep_alias.alias_key = channel_aliases.alias_key
+                      AND keep_alias.alias_kind = channel_aliases.alias_kind
+               )
+            """,
+            (merge_id, keep_id),
+        )
+        cursor.execute(
+            "UPDATE channel_aliases SET channel_db_id = ? WHERE channel_db_id = ?",
+            (keep_id, merge_id),
+        )
+
+        keep_name = str(keep_row["channel_name"] or "").strip()
+        merge_name = str(merge_row["channel_name"] or "").strip()
+        keep_handle = str(keep_row["channel_handle"] or "").strip()
+        merge_handle = str(merge_row["channel_handle"] or "").strip()
+        keep_url = str(keep_row["channel_url"] or "").strip()
+        merge_url = str(merge_row["channel_url"] or "").strip()
+        keep_thumbnail = str(keep_row["thumbnail_url"] or "").strip()
+        merge_thumbnail = str(merge_row["thumbnail_url"] or "").strip()
+        resolved_name = keep_name or merge_name or keep_channel_id or merge_channel_id
+        resolved_handle = keep_handle or merge_handle
+        resolved_url = keep_url or merge_url
+        resolved_thumbnail = keep_thumbnail or merge_thumbnail
+        resolved_subscriber = max(int(keep_row["subscriber_count"] or 0), int(merge_row["subscriber_count"] or 0))
+        resolved_video_count = cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM videos WHERE channel_id = ?",
+            (keep_id,),
+        ).fetchone()["cnt"]
+        cursor.execute(
+            """
+            UPDATE channels
+               SET channel_name = ?,
+                   channel_handle = COALESCE(NULLIF(?, ''), channel_handle),
+                   channel_url = ?,
+                   subscriber_count = ?,
+                   video_count = ?,
+                   thumbnail_url = COALESCE(NULLIF(?, ''), thumbnail_url),
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?
+            """,
+            (
+                resolved_name,
+                resolved_handle,
+                resolved_url,
+                resolved_subscriber,
+                int(resolved_video_count or 0),
+                resolved_thumbnail,
+                keep_id,
+            ),
+        )
+        cursor.execute("DELETE FROM channels WHERE id = ?", (merge_id,))
+
+    def _dedupe_channels_by_alias(self, cursor) -> int:
+        """Merge duplicated channels that share the same strong alias key."""
+        rows = cursor.execute(
+            """
+            SELECT alias_key, GROUP_CONCAT(DISTINCT channel_db_id) AS db_ids
+            FROM channel_aliases
+            WHERE alias_kind IN ('channel_id', 'channel_handle')
+            GROUP BY alias_key
+            HAVING COUNT(DISTINCT channel_db_id) > 1
+            ORDER BY alias_key
+            """
+        ).fetchall()
+        merged = 0
+        seen_keys: set[str] = set()
+        for row in rows:
+            alias_key = str(row["alias_key"] or "").strip()
+            if not alias_key or alias_key in seen_keys:
+                continue
+            seen_keys.add(alias_key)
+            db_ids: list[int] = []
+            for token in str(row["db_ids"] or "").split(","):
+                token = token.strip()
+                if token.isdigit():
+                    db_ids.append(int(token))
+            db_ids = sorted(set(db_ids))
+            if len(db_ids) < 2:
+                continue
+
+            placeholders = ",".join("?" for _ in db_ids)
+            channel_rows = cursor.execute(
+                f"""
+                SELECT id, channel_id, channel_name, COALESCE(channel_handle, '') AS channel_handle,
+                       channel_url, subscriber_count, video_count, thumbnail_url
+                FROM channels
+                WHERE id IN ({placeholders})
+                """,
+                db_ids,
+            ).fetchall()
+            if len(channel_rows) < 2:
+                continue
+
+            actual_counts: dict[int, int] = {}
+            for ch in channel_rows:
+                cnt_row = cursor.execute(
+                    "SELECT COUNT(*) AS cnt FROM videos WHERE channel_id = ?",
+                    (int(ch["id"]),),
+                ).fetchone()
+                actual_counts[int(ch["id"])] = int(cnt_row["cnt"]) if cnt_row else 0
+
+            channel_rows = sorted(
+                channel_rows,
+                key=lambda r: (
+                    actual_counts.get(int(r["id"]), 0),
+                    1 if str(r["channel_handle"] or "").strip() else 0,
+                    1 if _extract_channel_handle(str(r["channel_url"] or "")) else 0,
+                    int(r["video_count"] or 0),
+                    -int(r["id"]),
+                ),
+                reverse=True,
+            )
+            keep_row = channel_rows[0]
+            for merge_row in channel_rows[1:]:
+                self._merge_channel_rows(cursor, keep_row, merge_row)
+                merged += 1
+        return merged
     
     def add_channel(self, channel_id: str, channel_name: str, channel_url: str, 
                    subscriber_count: int = 0, video_count: int = 0, 

@@ -94,6 +94,16 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] Daemon tidak meluncurkan retry queue item yang masih diblokir pause/quarantine/policy blocker.
 - [ ] Dashboard `/admin/orchestrator` menampilkan retry queue secara read-only dan tetap bisa memanggil retry dry-run.
 
+## Stage 13 Retry Executor Validation
+
+- [ ] `./scripts/orchestrator.sh retry-queue stats --json` menampilkan ringkasan retry queue dengan `blocked_pending` dan `oldest_pending`.
+- [ ] `./scripts/orchestrator.sh retry-queue list --status pending --limit 10 --json` menampilkan daftar kandidat queue.
+- [ ] `./scripts/orchestrator.sh retry-queue drain --limit 2 --dry-run --json` tidak meluncurkan job nyata.
+- [ ] `./scripts/orchestrator.sh retry-queue drain --limit 2 --json` hanya meluncurkan kandidat yang lolos policy dan slot.
+- [ ] Pending retry queue di-claim sebelum launch, sehingga daemon dan CLI drain tidak double-launch.
+- [ ] `./scripts/orchestrator.sh doctor --json` menampilkan `claimed`, `blocked_pending`, dan `oldest_pending`.
+- [ ] Dashboard `/admin/orchestrator` menampilkan retry queue summary yang lebih operasional.
+
 ## Batch Validations
 - **Phase 1 Validation**:
   - [ ] 5 videos processed.

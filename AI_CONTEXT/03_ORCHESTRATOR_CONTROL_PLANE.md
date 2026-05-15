@@ -21,6 +21,10 @@
 - `./scripts/orchestrator.sh resume-group <group>`
 - `./scripts/orchestrator.sh retry-failed --stage <stage> --limit N --dry-run`
 - `./scripts/orchestrator.sh retry-failed --stage <stage> --limit N --no-dry-run`
+- `./scripts/orchestrator.sh retry-queue stats`
+- `./scripts/orchestrator.sh retry-queue list --status pending --limit N`
+- `./scripts/orchestrator.sh retry-queue drain --limit N --dry-run`
+- `./scripts/orchestrator.sh retry-queue drain --limit N`
 - `./scripts/orchestrator.sh quarantine-channel <CHANNEL_ID> --reason ...`
 - `./scripts/orchestrator.sh unquarantine-channel <CHANNEL_ID>`
 
@@ -34,6 +38,7 @@
 - pause/quarantine harus tercermin di doctor dan dashboard snapshot.
 - `retry-failed --no-dry-run` harus mengisi retry queue persisten, bukan launch langsung.
 - retry queue hanya boleh diluncurkan jika policy blocker sudah clear.
+- pending retry queue harus di-claim sebelum launch supaya daemon dan CLI tidak double-launch.
 
 ## Scope
 

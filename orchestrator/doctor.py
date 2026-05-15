@@ -159,8 +159,12 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
     elif "youtube:content" in cooldown_scopes and "youtube:discovery" not in cooldown_scopes:
         recs.append("Discovery masih aman; content cooldown hanya menahan transcript/audio_download.")
 
-    if "provider" in cooldown_scopes or any(scope.startswith("provider:") for scope in cooldown_scopes):
+    provider_scopes = {scope for scope in cooldown_scopes if scope.startswith("provider:")}
+    provider_asr_only = "provider:asr" in provider_scopes and provider_scopes <= {"provider:asr"}
+    if provider_scopes and not provider_asr_only:
         recs.append("Provider sedang cooldown; prioritaskan discovery dan local jobs.")
+    elif provider_asr_only:
+        recs.append("ASR provider lease sedang cooldown; resume/format tetap aman.")
 
     if backlog.get("transcript", 0) > backlog.get("resume", 0):
         recs.append("Transcript backlog dominan; jaga transcript workers tetap rendah bila YouTube mulai error.")
@@ -180,6 +184,10 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
 
     if int(retry_queue.get("pending", 0) or 0) > 0:
         recs.append(f"Ada {int(retry_queue.get('pending', 0) or 0)} retry queue pending; daemon akan memprosesnya di cycle berikutnya.")
+    if int(retry_queue.get("blocked_pending", 0) or 0) > 0:
+        recs.append(
+            f"Ada {int(retry_queue.get('blocked_pending', 0) or 0)} retry queue pending yang masih blocked policy; cek pause/quarantine sebelum drain."
+        )
 
     if not recs:
         recs.append("Tidak ada anomali besar yang terdeteksi.")
@@ -386,9 +394,26 @@ def render_doctor_text(report: dict[str, Any]) -> str:
     lines.append("Retry queue:")
     if retry_queue:
         lines.append(
-            f"  - pending: {retry_queue.get('pending', 0)}, running: {retry_queue.get('running', 0)}, "
-            f"completed: {retry_queue.get('completed', 0)}, failed: {retry_queue.get('failed', 0)}"
+            f"  - pending: {retry_queue.get('pending', 0)}, claimed: {retry_queue.get('claimed', 0)}, running: {retry_queue.get('running', 0)}, "
+            f"completed: {retry_queue.get('completed', 0)}, failed: {retry_queue.get('failed', 0)}, blocked_pending: {retry_queue.get('blocked_pending', 0)}"
         )
+        oldest = retry_queue.get("oldest_pending") or {}
+        if oldest:
+            age = _format_duration(int(retry_queue.get("oldest_pending_age_seconds", 0) or 0))
+            lines.append(
+                f"  - oldest pending: {oldest.get('source_job_id', '')} "
+                f"({oldest.get('stage', '')} / {oldest.get('scope', '')}) "
+                f"{age} ago"
+            )
+        blocked_preview = retry_queue.get("blocked_preview") or []
+        if blocked_preview:
+            lines.append("  - blocked preview:")
+            for item in blocked_preview[:3]:
+                blockers = item.get("policy_blockers", [])
+                blocker_text = "; ".join(str(b.get("message") or b) for b in blockers)
+                lines.append(
+                    f"    - {item.get('source_job_id', '')} ({item.get('stage', '')} / {item.get('scope', '')}): {blocker_text}"
+                )
     else:
         lines.append("  - none")
     lines.append("")

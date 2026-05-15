@@ -838,6 +838,27 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                 delay_factor = max(delay_factor, 2.0)
 
         if self._skip_expensive_fallback:
+            if self._looks_like_terminal_transcript_error(err_msg):
+                logger.info(
+                    f"   ℹ️  API mengarah ke transcript terminal untuk {video_id}; "
+                    f"cek inventory yt-dlp sebelum pulang."
+                )
+                if self._maybe_bail_video_budget(video_id):
+                    return None, "retry_later"
+                delay_factor = max(delay_factor, 1.5)
+                time.sleep(random.uniform(self._yt_dlp_pre_inventory_sleep_min, self._yt_dlp_pre_inventory_sleep_max))
+                inventory_state, inventory, inventory_detail = self._yt_dlp_subtitle_inventory(video_id, cookie_file=cookie_file)
+                if inventory_state == "missing":
+                    logger.info(
+                        f"   ℹ️  Inventory yt-dlp eksplisit kosong untuk {video_id}; "
+                        f"no_subtitle valid walau fallback mahal dimatikan."
+                    )
+                    self.last_transcript_failure_reason = self.last_transcript_failure_reason or "subtitle_inventory_missing"
+                    return None, "no_subtitle"
+                if inventory_state == "unknown" and self._looks_like_retry_later_error(inventory_detail):
+                    retry_later = True
+                    self.last_transcript_failure_reason = inventory_detail or self.last_transcript_failure_reason or "retry_later"
+
             self.last_transcript_failure_reason = self.last_transcript_failure_reason or "expensive_fallback_skipped"
             logger.warning(
                 f"   ⏭️  Expensive fallback dimatikan untuk {video_id}; tandai retry_later tanpa yt-dlp/Webshare."

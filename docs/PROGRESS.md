@@ -66,6 +66,7 @@
   - stage 9 observability sedang ditambah lewat command `doctor` untuk melihat daemon, backlog, cooldown, dan recent failures tanpa membaca log panjang
   - stage 11 safe actions mulai dipakai lewat `orchestrator/actions.py`: pause/resume stage/group, quarantine/unquarantine channel, retry-failed dry-run, dan policy blockers tampil di doctor/dashboard
   - stage 12 policy requeue mulai dipakai lewat `orchestrator/state.py` + `orchestrator/planner.py`: retry queue persisten, `retry-failed --no-dry-run` masuk queue, dan daemon hanya meluncurkan retry yang lolos policy blocker
+  - stage 13 retry executor mulai dipakai lewat `orchestrator/retry_executor.py`: `retry-queue stats/list/drain`, claim before launch, dan doctor/dashboard menampilkan retry queue yang lebih operasional
 - discovery sekarang punya bootstrap state: channel yang belum punya `full_history_scanned_at` dipindai `scan-all-missing` dulu, lalu setelah itu masuk rotasi `latest-only`
 - cooldown YouTube sekarang dipisah lebih halus:
   - `youtube:content` hanya menahan transcript/audio
@@ -356,3 +357,40 @@
   - `orchestrator_state` sekarang menyimpan pause keys, inventory snapshot, dan state batch adaptif per stage.
   - `./scripts/orchestrator.sh explain` sekarang menampilkan disk/memory, pause state, dan keputusan per stage yang lebih jelas.
   - `orchestrator/janitor.py` dan `scripts/orchestrator_ctl.sh janitor` menambah maintenance pass ringan untuk event/log/run-dir/report/audio orphan.
+
+## Stage 13 — Retry Queue Executor & Controlled Recovery
+
+Stage 13 menambahkan retry executor terpisah, config retry queue, dan
+integrasi daemon + CLI.
+
+**Implemented:**
+- `orchestrator/retry_executor.py` — modul executor khusus
+- Config `retry_queue` di `orchestrator.yaml` (enabled, max_per_cycle, max_attempts_default, prefer_retry_before_normal)
+- CLI commands: `retry-queue stats`, `retry-queue list`, `retry-queue drain`
+- State methods di `state.py`: `list_retry_queue()`, `retry_queue_stats()`, `claim_retry_item()`, `mark_retry_running()`, `mark_retry_completed()`, `mark_retry_failed()`, `mark_retry_blocked()`, `cancel_retry_item()`
+- Integrasi daemon cycle: retry queue diproses via `plan_jobs()` di planner
+- Doctor menampilkan retry_queue, policy_blockers, cycle_failures
+- Explain/mode menampilkan retry queue summary
+- Naming konsisten: `completed` bukan `done`
+
+**Not yet (reserved for future):**
+- Dashboard widget real-time retry drain action
+
+## Stage 14 — Web Admin Control Actions & Retry Queue UI
+
+Stage 14 menambahkan halaman web admin untuk retry queue dan tombol
+safe actions (pause/resume/quarantine) yang memanggil modul Python
+yang sudah ada.
+
+**Implemented:**
+- `flask_app/templates/admin_retry_queue.html` — halaman retry queue dengan stats, pending list, blocked list, pauses, policy blockers
+- `flask_app/app.py` — route GET `/admin/orchestrator/retry-queue` dan POST `/admin/orchestrator/retry-queue/action`
+- Link "Retry Queue" di topbar admin_orchestrator.html
+- Tombol: dry-run drain, drain 1 item (wajib JS confirm), pause/resume stage/group, quarantine/unquarantine channel
+- `flask_app/static/favicon.svg` — favicon solid red #FF2A00 + white play triangle
+- `AI_CONTEXT/09_STAGE14_WEB_CONTROL_UI.md`
+
+**Invariant:**
+- Web hanya wrapper, tidak membuat logic sendiri
+- Drain nyata limit=1, butuh JS confirm
+- Semua action audit event di orchestrator_events

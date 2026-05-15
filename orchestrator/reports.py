@@ -12,6 +12,7 @@ from typing import Any
 from .state import OrchestratorState
 from . import cooldown as cd
 from . import planner
+from . import retry_executor as retry_queue_utils
 from . import db_queries
 from .safety import check_system_health
 
@@ -38,24 +39,26 @@ def build_inventory_snapshot(
     recent_events = state.get_recent_events(limit=50)
     pauses = state.list_pauses()
     quarantined_channels = state.list_quarantined_channels()
-    retry_queue = {
-        "pending": state.count_retry_queue("pending"),
-        "running": state.count_retry_queue("running"),
-        "completed": state.count_retry_queue("completed"),
-        "failed": state.count_retry_queue("failed"),
-    }
-    retry_queue["total"] = sum(int(retry_queue.get(key, 0) or 0) for key in ("pending", "running", "completed", "failed"))
+    retry_queue = retry_queue_utils.build_retry_queue_summary(state, pending_limit=200)
     sys_health = None
     try:
         sys_health = check_system_health(config)
     except Exception:
         sys_health = None
 
+    provider_cooldowns = [cd_entry for cd_entry in active_cooldowns if str(cd_entry.get("scope") or "").startswith("provider:")]
+    asr_provider_cooldowns = [
+        cd_entry for cd_entry in provider_cooldowns
+        if str(cd_entry.get("scope") or "") in {"provider:asr", "stage:asr"} or str(cd_entry.get("scope") or "").startswith("provider:asr:")
+    ]
+    regular_provider_cooldowns = [cd_entry for cd_entry in provider_cooldowns if cd_entry not in asr_provider_cooldowns]
+
     blocked = {
         "youtube": any(cd_entry["scope"] == "youtube" for cd_entry in active_cooldowns),
         "youtube_discovery": any(cd_entry["scope"] == "youtube:discovery" for cd_entry in active_cooldowns),
         "youtube_content": any(cd_entry["scope"] == "youtube:content" for cd_entry in active_cooldowns),
-        "provider": any(cd_entry["scope"].startswith("provider:") for cd_entry in active_cooldowns),
+        "provider": bool(regular_provider_cooldowns),
+        "provider_asr": bool(asr_provider_cooldowns),
         "channel": any(cd_entry["scope"].startswith("channel:") for cd_entry in active_cooldowns),
         "pauses": bool(pauses),
         "quarantine": bool(quarantined_channels),
@@ -369,12 +372,18 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
         lines.append(f"- Active cooldowns: {inv.get('cooldowns', {}).get('active_count', 0)}")
         lines.append(f"- Active locks: {inv.get('locks', {}).get('active_count', 0)}")
         if inv.get("retry_queue"):
-            rq = inv["retry_queue"]
+            retry_queue_summary = inv["retry_queue"]
             lines.append(
                 "- Retry queue: "
-                f"pending={rq.get('pending', 0)}, running={rq.get('running', 0)}, "
-                f"completed={rq.get('completed', 0)}, failed={rq.get('failed', 0)}"
+                f"pending={retry_queue_summary.get('pending', 0)}, claimed={retry_queue_summary.get('claimed', 0)}, running={retry_queue_summary.get('running', 0)}, "
+                f"completed={retry_queue_summary.get('completed', 0)}, failed={retry_queue_summary.get('failed', 0)}, blocked_pending={retry_queue_summary.get('blocked_pending', 0)}"
             )
+            oldest = retry_queue_summary.get("oldest_pending") or {}
+            if oldest:
+                lines.append(
+                    f"  - Oldest pending: `{oldest.get('source_job_id', '')}` "
+                    f"({oldest.get('stage', '')} / {oldest.get('scope', '')})"
+                )
         if inv.get("pauses"):
             lines.append("- Pauses:")
             for pause in inv["pauses"]:
@@ -402,6 +411,7 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
         "ASR": ("asr", "system"),
     }
     blocked_providers = cd_info.get("blocked_providers", [])
+    blocked_provider_asr = bool(cd_info.get("blocked_provider_asr"))
     youtube_blocked = any(cd_entry["scope"] == "youtube" for cd_entry in cd_info.get("details", []))
     pause_keys = {str(p.get("pause_key", "")).strip() for p in inv.get("pauses", [])}
     sys_info = inv.get("system", {})
@@ -427,6 +437,8 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
             lines.append(f"- **{stage}**: limited (memory low)")
         elif dep == "youtube" and youtube_blocked:
             lines.append(f"- **{stage}**: blocked (YouTube cooldown)")
+        elif stage_key == "asr" and blocked_provider_asr:
+            lines.append(f"- **{stage}**: limited (ASR provider cooldown)")
         elif dep == "provider" and blocked_providers:
             lines.append(f"- **{stage}**: limited (provider cooldown)")
         else:

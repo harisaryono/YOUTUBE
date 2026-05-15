@@ -82,6 +82,8 @@ from local_services import (
     coordinator_release_lease,
     coordinator_report_provider_event,
     coordinator_status_accounts,
+    CoordinatorUnavailable,
+    CoordinatorResponseError,
     yt_dlp_auth_args,
     yt_dlp_command,
 )
@@ -96,6 +98,7 @@ DEFAULT_NVIDIA_BASE_URL = "http://127.0.0.1:9000/v1/audio/transcriptions"
 DEFAULT_NVIDIA_RIVA_SERVER = "grpc.nvcf.nvidia.com:443"
 DEFAULT_NVIDIA_RIVA_FUNCTION_ID = "b702f636-f60c-4a3d-a6f4-f3568c13bd7d"
 DEFAULT_ASR_AUDIO_FORMAT_SELECTOR = "ba[abr<=96]/ba[abr<=128]/ba[abr<=160]/ba/b"
+NVIDIA_WHISPER_GRPC_MODELS = {"whisper-large-v3-multi-asr-offline"}
 
 
 logging.basicConfig(
@@ -463,13 +466,11 @@ class ASRPipeline:
         self.postprocess_max_chars = max(12000, _env_int("ASR_POSTPROCESS_MAX_CHARS", 30000))
         self.postprocess_max_lines = max(60, _env_int("ASR_POSTPROCESS_MAX_LINES", 240))
         self.postprocess_max_chunks = max(1, _env_int("ASR_POSTPROCESS_MAX_CHUNKS", 12))
-        self.groq_asph_cooldown_seconds = max(300, _env_int("ASR_GROQ_ASPH_COOLDOWN_SECONDS", 86400))
         self.prefer_existing = True
         self.coordinator_holder = str(args.coordinator_holder or "").strip() or f"asr-{os.getpid()}"
         self.coordinator_host = os.uname().nodename
         self.coordinator_pid = os.getpid()
         self._report_status_path = self.run_dir / "coordinator_status.json"
-        self._provider_disabled_until: dict[str, float] = {}
         self.claim_owner = str(os.getenv("JOB_ID") or f"asr:{os.getpid()}:{self.run_dir.name}").strip()
         self._ensure_coordinator_ready()
 
@@ -524,6 +525,13 @@ class ASRPipeline:
         configs["nvidia"] = ProviderConfig(name="nvidia", base_url=nvidia_base, model=nvidia_model)
 
         return configs
+
+    def _nvidia_grpc_available(self) -> bool:
+        return RivaASRService is not None and Auth is not None and RecognitionConfig is not None and AudioEncoding is not None
+
+    def _nvidia_whisper_grpc_required(self, model_name: str) -> bool:
+        normalized = str(model_name or "").strip().lower()
+        return normalized in NVIDIA_WHISPER_GRPC_MODELS
 
     def _ensure_coordinator_ready(self) -> None:
         if self.download_only:
@@ -590,17 +598,20 @@ class ASRPipeline:
             else:
                 (idle_fallback_ids if is_idle else busy_fallback_ids).append(account_id)
         eligible = idle_matching_ids or idle_fallback_ids or busy_matching_ids or busy_fallback_ids or None
-        leases = coordinator_acquire_accounts(
-            provider=provider_name,
-            model_name=provider_cfg.model,
-            count=1,
-            eligible_account_ids=eligible,
-            holder=self.coordinator_holder,
-            host=self.coordinator_host,
-            pid=self.coordinator_pid,
-            task_type="asr_transcription",
-            lease_ttl_seconds=self.lease_ttl_seconds,
-        )
+        try:
+            leases = coordinator_acquire_accounts(
+                provider=provider_name,
+                model_name=provider_cfg.model,
+                count=1,
+                eligible_account_ids=eligible,
+                holder=self.coordinator_holder,
+                host=self.coordinator_host,
+                pid=self.coordinator_pid,
+                task_type="asr_transcription",
+                lease_ttl_seconds=self.lease_ttl_seconds,
+            )
+        except (CoordinatorUnavailable, CoordinatorResponseError):
+            raise
         if not leases:
             raise RuntimeError(f"Tidak ada lease coordinator untuk {provider_name}/{provider_cfg.model}")
         lease = dict(leases[0])
@@ -632,11 +643,14 @@ class ASRPipeline:
         errors: list[str] = []
         try:
             for provider_name in self.provider_order:
-                if self._provider_is_disabled(provider_name):
-                    logger.info("Skip acquire provider %s karena masih cooldown/disabled.", provider_name)
-                    continue
                 cfg = self.providers.get(provider_name)
                 if not cfg:
+                    continue
+                if provider_name == "nvidia" and self._nvidia_whisper_grpc_required(cfg.model) and not self._nvidia_grpc_available():
+                    logger.warning(
+                        "Skip acquire provider nvidia/%s karena nvidia-riva-client/grpcio belum terpasang. Jalur Whisper ASR NVIDIA hanya gRPC.",
+                        cfg.model,
+                    )
                     continue
                 try:
                     acquired[provider_name] = self._acquire_provider_lease(provider_name, cfg)
@@ -647,6 +661,14 @@ class ASRPipeline:
                         acquired[provider_name].account_name,
                         acquired[provider_name].provider_account_id,
                     )
+                except CoordinatorUnavailable as exc:
+                    errors.append(f"{provider_name}/{cfg.model}: coordinator_unreachable: {exc}")
+                    logger.warning("Coordinator tidak bisa dihubungi untuk %s/%s: %s", provider_name, cfg.model, exc)
+                    continue
+                except CoordinatorResponseError as exc:
+                    errors.append(f"{provider_name}/{cfg.model}: coordinator_response_error: {exc}")
+                    logger.warning("Coordinator response error untuk %s/%s: %s", provider_name, cfg.model, exc)
+                    continue
                 except Exception as exc:
                     errors.append(f"{provider_name}/{cfg.model}: {exc}")
                     logger.warning("Lease coordinator gagal untuk %s/%s: %s", provider_name, cfg.model, exc)
@@ -662,10 +684,6 @@ class ASRPipeline:
         if not self.provider_leases:
             raise RuntimeError("Tidak ada lease coordinator yang tersedia untuk provider ASR yang diminta: " + "; ".join(errors))
 
-    def _provider_is_disabled(self, provider_name: str) -> bool:
-        disabled_until = float(self._provider_disabled_until.get(provider_name, 0.0) or 0.0)
-        return disabled_until > time.time()
-
     def _disable_provider(
         self,
         provider_name: str,
@@ -678,12 +696,6 @@ class ASRPipeline:
         provider_name = str(provider_name or "").strip().lower()
         if not provider_name:
             return
-        now = time.time()
-        if cooldown_seconds is None:
-            until = float("inf")
-        else:
-            until = now + max(1, int(cooldown_seconds))
-        self._provider_disabled_until[provider_name] = until
         note = str(reason or "").strip()[:500]
         if lease is None:
             lease = self.provider_leases.get(provider_name)
@@ -693,27 +705,33 @@ class ASRPipeline:
             except Exception:
                 pass
         self.provider_leases.pop(provider_name, None)
-        if cooldown_seconds is None:
-            logger.warning("ASR provider %s dimatikan untuk sisa run: %s", provider_name, note or "tanpa alasan")
-        else:
-            logger.warning(
-                "ASR provider %s cooldown %ss: %s",
-                provider_name,
-                int(cooldown_seconds),
-                note or "tanpa alasan",
-            )
-
-    def _prune_disabled_provider_leases(self) -> None:
-        for provider_name in list(self.provider_leases.keys()):
-            if self._provider_is_disabled(provider_name):
-                self.provider_leases.pop(provider_name, None)
 
     def _has_active_provider_capacity(self) -> bool:
-        for provider_name in self.provider_order:
-            if self._provider_is_disabled(provider_name):
-                continue
-            return True
-        return False
+        return bool(self.provider_leases)
+
+    def _release_provider_lease(self, provider_name: str, *, reason: str, final_state: str = "retry_later") -> None:
+        provider_name = str(provider_name or "").strip().lower()
+        if not provider_name:
+            return
+        lease = self.provider_leases.get(provider_name)
+        if lease is None:
+            return
+        try:
+            lease.stop(final_state=final_state, note=str(reason or "").strip()[:500] or "provider released")
+        except Exception:
+            pass
+        self.provider_leases.pop(provider_name, None)
+        logger.warning("ASR provider %s dilepas dari run ini: %s", provider_name, str(reason or "").strip()[:500] or "tanpa alasan")
+
+    def _provider_order_for_chunk(self) -> list[str]:
+        if "groq" in self.provider_leases:
+            return list(self.provider_order)
+        if "nvidia" in self.provider_leases:
+            ordered = [name for name in self.provider_order if name != "groq"]
+            if "nvidia" not in ordered:
+                ordered.append("nvidia")
+            return ordered
+        return list(self.provider_order)
 
     def _should_disable_provider_after_failure(self, provider_name: str, attempt: TranscriptionAttempt) -> tuple[bool, int | None, str]:
         provider_name = str(provider_name or "").strip().lower()
@@ -721,7 +739,7 @@ class ASRPipeline:
         lower = error_text.lower()
         if provider_name == "groq":
             if attempt.status_code == 429:
-                return True, self.groq_asph_cooldown_seconds, "Groq ASPH/rate limit"
+                return True, None, "Groq rate limit handled by coordinator"
         if provider_name == "nvidia":
             if (
                 "model" in lower
@@ -745,9 +763,6 @@ class ASRPipeline:
     def _provider_event_reason(self, provider_name: str, attempt: TranscriptionAttempt) -> str:
         provider_name = str(provider_name or "").strip().lower()
         error_text = str(attempt.error_text or "").strip()
-        if provider_name == "groq" and attempt.status_code == 429:
-            base_reason = error_text or "Groq 429 rate limit"
-            return f"reset_at={_utc_iso_after_seconds(self.groq_asph_cooldown_seconds)}; {base_reason}"
         return error_text
 
     def _acquire_postprocess_lease(self) -> ProviderLease:
@@ -1711,7 +1726,7 @@ class ASRPipeline:
         return _env_bool("ASR_NVIDIA_FORCE_MODEL", False)
 
     def _transcribe_chunk_nvidia_grpc(self, lease: ProviderLease, audio_path: Path) -> TranscriptionAttempt:
-        if RivaASRService is None or Auth is None or RecognitionConfig is None or AudioEncoding is None:
+        if not self._nvidia_grpc_available():
             raise RuntimeError(
                 "nvidia-riva-client/grpcio belum terpasang. Jalur NVIDIA gRPC tidak tersedia di environment ini."
             )
@@ -1784,7 +1799,7 @@ class ASRPipeline:
         )
 
     def _transcribe_chunk(self, lease: ProviderLease, audio_path: Path) -> TranscriptionAttempt:
-        if lease.provider == "nvidia" and RivaASRService is not None and Auth is not None and RecognitionConfig is not None:
+        if lease.provider == "nvidia" and self._nvidia_whisper_grpc_required(lease.model_name):
             return self._transcribe_chunk_nvidia_grpc(lease, audio_path)
 
         provider_name = str(lease.provider or "").strip().lower()
@@ -1982,23 +1997,6 @@ class ASRPipeline:
                 "source_path": str(source_path),
             }
 
-        self._prune_disabled_provider_leases()
-        if not self._has_active_provider_capacity():
-            reason = "No active ASR provider capacity available (cooldown/disabled)"
-            self.db.mark_video_transcript_retry_later(video_id, reason=reason, retry_after_hours=24)
-            return {
-                "video_id": video_id,
-                "status": "retry_later",
-                "provider": ",".join(self.provider_order),
-                "chunk_count": 0,
-                "processed_chunks": 0,
-                "error_text": reason,
-                "transcript_path": "",
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-                "title": title,
-            }
-
         cached_audio = self._resolve_local_audio_source(video_id)
         if self.local_audio_only or self.require_cached_audio:
             if cached_audio is None:
@@ -2085,6 +2083,7 @@ class ASRPipeline:
 
         detected_languages: list[str] = []
         chunk_records: dict[int, dict] = {}
+        disabled_provider_warnings: set[str] = set()
         missing_chunk_count = sum(1 for chunk_index in range(chunk_count) if chunk_index not in existing_done)
         if missing_chunk_count > 0 and not self.provider_leases:
             try:
@@ -2123,13 +2122,20 @@ class ASRPipeline:
             chunk_failed = True
             last_error = ""
             last_lease: ProviderLease | None = None
-            for provider_name in self.provider_order:
-                if self._provider_is_disabled(provider_name):
-                    logger.info("ASR skip provider=%s karena cooldown/disabled untuk video=%s chunk=%s", provider_name, video_id, chunk_index)
-                    continue
+            for provider_name in self._provider_order_for_chunk():
                 lease = self.provider_leases.get(provider_name)
                 if not lease:
+                    if provider_name not in disabled_provider_warnings:
+                        logger.warning(
+                            "ASR provider=%s tidak punya lease aktif untuk video=%s chunk=%s; lanjut fallback berikutnya",
+                            provider_name,
+                            video_id,
+                            chunk_index,
+                        )
+                        disabled_provider_warnings.add(provider_name)
                     continue
+                if provider_name != self.provider_order[0] or disabled_provider_warnings:
+                    logger.info("ASR fallback aktif untuk video=%s chunk=%s provider=%s", video_id, chunk_index, provider_name)
                 attempt = self._transcribe_chunk(lease, chunk_path)
                 self.db.upsert_video_asr_chunk(
                     video_id=video_id,
@@ -2176,13 +2182,20 @@ class ASRPipeline:
                 )
                 disable_provider, cooldown_seconds, disable_reason = self._should_disable_provider_after_failure(provider_name, attempt)
                 if disable_provider:
-                    self._disable_provider(
-                        provider_name,
-                        lease=lease,
-                        reason=f"{disable_reason}: {attempt.error_text}",
-                        cooldown_seconds=cooldown_seconds,
-                        final_state="retry_later" if cooldown_seconds is not None else "error",
-                    )
+                    if provider_name == "groq":
+                        self._release_provider_lease(
+                            provider_name,
+                            reason=f"{disable_reason}: {attempt.error_text}",
+                            final_state="retry_later",
+                        )
+                    else:
+                        self._disable_provider(
+                            provider_name,
+                            lease=lease,
+                            reason=f"{disable_reason}: {attempt.error_text}",
+                            cooldown_seconds=cooldown_seconds,
+                            final_state="retry_later" if cooldown_seconds is not None else "error",
+                        )
                 if attempt.fatal:
                     # Fatal error on one provider does not automatically stop the batch;
                     # the next provider may still work. The row is already persisted.

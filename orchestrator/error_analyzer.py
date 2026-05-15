@@ -29,11 +29,30 @@ ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
     (r"(?i)(context\s*length|context\s*too\s*large|max\s*context)", "provider_context_too_large", "Context too large", 0),
     (r"(?i)(auth|api\s*key|unauthorized|401)", "provider_auth_error", "Provider auth error", 86400),
     (r"(?i)(timeout|timed\s*out)", "provider_timeout", "Provider timeout", 300),
+    (
+        r"(?i)(no\s*active\s*asr\s*provider\s*capacity\s*available\s*from\s*coordinator|"
+        r"no\s*asr\s*lease\s*available|"
+        r"tidak\s*ada\s*lease\s*coordinator\s*yang\s*tersedia|"
+        r"tidak\s*ada\s*lease\s*coordinator\s*untuk\s*provider\s*asr)",
+        "asr_provider_unavailable",
+        "ASR provider capacity unavailable",
+        300,
+    ),
+    (
+        r"(?i)(no\s*accounts\s*for\s+[a-z0-9_./-]+/[a-z0-9_./-]+|"
+        r"no\s*lease\s*available\s*for\s+[a-z0-9_./-]+/[a-z0-9_./-]+|"
+        r"lease\s*tidak\s*tersedia|"
+        r"lease\s*belum\s*tersedia)",
+        "lease_unavailable",
+        "Requested lease unavailable",
+        0,
+    ),
 
     # System errors
     (r"(?i)(memory|oom|out\s*of\s*memory)", "memory_low", "Out of memory", 900),
     (r"(?i)(disk|space|no\s*space)", "disk_low", "Disk full", 1800),
-    (r"(?i)(coordinator|connection\s*refused).*8788", "coordinator_unavailable", "Coordinator unavailable", 300),
+    (r"(?i)(coordinator\s+tidak\s+bisa\s*dihubungi|coordinator|connection\s*refused).*8788", "coordinator_unavailable", "Coordinator unavailable", 300),
+    (r"(?i)(coordinator\s+tidak\s+bisa\s*dihubungi|coordinator\s*unreachable|unable\s*to\s*connect\s*to\s*coordinator)", "coordinator_unavailable", "Coordinator unavailable", 300),
 ]
 
 
@@ -74,9 +93,25 @@ RECOMMENDATIONS: dict[str, str] = {
     "provider_context_too_large": "Reduce chunk size, split transcript",
     "provider_auth_error": "Check API key, rotate if needed",
     "provider_timeout": "Retry with longer timeout, reduce batch size",
+    "asr_provider_unavailable": "Wait for ASR provider lease to become available",
+    "lease_unavailable": "Wait for lease availability or check coordinator account pool",
     "memory_low": "Reduce workers, wait for other jobs to finish",
     "disk_low": "Clean up runs/uploads/logs/cache",
     "coordinator_unavailable": "Check coordinator service, restart if needed",
+}
+
+
+SUCCESS_STATUSES = {
+    "ok",
+    "success",
+    "done",
+    "skipped",
+    "downloaded",
+    "audio_downloaded",
+    "audio_cached",
+    "completed",
+    "processed",
+    "formatted",
 }
 
 
@@ -161,6 +196,10 @@ def classify_error(
                 suggested_scope = "stage:llm"
             elif error_type == "disk_low":
                 suggested_scope = "global"
+            elif error_type == "asr_provider_unavailable":
+                suggested_scope = "stage:asr"
+            elif error_type == "lease_unavailable":
+                suggested_scope = "provider"
             elif error_type == "coordinator_unavailable":
                 suggested_scope = "coordinator"
             return ErrorClassification(
@@ -196,7 +235,10 @@ def analyze_report_csv(
                 video_id = (row.get("video_id") or row.get("id") or "").strip()
                 channel_id = (row.get("channel_id") or "").strip()
 
-                if status in ("ok", "success", "done", "skipped"):
+                if status in SUCCESS_STATUSES:
+                    continue
+
+                if not error_msg:
                     continue
 
                 classification = classify_error(error_msg)

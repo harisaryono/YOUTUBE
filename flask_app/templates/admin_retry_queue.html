@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retry Queue - Orchestrator - YouTube Admin</title>
+<style>
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--ink:#e4e6eb;--muted:#8b8fa3;--line:#2e3348;--accent:#4f8cff;--good:#34d399;--warn:#fbbf24;--danger:#f87171;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.shell{max-width:1500px;margin:0 auto;padding:1rem}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.2rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:1rem}
+.topbar h1{font-size:1.3rem;font-weight:700}
+.topbar .meta{color:var(--muted);font-size:.86rem}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.7rem;margin-bottom:1rem}
+.stat-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:.9rem 1rem}
+.stat-card .label{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.stat-card .value{font-size:1.45rem;font-weight:700;margin-top:.2rem}
+.stat-card .value.good{color:var(--good)}
+.stat-card .value.warn{color:var(--warn)}
+.stat-card .value.danger{color:var(--danger)}
+.stat-card .sub{font-size:.8rem;color:var(--muted);margin-top:.2rem}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:1.1rem;margin-bottom:1rem}
+.panel h2{font-size:1.05rem;margin-bottom:.8rem}
+.panel h3{font-size:.95rem;margin:0 0 .65rem}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+tr:hover td{background:var(--surface2)}
+.badge{display:inline-block;padding:.15rem .5rem;border-radius:999px;font-size:.74rem;font-weight:700}
+.badge-good{background:rgba(52,211,153,.15);color:var(--good)}
+.badge-warn{background:rgba(251,191,36,.15);color:var(--warn)}
+.badge-danger{background:rgba(248,113,113,.15);color:var(--danger)}
+.badge-muted{background:rgba(139,143,163,.15);color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.55rem .9rem;border:none;border-radius:8px;font:inherit;font-weight:600;font-size:.85rem;cursor:pointer;transition:opacity .15s;text-decoration:none}
+.btn:hover{opacity:.85}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-good{background:var(--good);color:#0f1117}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-muted{background:var(--surface2);color:var(--ink);border:1px solid var(--line)}
+.btn-sm{padding:.35rem .65rem;font-size:.8rem}
+.btn-row{display:flex;gap:.5rem;flex-wrap:wrap}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.8rem}
+label{display:block;font-size:.85rem;font-weight:600;margin-bottom:.55rem;color:var(--muted)}
+input,select,textarea{width:100%;padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--ink);font:inherit;font-size:.9rem}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+.flash{padding:.7rem 1rem;border-radius:8px;margin-bottom:1rem}
+.flash-good{background:rgba(52,211,153,.15);border:1px solid var(--good);color:var(--good)}
+.flash-danger{background:rgba(248,113,113,.15);border:1px solid var(--danger);color:var(--danger)}
+.list{display:grid;gap:.45rem}
+.list-item{padding:.6rem .7rem;background:var(--surface2);border:1px solid var(--line);border-radius:8px}
+.small{font-size:.84rem;color:var(--muted)}
+.command-line{font-family:"JetBrains Mono","Fira Code",monospace;font-size:.78rem;background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:.55rem .7rem;overflow-x:auto;white-space:pre-wrap}
+.grid-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:1rem}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div>
+      <h1>Retry Queue Manager</h1>
+      <div class="meta">Inspect, filter, dan drain retry queue dengan aman</div>
+    </div>
+    <div class="btn-row">
+      <a href="{{ url_for('admin_orchestrator_page') }}" class="btn btn-muted btn-sm">← Dashboard</a>
+      <a href="{{ url_for('admin_retry_queue_page') }}" class="btn btn-muted btn-sm">Refresh</a>
+      <a href="{{ url_for('admin_retry_queue_page', format='json') }}" class="btn btn-muted btn-sm">JSON</a>
+    </div>
+  </div>
+
+  {% if flash %}<div class="flash flash-good">{{ flash }}</div>{% endif %}
+  {% if error_flash %}<div class="flash flash-danger">{{ error_flash }}</div>{% endif %}
+
+  {% set stats = retry_stats or {} %}
+
+  <div class="summary-grid">
+    <div class="stat-card">
+      <div class="label">Pending</div>
+      <div class="value warn">{{ stats.pending or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Blocked (policy)</div>
+      <div class="value warn">{{ stats.blocked_pending or 0 }}</div>
+      <div class="sub">by pause/quarantine/policy</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Claimed / Running</div>
+      <div class="value value-warn">{{ (stats.claimed or 0) + (stats.running or 0) }}</div>
+      <div class="sub">claimed={{ stats.claimed or 0 }} · running={{ stats.running or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Completed</div>
+      <div class="value good">{{ stats.completed or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Failed</div>
+      <div class="value danger">{{ stats.failed or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total</div>
+      <div class="value">{{ (stats.pending or 0) + (stats.claimed or 0) + (stats.running or 0) + (stats.completed or 0) + (stats.failed or 0) }}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Retry Queue Controls</h2>
+    <div class="controls">
+      <div class="panel" style="margin:0;">
+        <h3>Drain Retry</h3>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}">
+          <input type="hidden" name="action" value="drain_retry">
+          <label>Limit
+            <input name="limit" type="number" min="1" max="10" value="1">
+          </label>
+          <div style="display:flex;align-items:center;gap:.45rem;padding:.4rem 0;">
+            <input type="checkbox" name="dry_run" value="1" checked style="width:auto;">
+            <span class="small">Dry run (safe, no actual launch)</span>
+          </div>
+          <div class="btn-row" style="margin-top:.6rem;">
+            <button class="btn btn-primary btn-sm" type="submit">Dry-Run Drain</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}" onsubmit="return confirm('Yakin akan drain {{ stats.pending or 0 }} item retry? Drain nyata akan meluncurkan job ke antrean dan slot.');" style="margin-top:.6rem;">
+          <input type="hidden" name="action" value="drain_retry">
+          <input type="hidden" name="limit" value="1">
+          <input type="hidden" name="dry_run" value="0">
+          <div class="btn-row">
+            <button class="btn btn-danger btn-sm" type="submit">Drain 1 Item</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel" style="margin:0;">
+        <h3>Pause Stage</h3>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}">
+          <input type="hidden" name="action" value="pause_stage">
+          <label>Stage
+            <input name="stage" placeholder="transcript / resume / format / asr">
+          </label>
+          <label>Reason
+            <input name="reason" placeholder="manual block via web">
+          </label>
+          <label>Minutes
+            <input name="minutes" type="number" min="1" max="1440" value="10">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-danger btn-sm" type="submit">Pause Stage</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}" style="margin-top:.6rem;">
+          <input type="hidden" name="action" value="resume_stage">
+          <label>Stage
+            <input name="stage" placeholder="transcript / resume / format / asr">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-good btn-sm" type="submit">Resume Stage</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel" style="margin:0;">
+        <h3>Pause Group</h3>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}">
+          <input type="hidden" name="action" value="pause_group">
+          <label>Group
+            <input name="group" placeholder="youtube / provider / discovery / local">
+          </label>
+          <label>Reason
+            <input name="reason" placeholder="manual block via web">
+          </label>
+          <label>Minutes
+            <input name="minutes" type="number" min="1" max="1440" value="10">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-danger btn-sm" type="submit">Pause Group</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}" style="margin-top:.6rem;">
+          <input type="hidden" name="action" value="resume_group">
+          <label>Group
+            <input name="group" placeholder="youtube / provider / discovery / local">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-good btn-sm" type="submit">Resume Group</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel" style="margin:0;">
+        <h3>Quarantine Channel</h3>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}">
+          <input type="hidden" name="action" value="quarantine_channel">
+          <label>Channel ID
+            <input name="channel_id" placeholder="UC...">
+          </label>
+          <label>Reason
+            <input name="reason" placeholder="spam / broken / manual">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-danger btn-sm" type="submit">Quarantine</button>
+          </div>
+        </form>
+        <form method="post" action="{{ url_for('admin_retry_queue_action') }}" style="margin-top:.6rem;">
+          <input type="hidden" name="action" value="unquarantine_channel">
+          <label>Channel ID
+            <input name="channel_id" placeholder="UC...">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-good btn-sm" type="submit">Unquarantine</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-two">
+    <div class="panel">
+      <h2>Pending Items ({{ pending_items | length }})</h2>
+      {% if pending_items %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Source Job</th>
+              <th>Stage</th>
+              <th>Scope</th>
+              <th>Attempts</th>
+              <th>Reason</th>
+              <th>Requested</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in pending_items %}
+            <tr>
+              <td><strong>{{ item.source_job_id }}</strong></td>
+              <td><span class="badge badge-warn">{{ item.stage }}</span></td>
+              <td>{{ item.scope }}</td>
+              <td>{{ item.attempts }}/{{ item.max_attempts or 1 }}</td>
+              <td class="small">{{ item.reason }}</td>
+              <td class="small">{{ item.created_at }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small">Tidak ada item pending retry.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h2>Blocked Items ({{ blocked_items | length }})</h2>
+      {% if blocked_items %}
+      <div class="list">
+        {% for item in blocked_items %}
+        <div class="list-item">
+          <strong>{{ item.source_job_id }}</strong>
+          <span class="badge badge-danger">{{ item.stage }}</span>
+          <div class="small">{{ item.reason }} · blocked by: {{ item.blocked_by or 'policy' }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="small">Tidak ada item yang terblokir.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Active Pauses</h2>
+    {% if pauses %}
+    <div class="list">
+      {% for item in pauses %}
+      <div class="list-item">
+        <strong>{{ item.pause_key or item.scope }}</strong>
+        <div class="small">
+          {% if item.until %}until {{ item.until }}{% endif %}
+          {% if item.actor %}by {{ item.actor }}{% endif %}
+        </div>
+        <div class="small">{{ item.reason }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="small">Tidak ada pause aktif.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Policy Blockers</h2>
+    {% if policy_blockers %}
+    <div class="list">
+      {% for item in policy_blockers %}
+      <div class="list-item">{{ item }}</div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="small">Tidak ada policy blocker aktif.</p>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

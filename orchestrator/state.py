@@ -131,6 +131,8 @@ class OrchestratorState:
                 status TEXT NOT NULL DEFAULT 'pending',
                 attempts INTEGER NOT NULL DEFAULT 0,
                 max_attempts INTEGER NOT NULL DEFAULT 1,
+                claimed_by TEXT NOT NULL DEFAULT '',
+                claimed_at TEXT,
                 payload_json TEXT NOT NULL DEFAULT '{}',
                 error_text TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -143,6 +145,15 @@ class OrchestratorState:
             CREATE INDEX IF NOT EXISTS idx_retry_queue_requested
                 ON orchestrator_retry_queue(requested_at DESC);
         """)
+        for ddl in (
+            "ALTER TABLE orchestrator_retry_queue ADD COLUMN claimed_by TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE orchestrator_retry_queue ADD COLUMN claimed_at TEXT",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         conn.commit()
 
     # --- Key-Value State ---
@@ -623,8 +634,8 @@ class OrchestratorState:
             """
             INSERT INTO orchestrator_retry_queue (
                 source_job_id, stage, scope, reason, requested_by, requested_at,
-                status, attempts, max_attempts, payload_json, error_text, updated_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, datetime('now'), 'pending', 1, ?, ?, '', datetime('now'), NULL)
+                status, attempts, max_attempts, claimed_by, claimed_at, payload_json, error_text, updated_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, datetime('now'), 'pending', 1, ?, '', NULL, ?, '', datetime('now'), NULL)
             ON CONFLICT(source_job_id) DO UPDATE SET
                 stage = excluded.stage,
                 scope = excluded.scope,
@@ -634,6 +645,8 @@ class OrchestratorState:
                 status = 'pending',
                 attempts = COALESCE(attempts, 0) + 1,
                 max_attempts = excluded.max_attempts,
+                claimed_by = '',
+                claimed_at = NULL,
                 payload_json = excluded.payload_json,
                 error_text = '',
                 updated_at = datetime('now'),
@@ -675,6 +688,57 @@ class OrchestratorState:
         item = dict(row)
         item["payload"] = self._decode_json_payload(str(item.get("payload_json") or ""))
         return item
+
+    def claim_retry_queue_item(
+        self,
+        source_job_id: str,
+        *,
+        claimed_by: str = "",
+    ) -> bool:
+        source_job_id = str(source_job_id or "").strip()
+        if not source_job_id:
+            return False
+        conn = self._connect()
+        cursor = conn.execute(
+            """
+            UPDATE orchestrator_retry_queue
+            SET status = 'claimed',
+                claimed_by = ?,
+                claimed_at = datetime('now'),
+                updated_at = datetime('now'),
+                error_text = ''
+            WHERE source_job_id = ? AND status = 'pending'
+            """,
+            (str(claimed_by or "").strip(), source_job_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def release_retry_queue_item(
+        self,
+        source_job_id: str,
+        *,
+        status: str = "pending",
+        error_text: str = "",
+    ) -> None:
+        source_job_id = str(source_job_id or "").strip()
+        if not source_job_id:
+            return
+        conn = self._connect()
+        conn.execute(
+            """
+            UPDATE orchestrator_retry_queue
+            SET status = ?,
+                claimed_by = '',
+                claimed_at = NULL,
+                error_text = ?,
+                updated_at = datetime('now'),
+                finished_at = CASE WHEN ? = 'pending' THEN NULL ELSE finished_at END
+            WHERE source_job_id = ?
+            """,
+            (str(status or "pending"), str(error_text or ""), str(status or "pending"), source_job_id),
+        )
+        conn.commit()
 
     def list_retry_queue(
         self,
@@ -748,6 +812,8 @@ class OrchestratorState:
             UPDATE orchestrator_retry_queue
             SET status = ?,
                 error_text = ?,
+                claimed_by = '',
+                claimed_at = NULL,
                 updated_at = datetime('now'),
                 finished_at = datetime('now')
             WHERE source_job_id = ?

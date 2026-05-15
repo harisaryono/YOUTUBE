@@ -354,7 +354,7 @@ def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) ->
     error_type = str(getattr(classification, "error_type", "") or "").strip()
 
     scopes: list[str] = []
-    if scope.startswith("channel:"):
+    if scope.startswith("channel:") and stage not in {"resume", "audio_download", "asr"}:
         scopes.append(scope)
 
     severe_youtube_errors = {
@@ -374,6 +374,8 @@ def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) ->
             scopes.append("youtube")
     elif getattr(classification, "suggested_scope", ""):
         scopes.append(str(classification.suggested_scope))
+    elif stage in {"resume", "audio_download", "asr"}:
+        scopes.append(f"stage:{stage}")
     elif not scopes:
         scopes.append(scope or "global")
 
@@ -1051,8 +1053,11 @@ def run_once(
                 reason_code=decision.reason_code,
             )
             if decision.cooldown_seconds > 0 and job.get("scope"):
+                cooldown_scope = str(job["scope"])
+                if stage == "asr" and decision.reason_code == "DEFER_PROVIDER_UNAVAILABLE":
+                    cooldown_scope = "provider:asr"
                 state.set_cooldown(
-                    scope=str(job["scope"]),
+                    scope=cooldown_scope,
                     reason=decision.reason,
                     duration_seconds=decision.cooldown_seconds,
                     recommendation=decision.recommendation,
@@ -1127,6 +1132,21 @@ def run_once(
             cycle_result["jobs_dispatched"] += 1
             continue
 
+        retry_queue_source_job_id = str(job.get("retry_queue_source_job_id") or "").strip()
+        if retry_queue_source_job_id:
+            if not state.claim_retry_queue_item(retry_queue_source_job_id, claimed_by="daemon"):
+                state.release_lock(lock_key)
+                cycle_result["jobs_deferred"] += 1
+                state.add_event(
+                    event_type="deferred",
+                    message=f"{stage} deferred: retry queue item already claimed",
+                    stage=stage,
+                    scope=job.get("scope", ""),
+                    severity="info",
+                    reason_code="DEFER_RETRY_QUEUE_CLAIMED",
+                )
+                continue
+
         try:
             result = launch_job(
                 job,
@@ -1137,6 +1157,15 @@ def run_once(
             )
         except Exception as e:
             state.release_lock(lock_key)
+            if retry_queue_source_job_id:
+                try:
+                    state.release_retry_queue_item(
+                        retry_queue_source_job_id,
+                        status="pending",
+                        error_text=str(e),
+                    )
+                except Exception:
+                    pass
             cycle_result["jobs_failed"] += 1
             state.add_event(
                 event_type="error",
@@ -1149,7 +1178,6 @@ def run_once(
             continue
 
         if result.get("launched"):
-            retry_queue_source_job_id = str(job.get("retry_queue_source_job_id") or "").strip()
             if retry_queue_source_job_id:
                 try:
                     state.mark_retry_queue_running(retry_queue_source_job_id, launched_job_id=str(result.get("job_id") or ""))
@@ -1158,6 +1186,15 @@ def run_once(
             cycle_result["jobs_dispatched"] += 1
         elif result.get("deferred"):
             state.release_lock(lock_key)
+            if retry_queue_source_job_id:
+                try:
+                    state.release_retry_queue_item(
+                        retry_queue_source_job_id,
+                        status="pending",
+                        error_text=str(result.get("reason") or "launch deferred"),
+                    )
+                except Exception:
+                    pass
             cycle_result["jobs_deferred"] += 1
             state.add_event(
                 event_type="deferred",
@@ -1172,6 +1209,15 @@ def run_once(
             )
         else:
             state.release_lock(lock_key)
+            if retry_queue_source_job_id:
+                try:
+                    state.release_retry_queue_item(
+                        retry_queue_source_job_id,
+                        status="pending",
+                        error_text=str(result.get("error") or "launch failed"),
+                    )
+                except Exception:
+                    pass
             cycle_result["jobs_failed"] += 1
             state.add_event(
                 event_type="error",
@@ -1602,6 +1648,7 @@ def main() -> None:
         blocked = inventory.get("blocked", {})
         youtube_blocked = bool(blocked.get("youtube"))
         provider_blocked = bool(blocked.get("provider"))
+        provider_asr_blocked = bool(blocked.get("provider_asr"))
         disk_low = float(system_info.get("disk_free_gb", 0) or 0) < float(config.get("system", {}).get("min_free_disk_gb", 5) or 5)
         mem_low = float(system_info.get("mem_available_mb", 0) or 0)
         stage_defs = [
@@ -1639,6 +1686,9 @@ def main() -> None:
                 continue
             if dep == "youtube" and youtube_blocked:
                 stage_decisions.append((label, "WAIT_YOUTUBE_COOLDOWN"))
+                continue
+            if stage_key == "asr" and provider_asr_blocked:
+                stage_decisions.append((label, "WAIT_ASR_PROVIDER_COOLDOWN"))
                 continue
             if dep == "provider" and provider_blocked:
                 stage_decisions.append((label, "WAIT_PROVIDER_COOLDOWN"))
