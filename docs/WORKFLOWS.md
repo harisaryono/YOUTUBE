@@ -275,6 +275,29 @@ Command utama:
 - `timeouts:` juga bisa dioverride lewat `.env` dengan `ORCH_TIMEOUT_DEFAULT_SECONDS`, `ORCH_TIMEOUT_DISCOVERY_SECONDS`, `ORCH_TIMEOUT_TRANSCRIPT_SECONDS`, `ORCH_TIMEOUT_AUDIO_DOWNLOAD_SECONDS`, `ORCH_TIMEOUT_RESUME_SECONDS`, `ORCH_TIMEOUT_ASR_SECONDS`, dan `ORCH_TIMEOUT_FORMAT_SECONDS`.
 - Output `active` menampilkan `TIMEOUT` dan `REMAIN` supaya job yang hampir habis bisa dipantau lebih cepat.
 
+## Orchestrator Dashboard
+
+Tujuan:
+- melihat status daemon, backlog, cooldown, failure, dan rekomendasi tanpa membuka log panjang.
+
+Entry point:
+- route web: `/admin/orchestrator`
+- template: [flask_app/templates/admin_orchestrator.html](/media/harry/DATA120B/GIT/YOUTUBE/flask_app/templates/admin_orchestrator.html)
+- implementasi: [flask_app/app.py](/media/harry/DATA120B/GIT/YOUTUBE/flask_app/app.py)
+
+Mode penting:
+- `doctor` untuk snapshot observability
+- `explain` untuk stage decision ringkas
+- `validate` untuk cek control-plane dan AI context
+- `reconcile` untuk membersihkan state stale
+- `once --dry-run` untuk cek planner tanpa job nyata
+
+Kontrol web:
+- pause/resume target
+- cancel job / stage / group
+- view log job orchestrator
+- JSON snapshot via `?format=json`
+
 ## Urutan Praktis
 
 Kalau tujuan Anda tidak spesifik, pakai urutan ini:

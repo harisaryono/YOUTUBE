@@ -29,6 +29,9 @@ except ModuleNotFoundError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database_optimized import OptimizedDatabase
+from orchestrator.config import load_config
+from orchestrator.doctor import build_doctor_report
+from orchestrator.state import OrchestratorState
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -834,6 +837,48 @@ def _render_admin_jobs_fragment():
             job_log_entries=_job_log_entries_cached(limit=ADMIN_JOB_LIST_LIMIT),
         ),
     )
+
+
+def _orchestrator_dashboard_report() -> dict:
+    config = load_config()
+    return build_doctor_report(config)
+
+
+def _run_orchestrator_command(args: list[str], timeout: int = 180) -> tuple[int, str, str]:
+    script = REPO_ROOT / 'scripts' / 'orchestrator.sh'
+    cmd = ['bash', str(script)] + [str(arg) for arg in args]
+    result = _subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        timeout=timeout,
+    )
+    return result.returncode, result.stdout or '', result.stderr or ''
+
+
+def _shorten_control_output(text: str, limit: int = 900) -> str:
+    value = str(text or '').strip()
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + '...'
+
+
+def _resolve_orchestrator_job_log_path(value: str) -> Path | None:
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if path.is_absolute():
+        return path if path.exists() else None
+    candidates = [
+        REPO_ROOT / path,
+        REPO_ROOT / 'logs' / path.name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 # Configuration
 UPLOAD_FOLDER = BASE_DIR
@@ -1921,6 +1966,142 @@ def admin_data_page():
     if 'Cookie' not in vary:
         response.headers['Vary'] = (vary + ', Cookie').strip(', ')
     return response
+
+
+@app.route('/admin/orchestrator', methods=['GET'], strict_slashes=False)
+def admin_orchestrator_page():
+    if not _admin_authenticated():
+        return redirect(url_for('admin_data_page'))
+
+    report = _orchestrator_dashboard_report()
+    if (request.args.get('format') or '').strip().lower() == 'json':
+        return jsonify(report)
+
+    return render_template(
+        'admin_orchestrator.html',
+        report=report,
+        flash=request.args.get('flash', ''),
+        error_flash=request.args.get('error', ''),
+    )
+
+
+@app.route('/admin/orchestrator/action', methods=['POST'])
+def admin_orchestrator_action():
+    if not _admin_authenticated():
+        return redirect(url_for('admin_data_page'))
+
+    action = (request.form.get('action') or '').strip().lower()
+    args: list[str]
+    timeout = 180
+    redirect_args: dict[str, str] = {}
+
+    try:
+        if action == 'doctor':
+            args = ['doctor']
+        elif action == 'explain':
+            args = ['explain']
+        elif action == 'validate':
+            args = ['validate']
+        elif action == 'reconcile':
+            args = ['reconcile']
+        elif action == 'once_dry_run':
+            max_jobs = int(request.form.get('max_jobs', 7) or 7)
+            args = ['once', '--dry-run', '--max-jobs', str(max_jobs)]
+            timeout = max(60, min(600, 30 + max_jobs * 10))
+        elif action == 'pause':
+            target = (request.form.get('target') or '').strip()
+            reason = (request.form.get('reason') or '').strip()
+            if not target:
+                return redirect(url_for('admin_orchestrator_page', error='Target pause kosong'))
+            args = ['pause', '--target', target]
+            if reason:
+                args.extend(['--reason', reason])
+        elif action == 'resume':
+            target = (request.form.get('target') or '').strip()
+            if not target:
+                return redirect(url_for('admin_orchestrator_page', error='Target resume kosong'))
+            args = ['resume', '--target', target]
+        elif action == 'cancel':
+            job_id = (request.form.get('job_id') or '').strip()
+            if not job_id:
+                return redirect(url_for('admin_orchestrator_page', error='Job ID kosong'))
+            args = ['cancel', '--job-id', job_id]
+            if request.form.get('force') in {'1', 'true', 'on', 'yes'}:
+                args.append('--force')
+            grace_seconds = int(request.form.get('grace_seconds', 10) or 10)
+            args.extend(['--grace-seconds', str(max(1, grace_seconds))])
+            timeout = max(30, min(300, 20 + grace_seconds * 3))
+        elif action == 'cancel_stage':
+            stage = (request.form.get('stage') or '').strip()
+            if not stage:
+                return redirect(url_for('admin_orchestrator_page', error='Stage kosong'))
+            args = ['cancel-stage', stage]
+            if request.form.get('force') in {'1', 'true', 'on', 'yes'}:
+                args.append('--force')
+            grace_seconds = int(request.form.get('grace_seconds', 10) or 10)
+            args.extend(['--grace-seconds', str(max(1, grace_seconds))])
+            timeout = max(30, min(300, 20 + grace_seconds * 3))
+        elif action == 'cancel_group':
+            group = (request.form.get('group') or '').strip()
+            if not group:
+                return redirect(url_for('admin_orchestrator_page', error='Group kosong'))
+            args = ['cancel-group', group]
+            if request.form.get('force') in {'1', 'true', 'on', 'yes'}:
+                args.append('--force')
+            grace_seconds = int(request.form.get('grace_seconds', 10) or 10)
+            args.extend(['--grace-seconds', str(max(1, grace_seconds))])
+            timeout = max(30, min(300, 20 + grace_seconds * 3))
+        else:
+            return redirect(url_for('admin_orchestrator_page', error=f'Aksi tidak dikenal: {action or "empty"}'))
+
+        rc, stdout, stderr = _run_orchestrator_command(args, timeout=timeout)
+        output = '\n'.join(part for part in [stdout.strip(), stderr.strip()] if part)
+        if rc == 0:
+            flash_text = f"Command {' '.join(args)} berhasil."
+            if output:
+                flash_text += f" { _shorten_control_output(output) }"
+            redirect_args['flash'] = flash_text
+        else:
+            error_text = f"Command {' '.join(args)} gagal (rc={rc})."
+            if output:
+                error_text += f" { _shorten_control_output(output) }"
+            redirect_args['error'] = error_text
+    except Exception as exc:
+        redirect_args['error'] = str(exc)
+
+    return redirect(url_for('admin_orchestrator_page', **redirect_args))
+
+
+@app.route('/admin/orchestrator/job/<job_id>/log', methods=['GET'], strict_slashes=False)
+def admin_orchestrator_job_log(job_id):
+    if not _admin_authenticated():
+        return redirect(url_for('admin_data_page'))
+
+    state = OrchestratorState()
+    try:
+        job = state.get_job(job_id)
+    finally:
+        state.close()
+
+    if not job:
+        return redirect(url_for('admin_orchestrator_page', error='Job not found'))
+
+    log_path = _resolve_orchestrator_job_log_path(str(job.get('log_path') or ''))
+    if not log_path:
+        return redirect(url_for('admin_orchestrator_page', error='Log file not found'))
+
+    try:
+        content = log_path.read_text(encoding='utf-8', errors='ignore')
+        try:
+            filename = str(log_path.relative_to(REPO_ROOT))
+        except Exception:
+            filename = log_path.name
+    except Exception as exc:
+        return redirect(url_for('admin_orchestrator_page', error=str(exc)))
+
+    if request.args.get('partial') == '1':
+        return f'<pre id="log-text">{html.escape(content)}</pre>'
+    return render_template('admin_log_view.html', filename=filename, content=content)
 
 
 def _channel_aliases_page(channel_id: str):

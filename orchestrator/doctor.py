@@ -149,73 +149,76 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
 
 def build_doctor_report(config: dict[str, Any]) -> dict[str, Any]:
     state = OrchestratorState()
-    inventory = build_inventory_snapshot(config, state, None)
-    active_jobs = inventory.get("active_jobs", {}).get("details", [])
-    cooldowns = inventory.get("cooldowns", {}).get("details", [])
-    failures = _recent_failure_summary(state, limit=50)
+    try:
+        inventory = build_inventory_snapshot(config, state, None)
+        active_jobs = inventory.get("active_jobs", {}).get("details", [])
+        cooldowns = inventory.get("cooldowns", {}).get("details", [])
+        failures = _recent_failure_summary(state, limit=50)
 
-    parallel = config.get("parallel", {}) or {}
-    groups = parallel.get("groups", {}) or {}
-    stage_defs = parallel.get("stages", {}) or {}
+        parallel = config.get("parallel", {}) or {}
+        groups = parallel.get("groups", {}) or {}
+        stage_defs = parallel.get("stages", {}) or {}
 
-    group_usage: list[dict[str, Any]] = []
-    for group_name, group_cfg in groups.items():
-        stages = [str(stage) for stage in (group_cfg.get("stages", []) or [])]
-        group_usage.append(
-            {
-                "group": group_name,
-                "running": state.count_running_by_group(group_name),
-                "max_running": int(group_cfg.get("max_running", 0) or 0),
-                "stages": stages,
-            }
-        )
+        group_usage: list[dict[str, Any]] = []
+        for group_name, group_cfg in groups.items():
+            stages = [str(stage) for stage in (group_cfg.get("stages", []) or [])]
+            group_usage.append(
+                {
+                    "group": group_name,
+                    "running": state.count_running_by_group(group_name),
+                    "max_running": int(group_cfg.get("max_running", 0) or 0),
+                    "stages": stages,
+                }
+            )
 
-    stage_usage: list[dict[str, Any]] = []
-    work_remaining = inventory.get("work_remaining", {}) or {}
-    for stage_name, stage_cfg in stage_defs.items():
-        stage_usage.append(
-            {
-                "stage": stage_name,
-                "running": state.count_running_by_stage(stage_name),
-                "slots": int(stage_cfg.get("slots", 0) or 0),
-                "work_remaining": int(work_remaining.get(stage_name, 0) or 0),
-            }
-        )
+        stage_usage: list[dict[str, Any]] = []
+        work_remaining = inventory.get("work_remaining", {}) or {}
+        for stage_name, stage_cfg in stage_defs.items():
+            stage_usage.append(
+                {
+                    "stage": stage_name,
+                    "running": state.count_running_by_stage(stage_name),
+                    "slots": int(stage_cfg.get("slots", 0) or 0),
+                    "work_remaining": int(work_remaining.get(stage_name, 0) or 0),
+                }
+            )
 
-    stage_usage.sort(key=lambda item: (item["stage"] != "discovery", item["stage"]))
-    group_usage.sort(key=lambda item: item["group"])
+        stage_usage.sort(key=lambda item: (item["stage"] != "discovery", item["stage"]))
+        group_usage.sort(key=lambda item: item["group"])
 
-    return {
-        "ok": True,
-        "daemon": _daemon_status(),
-        "mode": inventory.get("mode", config.get("orchestrator", {}).get("mode", "work_conserving")),
-        "system": inventory.get("system", {}),
-        "backlog": work_remaining,
-        "blocked": inventory.get("blocked", {}),
-        "cooldowns": {
-            "active_count": len(cooldowns),
-            "details": [
-                item | {"remaining_seconds": _cooldown_remaining_seconds(item)}
-                for item in cooldowns
-            ],
-        },
-        "active_jobs": {
-            "active_count": len(active_jobs),
-            "details": active_jobs,
-        },
-        "group_usage": group_usage,
-        "stage_usage": stage_usage,
-        "recent_failures": failures[:10],
-        "recent_failure_counts": _count_by_key(failures, "reason_code"),
-        "recent_events": state.get_recent_events(limit=10),
-        "recommendations": _build_recommendations(
-            {
-                "cooldowns": {"details": cooldowns},
-                "recent_failures": failures,
-                "backlog": work_remaining,
-            }
-        ),
-    }
+        return {
+            "ok": True,
+            "daemon": _daemon_status(),
+            "mode": inventory.get("mode", config.get("orchestrator", {}).get("mode", "work_conserving")),
+            "system": inventory.get("system", {}),
+            "backlog": work_remaining,
+            "blocked": inventory.get("blocked", {}),
+            "cooldowns": {
+                "active_count": len(cooldowns),
+                "details": [
+                    item | {"remaining_seconds": _cooldown_remaining_seconds(item)}
+                    for item in cooldowns
+                ],
+            },
+            "active_jobs": {
+                "active_count": len(active_jobs),
+                "details": active_jobs,
+            },
+            "group_usage": group_usage,
+            "stage_usage": stage_usage,
+            "recent_failures": failures[:10],
+            "recent_failure_counts": _count_by_key(failures, "reason_code"),
+            "recent_events": state.get_recent_events(limit=10),
+            "recommendations": _build_recommendations(
+                {
+                    "cooldowns": {"details": cooldowns},
+                    "recent_failures": failures,
+                    "backlog": work_remaining,
+                }
+            ),
+        }
+    finally:
+        state.close()
 
 
 def render_doctor_text(report: dict[str, Any]) -> str:

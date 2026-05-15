@@ -97,6 +97,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
   <div class="topbar">
     <h1>Data Admin</h1>
     <div style="display:flex;gap:.5rem;">
+      <a href="{{ url_for('admin_orchestrator_page') }}" class="btn btn-muted btn-sm">🧭 Orchestrator</a>
       <a href="{{ url_for('admin_data_logs') }}" class="btn btn-muted btn-sm">📋 Logs</a>
       <a href="{{ url_for('admin_data_jobs') }}" class="btn btn-muted btn-sm">Jobs</a>
       <form method="post" action="/admin/data/logout" style="display:inline;"><button type="submit" class="btn btn-muted btn-sm">Logout</button></form>

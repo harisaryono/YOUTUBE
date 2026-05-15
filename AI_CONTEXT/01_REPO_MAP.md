@@ -28,6 +28,7 @@
 
 - `flask_app/app.py`
 - `flask_app/templates/*.html`
+- `flask_app/templates/admin_orchestrator.html`
 
 ## Data / DB
 
@@ -41,4 +42,3 @@
 - `partial_py/`
 - `partial_docs/`
 - `partial_ops/`
-

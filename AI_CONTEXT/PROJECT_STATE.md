@@ -11,6 +11,7 @@
 - orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
 - stage 8 hardening: AI_CONTEXT working files, `validate` command, PID cleanup, async report hooks, scope lock
 - stage 9 observability: `doctor` command for backlog/cooldown/failure diagnosis
+- stage 10 web integration: `/admin/orchestrator` dashboard + actions
 
 ## Directory Snapshot
 - `docs`: 18 files
@@ -51,3 +52,4 @@
 - report Markdown + JSON di runs/orchestrator/reports/
 - control-plane hardening: `active`, `logs`, `cancel`, `reconcile`, `validate`, timeout, scope lock, async report analysis
 - operational observability: `doctor` summary and recommendations
+- web observability: dashboard actions for doctor/explain/reconcile/pause/resume/cancel

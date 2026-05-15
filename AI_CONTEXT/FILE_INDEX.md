@@ -63,6 +63,7 @@
 - `flask_app/requirements.txt` (57 bytes)
 - `flask_app/static/css/style.css` (7080 bytes)
 - `flask_app/templates/admin_channel_aliases.html` (8790 bytes)
+- `flask_app/templates/admin_orchestrator.html`
 - `flask_app/templates/admin_data.html` (27431 bytes)
 - `flask_app/templates/admin_data_channels_fragment.html` (4937 bytes)
 - `flask_app/templates/admin_data_jobs_fragment.html` (2836 bytes)

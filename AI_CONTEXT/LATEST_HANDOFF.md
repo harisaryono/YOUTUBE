@@ -26,6 +26,9 @@ Generated: `2026-05-15T06:20:17+07:00`
 - Stage 9 adds observability:
   - `./scripts/orchestrator.sh doctor`
   - daemon/backlog/cooldown/failure summary
+- Stage 10 adds web admin integration:
+  - `/admin/orchestrator`
+  - dashboard actions for doctor/explain/validate/reconcile/pause/resume/cancel
 
 ## Important constraints
 
@@ -42,3 +45,4 @@ Generated: `2026-05-15T06:20:17+07:00`
 - Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`
 - Validate before patching when stage 8 changes touch orchestrator control plane.
 - Use `doctor` for quick operational diagnosis before reading long logs.
+- Use the web dashboard when you want the same snapshot without switching to terminal.

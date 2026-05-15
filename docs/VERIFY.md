@@ -64,6 +64,16 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] `./scripts/orchestrator.sh doctor` menampilkan recent failures dari event store.
 - [ ] `scripts/orchestrator.sh` help text memasukkan `doctor` sebagai control-plane command.
 
+## Stage 10 Web Orchestrator Validation
+
+- [ ] `/admin/orchestrator` dapat dibuka setelah login admin.
+- [ ] `/admin/orchestrator?format=json` mengembalikan snapshot JSON yang valid.
+- [ ] Tombol `Run Doctor`, `Explain`, `Validate`, `Reconcile`, dan `Once Dry-Run` di dashboard bekerja.
+- [ ] Form `Pause` / `Resume` pada dashboard mengubah gate target yang dipilih.
+- [ ] Form `Cancel Job`, `Cancel Stage`, dan `Cancel Group` di dashboard memanggil control-plane tanpa error sintaks.
+- [ ] Dashboard menampilkan backlog, group usage, stage usage, recent failures, dan recommendations.
+- [ ] Link log job pada dashboard membuka log orchestrator yang benar.
+
 ## Batch Validations
 - **Phase 1 Validation**:
   - [ ] 5 videos processed.
