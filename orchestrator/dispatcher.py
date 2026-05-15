@@ -239,6 +239,18 @@ def _build_stage_launch_command(
         if nvidia_model:
             env["ASR_MODEL_NVIDIA_RIVA"] = nvidia_model
         cmd = ["bash", str(script), "--local-audio-only"]
+
+        # Translate provider_plan to --providers arg
+        provider_plan = str(config.get("asr", {}).get("provider_plan", "groq_first")).strip()
+        if provider_plan == "groq_first":
+            cmd.extend(["--providers", "groq,nvidia"])
+        elif provider_plan == "nvidia_first":
+            cmd.extend(["--providers", "nvidia,groq"])
+        elif provider_plan == "groq_only":
+            cmd.extend(["--providers", "groq"])
+        elif provider_plan == "nvidia_only":
+            cmd.extend(["--providers", "nvidia"])
+
         if video_id:
             cmd.extend(["--video-id", str(video_id)])
         elif channel_id:

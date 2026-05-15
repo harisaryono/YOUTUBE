@@ -373,11 +373,18 @@ def safety_gate_for_job(
                     recommendation="Check coordinator service",
                     reason_code="DEFER_PROVIDER_UNAVAILABLE",
                 )
-            if stage == "asr" and "asr" in provider_health.blocked_providers:
+            if stage == "asr" and any(
+                p in provider_health.blocked_providers
+                for p in ("asr", "nvidia_riva")
+            ):
+                blocked_name = next(
+                    (p for p in ("nvidia_riva", "asr") if p in provider_health.blocked_providers),
+                    "asr",
+                )
                 return SafetyDecision.wait(
-                    "ASR provider service degraded, retry later",
+                    f"ASR provider service degraded ({blocked_name}), retry later",
                     cooldown_seconds=600,
-                    recommendation="Wait for NVIDIA Riva recovery or check provider cooldown",
+                    recommendation="Wait for provider recovery or check provider cooldown",
                     reason_code="DEFER_ASR_PROVIDER_DEGRADED",
                 )
 

@@ -183,9 +183,9 @@ def classify_error(
             elif error_type == "disk_low":
                 suggested_scope = "global"
             elif error_type == "nvidia_riva_degraded":
-                suggested_scope = "provider:asr"
+                suggested_scope = "provider:nvidia_riva"
             elif error_type == "nvidia_riva_rpc_error":
-                suggested_scope = "provider:asr"
+                suggested_scope = "provider:nvidia_riva"
             elif error_type == "asr_provider_unavailable":
                 suggested_scope = "stage:asr"
             elif error_type == "lease_unavailable":

@@ -49,7 +49,8 @@ def build_inventory_snapshot(
     provider_cooldowns = [cd_entry for cd_entry in active_cooldowns if str(cd_entry.get("scope") or "").startswith("provider:")]
     asr_provider_cooldowns = [
         cd_entry for cd_entry in provider_cooldowns
-        if str(cd_entry.get("scope") or "") in {"provider:asr", "stage:asr"} or str(cd_entry.get("scope") or "").startswith("provider:asr:")
+        if str(cd_entry.get("scope") or "") in {"provider:asr", "stage:asr", "provider:nvidia_riva"}
+        or str(cd_entry.get("scope") or "").startswith("provider:asr:")
     ]
     regular_provider_cooldowns = [cd_entry for cd_entry in provider_cooldowns if cd_entry not in asr_provider_cooldowns]
 

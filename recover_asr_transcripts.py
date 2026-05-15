@@ -751,6 +751,12 @@ class ASRPipeline:
             ):
                 return True, None, "NVIDIA ASR model unavailable"
             if (
+                "degraded function cannot be invoked" in lower
+                or ("invalid_argument" in lower and "degraded" in lower)
+                or "nvidia riva service degraded" in lower
+            ):
+                return True, 1800, "NVIDIA Riva service degraded"
+            if (
                 "ssleoferror" in lower
                 or "ssl" in lower
                 or "certificate verify failed" in lower
