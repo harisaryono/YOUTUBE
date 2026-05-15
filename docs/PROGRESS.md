@@ -218,215 +218,40 @@
     - Batch formatting seluruh transcript pending sedang berjalan: `runs/format_20260417_033836_5502/` (4827 target).
 
 - **2026-05-09 (Local + tafsir-server)**: Menambahkan delta sync tool `scripts/sync_missing_rows_to_server.py` + wrapper `scripts/sync_missing_rows_to_server.sh`.
-  - Tool ini membandingkan key unik lokal vs server, lalu hanya mengirim row yang belum ada di server untuk `channels`, `videos`, `video_asr_chunks`, `channels_meta`, `channel_runtime_state`, dan `content_blobs`.
-  - Bundle juga membawa file `uploads/...` yang direferensikan oleh video baru, tanpa menyalin database full.
-  - Sync real ke `tafsir-server` sudah selesai dan melewatkan 638 file upload referensi serta delta row yang belum ada di server.
+  - Tool ini... (truncated due to tool response token budget)
 
-- **2026-05-09 (tafsir-server)**: ASR server untuk backlog `no_subtitle` sudah dijalankan.
-  - Run dir: `runs/asr_server_no_subtitle_20260509_163725`
-  - Mode: `--video-workers 2 --providers groq,nvidia`
-  - Post-process GPT OSS tetap off.
+## Stage 17 — Terminal Failure Registry & Retry Policy Cleanup
 
-- **2026-05-14 (Local)**: Memperbaiki navigasi legacy video detail agar tidak berhenti di video yang `upload_date`-nya kosong.
-  - `get_adjacent_videos_by_video_id()` sekarang memakai urutan penuh `upload_date DESC -> created_at DESC -> id DESC` dengan fallback untuk `NULL`/string kosong.
-  - Tombol `Prev` di halaman legacy sekarang lanjut ke video yang lebih lama, jadi channel dengan ribuan video tidak terputus setelah grup kecil yang punya `upload_date`.
-  - Kasus yang dicek manual: `6TAIG7usqEU` di `FirandaAndirjaOfficial`.
-
-- **2026-05-14 (Local)**: Menambahkan rank eksplisit per channel untuk legacy navigation.
-  - Kolom SQLite `videos.channel_rank` dibackfill untuk `55,003` video.
-  - Rank `1` berarti video visible paling baru di channel.
-  - Navigasi legacy dan daftar video channel sekarang memakai rank itu dulu, lalu fallback ke urutan timestamp jika rank belum ada.
-  - Skrip repair yang dipakai: [repair_channel_ranks.py](/media/harry/DATA120B/GIT/YOUTUBE/repair_channel_ranks.py)
-
-- **2026-05-14 (Local)**: Menyetel ulang fallback ASR agar tidak membuang waktu saat provider bermasalah.
-  - Groq yang kena `ASPH 429` sekarang masuk cooldown lebih lama untuk sisa run, bukan diulang cepat pada chunk/video berikutnya.
-  - NVIDIA yang memunculkan error TLS/SSL sekarang dimatikan untuk sisa run supaya tidak mengulang request yang pasti gagal.
-  - Jika semua provider sedang cooldown/disabled, target langsung ditandai `retry_later` tanpa download audio lagi.
-
-- **2026-05-15 (Local)**: Groq `429` sekarang dipersist ke coordinator sebagai block lintas run.
-  - Saat Groq kena `429`, worker ASR tetap fallback ke NVIDIA untuk sisa run, lalu mengirim provider event dengan `reset_at` sehingga coordinator mem-block semua akun/model Groq yang aktif sampai cooldown habis.
-  - Ini mencegah run berikutnya kembali memilih Groq terlalu cepat setelah rate limit.
-
-- **2026-05-14 (Local)**: Menambahkan preflight lease untuk ASR supaya batch tidak download audio kalau lease kosong.
-  - `recover_asr_transcripts.py` sekarang mencoba acquire lease sebelum `yt-dlp` download audio.
-  - Kalau lease coordinator tidak menyediakan slot Groq/NVIDIA, video langsung ditandai `retry_later`.
-  - Ini menghindari pemborosan bandwidth/storage saat coordinator sedang kosong.
-
-- **2026-05-14 (Local)**: Menyetel cooldown Groq `ASPH 429` menjadi 24 jam.
-  - Jika Groq mengembalikan `seconds of audio per hour` limit, worker menahan provider itu selama satu hari penuh.
-  - Ini mengikuti sifat limit audio per jam, bukan retry cepat beberapa menit.
-
-- **2026-05-14 (Local)**: Mengalihkan NVIDIA Whisper ke jalur Riva gRPC sesuai tutorial resmi NVIDIA.
-  - `nvidia-riva-client` dan `grpcio` sudah dipasang di venv.
-  - Worker NVIDIA sekarang memakai `grpc.nvcf.nvidia.com:443` dengan metadata `function-id` dan `authorization: Bearer <API_KEY>` dari lease coordinator.
-  - Input audio dipakai sebagai WAV PCM mono 16-bit per chunk, lalu dikirim sebagai raw audio bytes ke `offline_recognize`.
-
-- **2026-05-14 (Local)**: Menambahkan preflight akses YouTube sebelum download audio di ASR.
-  - Jika yt-dlp mendeteksi `private` atau `members-only`, video langsung ditandai `skip_access_blocked`.
-  - Video akses-terblokir tidak lagi download audio, tidak memakan lease provider, dan batch lanjut ke item berikutnya.
-  - Jika file audio cached sudah ada di `runs/.../source/`, ASR memakai file itu langsung dan melewati probe akses.
-  - Cache audio sekarang dibaca dari shared run root dan worker source lama, jadi worker lain bisa reuse file yang sama tanpa probe ulang.
-
-- **2026-05-14 (Local)**: Mengetatkan selector audio yt-dlp untuk ASR.
-  - Download audio sekarang memakai selector bitrate bertingkat `ba[abr<=96]/ba[abr<=128]/ba[abr<=160]/ba/b`.
-  - Tujuannya agar file yang ditarik tidak terlalu besar, tapi tetap ada fallback kalau bitrate rendah tidak tersedia.
-
-- **2026-05-14 (Local)**: Diet database untuk metadata dan formatted path.
-  - `videos.metadata` dibackfill ke blob `metadata` dan kolom lama dikosongkan untuk row yang sudah dimigrasi.
-  - Writer aktif sekarang menyimpan `metadata` ke blob dan tidak lagi bergantung pada salinan teks besar di kolom utama.
-  - `transcript_formatted_path` menjadi sumber tulis canonical; `link_file_formatted` tetap tersedia sebagai fallback baca legacy.
-  - Tabel legacy `transcripts` dan `summaries` yang kosong sudah di-drop dari schema aktif.
-
-- **2026-05-14 (Local)**: Menahan diet `transcript_text` / `summary_text` karena FTS masih bergantung ke kolom itu.
-  - Audit menunjukkan trigger `videos_fts` masih membaca `transcript_text` dan `summary_text` secara langsung.
-  - Jalur baca runtime sudah blob-first, dan write baru untuk transcript/resume ikut mirror ke blob.
-  - Kolom teks lama belum dikosongkan supaya search FTS tetap aman sampai redesign indeks dilakukan.
-
-- **2026-05-14 (Local)**: Menghapus kolom formatted legacy yang sudah benar-benar redundant.
-  - `link_file_formatted` sudah tidak dipakai aktif lagi, dan kolom fisiknya di `videos` sudah di-drop.
-  - `transcript_formatted_path` sekarang menjadi satu-satunya kolom formatted path yang canonical.
-  - Runtime/monitor/sync path yang tersisa sudah membaca `transcript_formatted_path` langsung.
-
-- **2026-05-14 (Local)**: Backfill blob untuk transcript/resume agar jalur baca blob-first lengkap.
-  - `transcript_text` dan `summary_text` yang masih dipertahankan untuk FTS sudah disalin ke blob storage sebagai mirror.
-  - Jalur baca runtime tetap mengambil dari blob dulu; kolom teks lama hanya dipertahankan untuk trigger/search FTS.
-
-## Batch Report
-| Batch | Date | Limit | Success | Failed | Status |
-|---|---|---|---|---|---|
-| Phase 1 | 2026-03-27 | 5 | 0 | 5 | Done |
-| Phase 2 | 2026-03-27 | 50 | 0 | 50 | Done (Confirmed no subtitles exist for these) |
-| Phase 4 | 2026-03-27 | 5000 | - | - | **Restarting with logic fix** (Distinguish NoSubtitle vs FatalError) |
-- **2026-05-14 (Local)**: Rediscovery channel kecil yang sempat nol video.
-  - `Ancestral Yields` naik ke `109` video.
-  - `Backyard Bill` naik ke `57` video setelah rerun tunggal; error trigger yang muncul hanya efek run paralel sebelumnya.
-  - `Nostalgia Technologi` naik ke `37` video.
-
-- **2026-05-14 (Local)**: Audit ulang channel kecil di DB.
-  - `@AncestralYields` tetap `109` video setelah rerun ulang.
-  - `@nalarlambat` tetap `5` video setelah rerun ulang.
-  - `CozyPedia-93` tetap `7` video setelah rerun ulang.
-  - `@BackyardBill_YT` naik dari `9` ke `66` video, jadi sebelumnya belum terdiscovery penuh.
-
-- **2026-05-14 (Local)**: Membersihkan transcript palsu dari SaveSubs Cloudflare HTML.
-  - 503 row di `videos.transcript_text` berisi halaman `Access denied | savesubs.com used Cloudflare to restrict access`.
-  - Root cause: SaveSubs lama mengembalikan HTML error, lalu hasilnya ikut disimpan sebagai transcript mentah.
-  - Sudah dipasang guard baru di `savesubs_playwright.py`, `partial_py/savesubs_direct.py`, dan `recover_transcripts.py`.
-  - Sudah dijalankan repair script untuk menghapus transcript palsu dari DB, blob transcript, dan file fisiknya.
-
-- **2026-05-14 (Local)**: Membersihkan salinan fisik transcript yang sudah redundant.
-  - Folder `uploads/ilmulidi/text/` berisi 110 file dan semuanya sudah ada di DB/blob.
-  - `transcript_file_path` untuk row terkait sudah dikosongkan setelah file fisiknya dihapus.
-  - Cleanup lanjutan menghapus 7,473 row/path yang sudah punya blob transcript dan menghapus 3,252 file fisik redundan.
-
-- **2026-05-14 (Local)**: Membersihkan summary fisik yang sudah redundant.
-  - Satu-satunya file summary fisik yang tersisa sudah dihapus.
-  - `summary_file_path` legacy dipertahankan sebagai penanda status karena worker resume masih memakainya untuk seleksi backlog.
-  - Rencana migrasi FTS untuk melepaskan `transcript_text` dan `summary_text` dipisahkan ke [FTS_MIGRATION_PLAN.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/FTS_MIGRATION_PLAN.md).
-
-- **2026-05-14 (Local)**: Audit sisa file transcript fisik.
-  - Dari 4,007 file transcript yang tersisa di `uploads/*/text/`, 4,006 belum punya blob transcript sehingga dipertahankan.
-  - Satu file Oasis (`xvhVFQtfiwA`) sudah punya `transcript_text` di DB tetapi belum punya blob; sudah dipindah ke blob lalu file fisiknya dihapus.
-
-- **2026-05-14 (Local)**: Backfill final transcript fisik ke blob.
-  - 3,919 file transcript aktif dibackfill ke blob `transcript`, lalu file fisiknya dihapus setelah commit batch.
-  - 88 orphan file transcript yang sudah tidak punya `transcript_file_path` di DB juga dibackfill dari disk, lalu dihapus.
-  - Folder `uploads/*/text/` sekarang kosong.
-
-- **2026-05-14 (Local)**: Resume NVIDIA dibuat fail-fast.
-  - Jalur `fill_missing_resumes_youtube_db.py` sekarang memberi timeout khusus yang lebih pendek untuk NVIDIA daripada timeout generasi default.
-  - Retry internal OpenAI client untuk NVIDIA dimatikan agar request tidak macet terlalu lama di `chat.completions.create()`.
-  - Jalur NVIDIA sekarang memakai streaming chat completion ala contoh resmi, lalu mengumpulkan `delta.content` menjadi hasil final.
-  - Kalau NVIDIA kena timeout-like error, provider itu ditandai disabled untuk sisa run supaya worker pindah ke backlog lain alih-alih mengulang macet yang sama.
-
-- **2026-05-14 (Local)**: Resume launcher tidak lagi abort saat status coordinator timeout.
-  - `launch_resume_queue.py` sekarang retry lookup status coordinator secara singkat sebelum menyerah.
-  - Jika status pool tetap tidak bisa dibaca, launcher turun ke direct NVIDIA fallback worker alih-alih menghentikan seluruh run.
-
-- **2026-05-14 (Local)**: Work-conserving daemon dispatch path diperbaiki.
-  - Indentasi lock/dispatch di `orchestrator/daemon.py` sudah dibetulkan supaya `RUN` branch benar-benar acquire lock, dispatch job, dan release lock dalam satu blok yang sama.
-  - Duplikasi mode `explain` dihapus; `explain` sekarang memakai inventory snapshot langsung.
-  - Stage status report kini menampilkan `Audio Download` sebagai stage YouTube-limited yang terpisah.
-
-- **2026-05-14 (Local)**: Dispatch runner hardening ditambahkan.
-  - `run_once()` sekarang punya fallback `result` saat `dispatch_job()` melempar exception sebelum return.
-  - Lock tetap dilepas di `finally`, dan exception dispatch dicatat sebagai failure biasa agar cycle tidak mati mendadak.
-
-- **2026-05-14 (Local)**: Stage 3 baseline mulai dipasang.
-  - `orchestrator/preflight.py` dan `scripts/preflight_orchestrator.sh` sudah menambah preflight check untuk DB schema, script wrapper, audio dir, yt-dlp, dan coordinator opsional.
-  - `orchestrator_state` sekarang menyimpan pause keys, inventory snapshot, dan state batch adaptif per stage.
-  - `./scripts/orchestrator.sh explain` sekarang menampilkan disk/memory, pause state, dan keputusan per stage yang lebih jelas.
-  - `orchestrator/janitor.py` dan `scripts/orchestrator_ctl.sh janitor` menambah maintenance pass ringan untuk event/log/run-dir/report/audio orphan.
-
-## Stage 13 — Retry Queue Executor & Controlled Recovery
-
-Stage 13 menambahkan retry executor terpisah, config retry queue, dan
-integrasi daemon + CLI.
+Stage 17 memusatkan aturan error terminal/video-scoped agar tidak diperlakukan sebagai sinyal tekanan global.
 
 **Implemented:**
-- `orchestrator/retry_executor.py` — modul executor khusus
-- Config `retry_queue` di `orchestrator.yaml` (enabled, max_per_cycle, max_attempts_default, prefer_retry_before_normal)
-- CLI commands: `retry-queue stats`, `retry-queue list`, `retry-queue drain`
-- State methods di `state.py`: `list_retry_queue()`, `retry_queue_stats()`, `claim_retry_item()`, `mark_retry_running()`, `mark_retry_completed()`, `mark_retry_failed()`, `mark_retry_blocked()`, `cancel_retry_item()`
-- Integrasi daemon cycle: retry queue diproses via `plan_jobs()` di planner
-- Doctor menampilkan retry_queue, policy_blockers, cycle_failures
-- Explain/mode menampilkan retry queue summary
-- Naming konsisten: `completed` bukan `done`
-
-**Not yet (reserved for future):**
-- Dashboard widget real-time retry drain action
-
-## Stage 14 — Web Admin Control Actions & Retry Queue UI
-
-Stage 14 menambahkan halaman web admin untuk retry queue dan tombol
-safe actions (pause/resume/quarantine) yang memanggil modul Python
-yang sudah ada.
-
-**Implemented:**
-- `flask_app/templates/admin_retry_queue.html` — halaman retry queue dengan stats, pending list, blocked list, pauses, policy blockers
-- `flask_app/app.py` — route GET `/admin/orchestrator/retry-queue` dan POST `/admin/orchestrator/retry-queue/action`
-- Link "Retry Queue" di topbar admin_orchestrator.html
-- Tombol: dry-run drain, drain 1 item (wajib JS confirm), pause/resume stage/group, quarantine/unquarantine channel
-- `flask_app/static/favicon.svg` — favicon solid red #FF2A00 + white play triangle
-- `AI_CONTEXT/09_STAGE14_WEB_CONTROL_UI.md`
+- `orchestrator/terminal_failures.py` — registry terminal failure dengan policy:
+  - `scope`
+  - `retryable`
+  - `retry_strategy`
+  - `global_cooldown`
+  - `route_to_asr`
+  - `normal_retry`
+  - `target_stage`
+- `orchestrator/error_analyzer.py` memakai registry terminal failure untuk:
+  - mencegah cooldown global/channel pada terminal failure
+  - mencatat `event_type=terminal_failure`
+  - menyimpan metadata `terminal`, `retry_strategy`, `route_to_asr`, `retryable`, `normal_retry`, dan `target_stage` di payload event
+- Terminal failure yang dicakup:
+  - `youtube_geo_blocked`
+  - `member_only`
+  - `private_video`
+  - `age_restricted`
+  - `copyright_blocked`
+  - `not_ready_yet`
+  - `format_unavailable`
+  - `no_subtitle`
+  - `video_unavailable`
+  - `channel_unavailable`
+- `tests/test_stage17_terminal_failures.py` — test klasifikasi terminal dan cooldown policy.
 
 **Invariant:**
-- Web hanya wrapper, tidak membuat logic sendiri
-- Drain nyata limit=1, butuh JS confirm
-- Semua action audit event di orchestrator_events
-
-## Stage 15 — Safety Gate & Emergency Stop
-
-Stage 15 menambahkan safety gate yang lebih eksplisit untuk
-sistem, provider, dan YouTube health, serta emergency stop
-untuk menghentikan semua job launch saat darurat.
-
-**Implemented:**
-- `orchestrator/safety.py` — modul safety gate:
-  - `SystemHealth`, `ProviderHealth`, `YouTubeHealth` — health snapshot classes
-  - `SafetyDecision` — verdict RUN/WAIT/SKIP_PERMANENT/REPORT
-  - `check_system_health()` — disk, memory, load
-  - `check_provider_health()` — coordinator availability, blocked providers
-  - `check_youtube_health()` — global cooldown status
-  - `safety_gate_for_job()` — per-job safety decision (disk low, cooldowns, memory, coordinator, idle hours)
-  - `ensure_launch_allowed()` — emergency stop guard for launch_job and retry_queue_drain
-  - CLI: `python -m orchestrator.safety status [--json]`
-  - CLI: `python -m orchestrator.safety emergency-stop --reason "..."`
-  - CLI: `python -m orchestrator.safety clear-emergency-stop --reason "..."`
-- `orchestrator/state.py` — emergency stop, readonly, safety_events methods:
-  - `set_emergency_stop()`, `clear_emergency_stop()`, `is_emergency_stop_active()`
-  - `set_readonly()`, `clear_readonly()`, `is_readonly_active()`
-  - `get_safety_status()`, `add_safety_event()`, `list_safety_events()`
-- `orchestrator/dispatcher.py` — guard di `launch_job()` via `ensure_launch_allowed()`
-- `orchestrator/retry_executor.py` — guard di `drain_retry_queue()` via `ensure_launch_allowed()`
-- `orchestrator/daemon.py` — mode `safety` sebagai CLI endpoint:
-  - `./scripts/orchestrator.sh safety status`
-  - `./scripts/orchestrator.sh safety emergency-stop --reason "..." --actor "..."`
-  - `./scripts/orchestrator.sh safety clear-emergency-stop --reason "..." --actor "..."`
-
-**Invariant:**
-- Emergency stop hanya memblokir launch baru, tidak mematikan job yang sudah berjalan
-- Dry-run retry queue tetap diizinkan saat emergency stop aktif
-- Safety event direcord ke orchestrator_events untuk audit trail
-- CLI standalone `python -m orchestrator.safety` bisa dipakai tanpa daemon
-- Config `safety.emergency_stop_blocks_launch` dan `safety.emergency_stop_blocks_retry_drain` bisa disable guard
+- `youtube_geo_blocked` tidak membuat cooldown `youtube`, `youtube:content`, atau `channel:*`.
+- `no_subtitle` diarahkan ke strategi `route_to_asr` dengan target stage `audio_download`.
+- `member_only`, `private_video`, `copyright_blocked`, dan `video_unavailable` tidak masuk retry normal.
+- `youtube_bot_detection`, `youtube_ip_blocked`, dan `youtube_429` tetap cooldown-capable.
