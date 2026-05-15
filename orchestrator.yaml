@@ -122,6 +122,10 @@ audio_download:
   yt_dlp_rate_limit_safe: true
   keep_audio_after_asr: false
   audio_dir: "uploads/audio"
+  # Hard cap: jangan terus download audio bila ASR macet.
+  max_audio_dir_gb: 5
+  warn_audio_dir_gb: 4
+  stop_when_audio_dir_over_limit: true
 
 resume:
   enabled: true
@@ -153,6 +157,8 @@ asr:
   require_local_audio: true
   delete_audio_after_success: true
   require_cached_audio: false
+  # Hapus chunk WAV per-video setelah transcript berhasil digabung.
+  delete_chunks_after_success: true
 
 
 report:
