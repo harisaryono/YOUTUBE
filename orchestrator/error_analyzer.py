@@ -232,18 +232,15 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
 
     scopes: list[str] = []
     stage_scope = f"stage:{stage}" if stage else ""
-    channel_scope = scope if scope.startswith("channel:") else ""
     stage_local_scopes = {"resume", "format", "asr"}
     youtube_scoped_stages = {"transcript", "audio_download"}
 
-    # Keep non-YouTube stages isolated from the channel scope that happened to
-    # produce the job. A resume/ASR failure should only block the stage itself
-    # unless the error is explicitly provider- or YouTube-scoped.
+    # Keep non-YouTube stages isolated from broad cooldowns. Resume/ASR failures
+    # should only block the stage itself unless the error is explicitly provider-
+    # or YouTube-scoped.
     if stage in stage_local_scopes:
         if stage_scope:
             scopes.append(stage_scope)
-    elif channel_scope:
-        scopes.append(channel_scope)
 
     severe_youtube_errors = {
         "youtube_bot_detection",

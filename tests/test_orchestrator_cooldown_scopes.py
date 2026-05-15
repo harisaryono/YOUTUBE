@@ -51,7 +51,7 @@ class TestCooldownScopeSeparation(unittest.TestCase):
         self.assertEqual(failure_scopes, ["stage:asr"])
         self.assertEqual(report_scopes, ["stage:asr"])
 
-    def test_transcript_can_still_use_channel_scope(self) -> None:
+    def test_transcript_pressure_is_youtube_scoped(self) -> None:
         from orchestrator.daemon import _cooldown_scopes_for_failure
         from orchestrator.error_analyzer import ErrorClassification, _cooldown_scopes_for_row
 
@@ -67,10 +67,8 @@ class TestCooldownScopeSeparation(unittest.TestCase):
         failure_scopes = _cooldown_scopes_for_failure("transcript", "channel:HISTORY", classification)
         report_scopes = _cooldown_scopes_for_row("transcript", "channel:HISTORY", classification)
 
-        self.assertIn("channel:HISTORY", failure_scopes)
-        self.assertIn("channel:HISTORY", report_scopes)
-        self.assertIn("youtube:content", failure_scopes)
-        self.assertIn("youtube:content", report_scopes)
+        self.assertEqual(failure_scopes, ["youtube:content"])
+        self.assertEqual(report_scopes, ["youtube:content"])
 
     def test_geo_blocked_is_classified_without_cooldown(self) -> None:
         from orchestrator.error_analyzer import classify_error

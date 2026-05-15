@@ -361,11 +361,9 @@ def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) ->
 
     scopes: list[str] = []
 
-    # Only transcript/audio_download (YouTube-sensitive stages) get channel-level cooldowns.
-    # Other stages (resume, format, asr, discovery) use stage-level scopes to avoid
-    # cross-contamination: a resume failure must not block transcript for the same channel.
-    if scope.startswith("channel:") and stage in {"transcript", "audio_download"}:
-        scopes.append(scope)
+    # Keep non-YouTube stages isolated from broad cooldowns. Resume/ASR failures
+    # should only block the stage itself unless the error is explicitly provider-
+    # or YouTube-scoped.
 
     severe_youtube_errors = {
         "youtube_bot_detection",
