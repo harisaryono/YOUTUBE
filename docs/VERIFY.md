@@ -86,6 +86,14 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] `./scripts/orchestrator.sh doctor` menampilkan active pauses, quarantined channels, policy blockers, recent control actions, dan cycle failure summary.
 - [ ] `/admin/orchestrator` menampilkan pause/quarantine/control-action snapshot tanpa error.
 
+## Stage 12 Policy Requeue Validation
+
+- [ ] `./scripts/orchestrator.sh retry-failed --stage transcript --limit 5 --no-dry-run --json` memasukkan kandidat eligible ke retry queue persisten.
+- [ ] `./scripts/orchestrator.sh doctor --json` menampilkan ringkasan retry queue `pending/running/completed/failed`.
+- [ ] `./scripts/orchestrator.sh explain` menampilkan ringkasan retry queue pada inventori kerja.
+- [ ] Daemon tidak meluncurkan retry queue item yang masih diblokir pause/quarantine/policy blocker.
+- [ ] Dashboard `/admin/orchestrator` menampilkan retry queue secara read-only dan tetap bisa memanggil retry dry-run.
+
 ## Batch Validations
 - **Phase 1 Validation**:
   - [ ] 5 videos processed.

@@ -119,6 +119,29 @@ class OrchestratorState:
 
             CREATE INDEX IF NOT EXISTS idx_active_jobs_status_group
                 ON orchestrator_active_jobs(status, group_name);
+
+            CREATE TABLE IF NOT EXISTS orchestrator_retry_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_job_id TEXT NOT NULL UNIQUE,
+                stage TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                requested_by TEXT NOT NULL DEFAULT '',
+                requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 1,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                error_text TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                finished_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_retry_queue_status_stage
+                ON orchestrator_retry_queue(status, stage);
+
+            CREATE INDEX IF NOT EXISTS idx_retry_queue_requested
+                ON orchestrator_retry_queue(requested_at DESC);
         """)
         conn.commit()
 
@@ -559,6 +582,179 @@ class OrchestratorState:
             if item["active"]:
                 result.append(item)
         return result
+
+    # --- Retry Queue ---
+
+    @staticmethod
+    def _decode_json_payload(raw: str) -> dict[str, Any]:
+        text = str(raw or "").strip()
+        if not text:
+            return {}
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def enqueue_retry_queue_item(
+        self,
+        source_job: dict[str, Any],
+        *,
+        requested_by: str = "",
+        reason: str = "",
+        max_attempts: int = 1,
+    ) -> dict[str, Any]:
+        source_job_id = str(source_job.get("job_id") or "").strip()
+        stage = str(source_job.get("stage") or "").strip()
+        scope = str(source_job.get("scope") or "").strip()
+        if not source_job_id or not stage:
+            raise ValueError("source_job must include job_id and stage")
+
+        payload = {
+            "source_job": dict(source_job),
+            "job": self._decode_json_payload(str(source_job.get("payload_json") or "")).get("job", {}),
+            "requested_by": str(requested_by or "").strip(),
+            "reason": str(reason or "").strip(),
+            "source_job_id": source_job_id,
+            "retry_queue_status": "pending",
+        }
+        conn = self._connect()
+        conn.execute(
+            """
+            INSERT INTO orchestrator_retry_queue (
+                source_job_id, stage, scope, reason, requested_by, requested_at,
+                status, attempts, max_attempts, payload_json, error_text, updated_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, datetime('now'), 'pending', 1, ?, ?, '', datetime('now'), NULL)
+            ON CONFLICT(source_job_id) DO UPDATE SET
+                stage = excluded.stage,
+                scope = excluded.scope,
+                reason = excluded.reason,
+                requested_by = excluded.requested_by,
+                requested_at = datetime('now'),
+                status = 'pending',
+                attempts = COALESCE(attempts, 0) + 1,
+                max_attempts = excluded.max_attempts,
+                payload_json = excluded.payload_json,
+                error_text = '',
+                updated_at = datetime('now'),
+                finished_at = NULL
+            """,
+            (
+                source_job_id,
+                stage,
+                scope,
+                reason,
+                requested_by,
+                int(max_attempts or 1),
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return self.get_retry_queue_item(source_job_id) or {
+            "source_job_id": source_job_id,
+            "stage": stage,
+            "scope": scope,
+            "status": "pending",
+        }
+
+    def get_retry_queue_item(self, source_job_id: str) -> dict[str, Any] | None:
+        source_job_id = str(source_job_id or "").strip()
+        if not source_job_id:
+            return None
+        conn = self._connect()
+        row = conn.execute(
+            """
+            SELECT *
+            FROM orchestrator_retry_queue
+            WHERE source_job_id = ?
+            """,
+            (source_job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["payload"] = self._decode_json_payload(str(item.get("payload_json") or ""))
+        return item
+
+    def list_retry_queue(
+        self,
+        *,
+        status: str | None = None,
+        stage: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        conn = self._connect()
+        query = "SELECT * FROM orchestrator_retry_queue WHERE 1=1"
+        params: list[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if stage:
+            query += " AND stage = ?"
+            params.append(stage)
+        query += " ORDER BY requested_at ASC, id ASC LIMIT ?"
+        params.append(max(1, int(limit or 50)))
+        rows = conn.execute(query, params).fetchall()
+        items = [dict(r) for r in rows]
+        for item in items:
+            item["payload"] = self._decode_json_payload(str(item.get("payload_json") or ""))
+        return items
+
+    def count_retry_queue(self, status: str | None = None) -> int:
+        conn = self._connect()
+        query = "SELECT COUNT(*) AS cnt FROM orchestrator_retry_queue WHERE 1=1"
+        params: list[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        row = conn.execute(query, params).fetchone()
+        return int(row["cnt"] if row else 0)
+
+    def mark_retry_queue_running(self, source_job_id: str, *, launched_job_id: str = "") -> None:
+        source_job_id = str(source_job_id or "").strip()
+        if not source_job_id:
+            return
+        conn = self._connect()
+        item = self.get_retry_queue_item(source_job_id) or {}
+        payload = dict(item.get("payload") or {})
+        if launched_job_id:
+            payload["launched_job_id"] = launched_job_id
+            payload["launched_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        conn.execute(
+            """
+            UPDATE orchestrator_retry_queue
+            SET status = 'running',
+                payload_json = ?,
+                updated_at = datetime('now')
+            WHERE source_job_id = ?
+            """,
+            (json.dumps(payload, ensure_ascii=False), source_job_id),
+        )
+        conn.commit()
+
+    def mark_retry_queue_finished(
+        self,
+        source_job_id: str,
+        *,
+        status: str,
+        error_text: str = "",
+    ) -> None:
+        source_job_id = str(source_job_id or "").strip()
+        if not source_job_id:
+            return
+        conn = self._connect()
+        conn.execute(
+            """
+            UPDATE orchestrator_retry_queue
+            SET status = ?,
+                error_text = ?,
+                updated_at = datetime('now'),
+                finished_at = datetime('now')
+            WHERE source_job_id = ?
+            """,
+            (status, error_text, source_job_id),
+        )
+        conn.commit()
 
     # --- Inventory snapshots ---
 

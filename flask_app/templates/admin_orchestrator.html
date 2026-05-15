@@ -201,6 +201,30 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
           </div>
         </form>
       </div>
+
+      <div class="panel" style="margin:0;">
+        <h3>Retry Failed</h3>
+        <form method="post" action="{{ url_for('admin_orchestrator_action') }}">
+          <input type="hidden" name="action" value="retry_failed">
+          <label>Stage
+            <input name="stage" placeholder="transcript / resume / format / asr">
+          </label>
+          <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+            <label>Limit
+              <input name="limit" type="number" min="1" max="100" value="20">
+            </label>
+            <label><span style="visibility:hidden;">Dry run</span>
+              <div style="display:flex;align-items:center;gap:.45rem;padding:.65rem 0 0;">
+                <input type="checkbox" name="dry_run" value="1" checked style="width:auto;">
+                <span class="small">Dry run only</span>
+              </div>
+            </label>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-sm" type="submit">Retry Failed</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -344,6 +368,19 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
       {% endif %}
     </div>
 
+    <div class="panel">
+      <h2>Retry Queue</h2>
+      {% set retry_queue = report.retry_queue or {} %}
+      <div class="list">
+        <div class="list-item"><strong>Pending</strong><span style="float:right;">{{ retry_queue.pending or 0 }}</span></div>
+        <div class="list-item"><strong>Running</strong><span style="float:right;">{{ retry_queue.running or 0 }}</span></div>
+        <div class="list-item"><strong>Completed</strong><span style="float:right;">{{ retry_queue.completed or 0 }}</span></div>
+        <div class="list-item"><strong>Failed</strong><span style="float:right;">{{ retry_queue.failed or 0 }}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-two">
     <div class="panel">
       <h2>Recent Control Actions</h2>
       {% if report.recent_control_actions %}

@@ -5,10 +5,12 @@ Planner — Find and prioritize batch jobs across all stages.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .state import OrchestratorState
 from . import db_queries
+from .policies import policy_blockers_for_job
 
 
 # Priority order for job types (lower = higher priority).
@@ -53,6 +55,55 @@ def _adaptive_priority(stage: str, youtube_pressure: int, boost_threshold: int) 
     if youtube_pressure >= boost_threshold:
         return int(JOB_PRIORITY_YOUTUBE_HEAVY.get(stage, 99))
     return int(JOB_PRIORITY_AVAILABLE_WORK_FIRST.get(stage, 99))
+
+
+def _retry_queue_job_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    payload = item.get("payload") or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    source_job = payload.get("source_job") or {}
+    if not isinstance(source_job, dict):
+        source_job = {}
+    job_payload = payload.get("job") or {}
+    if not isinstance(job_payload, dict):
+        job_payload = {}
+
+    stage = str(item.get("stage") or source_job.get("stage") or job_payload.get("stage") or "").strip()
+    scope = str(item.get("scope") or source_job.get("scope") or job_payload.get("scope") or "").strip()
+    if not stage:
+        return None
+
+    job = dict(job_payload) if job_payload else {}
+    if not job:
+        job = dict(source_job)
+        nested = source_job.get("payload_json")
+        if isinstance(nested, str) and nested.strip():
+            try:
+                nested_payload = json.loads(nested)
+            except Exception:
+                nested_payload = {}
+            if isinstance(nested_payload, dict):
+                nested_job = nested_payload.get("job")
+                if isinstance(nested_job, dict):
+                    job = dict(nested_job)
+    if not job:
+        job = {
+            "stage": stage,
+            "scope": scope,
+        }
+
+    job.setdefault("stage", stage)
+    job.setdefault("scope", scope)
+    job.setdefault("retry_queue_source_job_id", str(item.get("source_job_id") or "").strip())
+    job.setdefault("retry_queue_id", int(item.get("id") or 0))
+    job.setdefault("retry_queue_reason", str(item.get("reason") or payload.get("reason") or "").strip())
+    job.setdefault("retry_queue_attempts", int(item.get("attempts") or 0))
+    job.setdefault("retry_queue_max_attempts", int(item.get("max_attempts") or 1))
+    job.setdefault("retry_queue_requested_by", str(item.get("requested_by") or payload.get("requested_by") or "").strip())
+    job.setdefault("retry_queue_status", str(item.get("status") or "pending").strip())
+    description = str(job.get("description") or f"Retry {stage}").strip()
+    job["description"] = description
+    return job
 
 
 def _parallel_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -169,6 +220,28 @@ def plan_jobs(
             "description": f"Import {pending_count} pending update(s)",
             "count": pending_count,
         })
+
+    # 1b. Retry queue — safe requeue candidates requested by operator.
+    retry_queue_items = state.list_retry_queue(status="pending", limit=max_jobs * 4)
+    if retry_queue_items:
+        for item in retry_queue_items:
+            retry_job = _retry_queue_job_from_item(item)
+            if not retry_job:
+                continue
+            blockers = policy_blockers_for_job(
+                state,
+                stage=str(retry_job.get("stage") or ""),
+                scope=str(retry_job.get("scope") or ""),
+            )
+            if blockers:
+                continue
+            retry_job["priority"] = 0
+            retry_job["count"] = int(item.get("attempts") or 0)
+            retry_job["description"] = (
+                f"Retry {retry_job.get('stage', '')} for {retry_job.get('scope', '') or 'global'}"
+                f" (attempt {int(item.get('attempts') or 0) + 1})"
+            )
+            jobs.append(retry_job)
 
     # Precompute backlog counts so the planner can adjust priorities adaptively.
     resume_count = db_queries.count_videos_need_resume(config, state)

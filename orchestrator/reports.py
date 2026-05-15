@@ -38,6 +38,13 @@ def build_inventory_snapshot(
     recent_events = state.get_recent_events(limit=50)
     pauses = state.list_pauses()
     quarantined_channels = state.list_quarantined_channels()
+    retry_queue = {
+        "pending": state.count_retry_queue("pending"),
+        "running": state.count_retry_queue("running"),
+        "completed": state.count_retry_queue("completed"),
+        "failed": state.count_retry_queue("failed"),
+    }
+    retry_queue["total"] = sum(int(retry_queue.get(key, 0) or 0) for key in ("pending", "running", "completed", "failed"))
     sys_health = None
     try:
         sys_health = check_system_health(config)
@@ -110,6 +117,7 @@ def build_inventory_snapshot(
         },
         "pauses": pauses,
         "quarantined_channels": quarantined_channels,
+        "retry_queue": retry_queue,
         "control_actions": [
             event for event in recent_events
             if str(event.get("event_type") or "").startswith("control")
@@ -360,6 +368,13 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
         lines.append(f"- Memory available: {sys_info.get('mem_available_mb', 0):.0f} MB")
         lines.append(f"- Active cooldowns: {inv.get('cooldowns', {}).get('active_count', 0)}")
         lines.append(f"- Active locks: {inv.get('locks', {}).get('active_count', 0)}")
+        if inv.get("retry_queue"):
+            rq = inv["retry_queue"]
+            lines.append(
+                "- Retry queue: "
+                f"pending={rq.get('pending', 0)}, running={rq.get('running', 0)}, "
+                f"completed={rq.get('completed', 0)}, failed={rq.get('failed', 0)}"
+            )
         if inv.get("pauses"):
             lines.append("- Pauses:")
             for pause in inv["pauses"]:

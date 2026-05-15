@@ -152,6 +152,7 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
     failure_stages = [str(item.get("stage") or "").lower() for item in failures]
     backlog = report.get("backlog", {})
     policy_blockers = report.get("policy_blockers", [])
+    retry_queue = report.get("retry_queue", {})
 
     if "youtube" in cooldown_scopes:
         recs.append("YouTube global cooldown aktif; tahan transcript/audio_download sampai cooldown selesai.")
@@ -177,6 +178,9 @@ def _build_recommendations(report: dict[str, Any]) -> list[str]:
     if policy_blockers:
         recs.append(f"Ada {len(policy_blockers)} policy blocker aktif; cek pause/quarantine sebelum retry.")
 
+    if int(retry_queue.get("pending", 0) or 0) > 0:
+        recs.append(f"Ada {int(retry_queue.get('pending', 0) or 0)} retry queue pending; daemon akan memprosesnya di cycle berikutnya.")
+
     if not recs:
         recs.append("Tidak ada anomali besar yang terdeteksi.")
 
@@ -196,6 +200,7 @@ def build_doctor_report(
         cooldowns = inventory.get("cooldowns", {}).get("details", [])
         pauses = inventory.get("pauses", [])
         quarantined_channels = inventory.get("quarantined_channels", [])
+        retry_queue = inventory.get("retry_queue", {})
         recent_events = state.get_recent_events(limit=max(50, recent_events_limit))
         failures = _recent_failure_summary(state, limit=50)
         control_actions = _recent_control_actions(state, limit=recent_events_limit)
@@ -241,6 +246,7 @@ def build_doctor_report(
             "blocked": inventory.get("blocked", {}),
             "pauses": pauses,
             "quarantined_channels": quarantined_channels,
+            "retry_queue": retry_queue,
             "policy_blockers": [
                 f"{str(item.get('pause_key') or item.get('scope') or '')} paused: {str(item.get('reason') or '').strip()}"
                 for item in pauses
@@ -281,6 +287,7 @@ def build_doctor_report(
                         f"channel {str(item.get('channel_id') or '')} quarantined: {str(item.get('reason') or '').strip()}"
                         for item in quarantined_channels
                     ],
+                    "retry_queue": retry_queue,
                 }
             ),
         }
@@ -299,6 +306,7 @@ def render_doctor_text(report: dict[str, Any]) -> str:
     failures = report.get("recent_failures", [])
     pauses = report.get("pauses", [])
     quarantined_channels = report.get("quarantined_channels", [])
+    retry_queue = report.get("retry_queue", {})
     control_actions = report.get("recent_control_actions", [])
     cycle_failures = report.get("cycle_failures", {})
     policy_blockers = report.get("policy_blockers", [])
@@ -372,6 +380,15 @@ def render_doctor_text(report: dict[str, Any]) -> str:
     if policy_blockers:
         for item in policy_blockers:
             lines.append(f"  - {item}")
+    else:
+        lines.append("  - none")
+    lines.append("")
+    lines.append("Retry queue:")
+    if retry_queue:
+        lines.append(
+            f"  - pending: {retry_queue.get('pending', 0)}, running: {retry_queue.get('running', 0)}, "
+            f"completed: {retry_queue.get('completed', 0)}, failed: {retry_queue.get('failed', 0)}"
+        )
     else:
         lines.append("  - none")
     lines.append("")

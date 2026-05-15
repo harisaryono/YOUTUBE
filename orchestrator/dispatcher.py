@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .state import OrchestratorState
+from .policies import policy_blockers_for_job
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -259,6 +260,17 @@ def launch_job(
     stage = str(job.get("stage", "")).strip()
     if not stage:
         return {"success": False, "error": "Missing stage"}
+
+    blockers = policy_blockers_for_job(state, stage=stage, scope=str(job.get("scope") or "").strip())
+    if blockers:
+        return {
+            "success": True,
+            "launched": False,
+            "deferred": True,
+            "reason": blockers[0].get("message", "policy blocker"),
+            "reason_code": "DEFER_POLICY_BLOCKER",
+            "policy_blockers": blockers,
+        }
 
     scope_lock_key = ""
     if _stage_needs_scope_lock(stage):

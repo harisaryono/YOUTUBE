@@ -11,10 +11,12 @@ Tujuan folder ini:
 2. [02_STAGE_CONTRACTS.md](02_STAGE_CONTRACTS.md)
 3. [03_ORCHESTRATOR_CONTROL_PLANE.md](03_ORCHESTRATOR_CONTROL_PLANE.md)
 4. [05_SAFE_PATCH_RULES.md](05_SAFE_PATCH_RULES.md)
+5. [06_STAGE11_SAFE_ACTIONS.md](06_STAGE11_SAFE_ACTIONS.md)
+6. [07_STAGE12_POLICY_REQUEUE.md](07_STAGE12_POLICY_REQUEUE.md)
 
 ## Objective Saat Ini
 
-- Stage 11: safe control actions dan recovery policy.
+- Stage 12: policy requeue dan enforcement.
 - Fokus:
   - context kecil per tugas,
   - validate command sebelum patch,
@@ -24,7 +26,10 @@ Tujuan folder ini:
   - `doctor` command untuk backlog, cooldown, failures, cycle-failure, dan rekomendasi,
   - pause/resume stage/group,
   - quarantine/unquarantine channel,
-  - retry-failed dry-run.
+  - retry-failed dry-run,
+  - retry queue persisten untuk safe requeue,
+  - policy blocker dicek sebelum launch retry,
+  - `doctor`/dashboard menampilkan retry queue ringkas.
 
 ## Source of Truth
 

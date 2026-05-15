@@ -817,6 +817,16 @@ def poll_active_jobs(
         if lock_key:
             state.release_lock(lock_key)
         _release_job_scope_lock(state, row)
+        retry_queue_source_job_id = str(_job_payload(row).get("retry_queue_source_job_id") or "").strip()
+        if retry_queue_source_job_id:
+            try:
+                state.mark_retry_queue_finished(
+                    retry_queue_source_job_id,
+                    status=status,
+                    error_text=error_text[-1000:],
+                )
+            except Exception:
+                pass
 
         if exit_code == 0:
             state.add_event(
@@ -1139,6 +1149,12 @@ def run_once(
             continue
 
         if result.get("launched"):
+            retry_queue_source_job_id = str(job.get("retry_queue_source_job_id") or "").strip()
+            if retry_queue_source_job_id:
+                try:
+                    state.mark_retry_queue_running(retry_queue_source_job_id, launched_job_id=str(result.get("job_id") or ""))
+                except Exception:
+                    pass
             cycle_result["jobs_dispatched"] += 1
         elif result.get("deferred"):
             state.release_lock(lock_key)
@@ -1149,7 +1165,10 @@ def run_once(
                 stage=stage,
                 scope=job.get("scope", ""),
                 severity="info",
-                reason_code="DEFER_SCOPE_LOCK",
+                reason_code=str(result.get("reason_code") or "DEFER_SCOPE_LOCK"),
+                payload={
+                    "policy_blockers": result.get("policy_blockers", []),
+                } if result.get("policy_blockers") else None,
             )
         else:
             state.release_lock(lock_key)
@@ -1566,6 +1585,14 @@ def main() -> None:
         print(f"Active locks: {inventory.get('locks', {}).get('active_count', 0)}")
         print(f"Active jobs: {inventory.get('active_jobs', {}).get('active_count', 0)}")
         print(f"Active cooldowns: {inventory.get('cooldowns', {}).get('active_count', 0)}")
+        retry_queue = inventory.get("retry_queue", {}) or {}
+        print(
+            "Retry queue: "
+            f"pending={retry_queue.get('pending', 0)}, "
+            f"running={retry_queue.get('running', 0)}, "
+            f"completed={retry_queue.get('completed', 0)}, "
+            f"failed={retry_queue.get('failed', 0)}"
+        )
         print(f"Timeouts: {config.get('timeouts', {})}")
         system_info = inventory.get("system", {})
         print(f"Disk free: {system_info.get('disk_free_gb', 0):.1f} GB")

@@ -236,7 +236,7 @@ case "$MODE" in
         echo "  resume-stage      Resume a paused stage"
         echo "  pause-group       Pause a control group"
         echo "  resume-group      Resume a paused control group"
-        echo "  retry-failed      Show retry candidates for failed jobs"
+        echo "  retry-failed      Show or enqueue retry candidates for failed jobs"
         echo "  quarantine-channel Quarantine a channel"
         echo "  unquarantine-channel Release a channel from quarantine"
         echo "  explain           Explain current work inventory and blockers"

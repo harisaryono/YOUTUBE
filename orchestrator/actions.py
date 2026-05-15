@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .state import OrchestratorState
+from .policies import policy_blockers_for_job
 
 
 KNOWN_GROUPS = {"discovery", "youtube", "provider", "local"}
@@ -274,34 +275,70 @@ def retry_failed(
     candidates.sort(key=lambda row: str(row.get("started_at") or ""))
     candidates = candidates[:limit]
 
+    eligible: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+    for row in candidates:
+        stage_name = str(row.get("stage") or "").strip().lower()
+        scope = str(row.get("scope") or "").strip()
+        blockers = policy_blockers_for_job(state, stage=stage_name, scope=scope)
+        row = dict(row)
+        row["policy_blockers"] = blockers
+        if blockers:
+            blocked.append(row)
+        else:
+            eligible.append(row)
+
+    eligible = eligible[:limit]
+    queued: list[dict[str, Any]] = []
+    if not dry_run:
+        for row in eligible:
+            queued_item = state.enqueue_retry_queue_item(
+                row,
+                requested_by=actor,
+                reason=f"retry_failed:{stage or 'all'}",
+                max_attempts=3,
+            )
+            queued.append(queued_item)
+
     payload = {
         "stage": stage,
         "limit": limit,
         "dry_run": dry_run,
         "actor": actor,
         "candidate_count": len(candidates),
+        "eligible_count": len(eligible),
+        "blocked_count": len(blocked),
+        "queued_count": len(queued),
         "candidates": candidates,
+        "eligible": eligible,
+        "blocked": blocked,
+        "queued": queued,
     }
     _emit_event(
         state,
         event_type="control.retry_failed",
-        message=f"Retry failed requested for stage={stage or 'all'} limit={limit} dry_run={dry_run}",
+        message=(
+            f"Retry failed requested for stage={stage or 'all'} limit={limit} dry_run={dry_run} "
+            f"eligible={len(eligible)} blocked={len(blocked)} queued={len(queued)}"
+        ),
         stage=stage or "control",
         scope=f"stage:{stage}" if stage else "scope:all",
         payload=payload,
-        recommendation="Dry-run only; actual requeue wiring can be added after policy review",
+        recommendation="Dry-run only; actual requeue uses retry queue and daemon planner",
     )
     message = f"Retry candidates: {len(candidates)} job(s)"
     if dry_run:
         message = f"Dry-run retry candidates: {len(candidates)} job(s)"
     else:
-        message += " (actual requeue is not wired yet; review candidates manually)"
+        message = f"Queued {len(queued)} retry job(s)"
+        if blocked:
+            message += f" ({len(blocked)} blocked by policy)"
     return ActionResult(
         ok=True,
         action="retry-failed",
         message=message,
         data=payload,
-        warnings=[] if dry_run else ["Actual requeue is not wired yet; this records only the retry request."],
+        warnings=[] if dry_run else ([f"{len(blocked)} candidate(s) blocked by policy and not queued"] if blocked else []),
     )
 
 
@@ -348,7 +385,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("group")
     add_common_flags(p)
 
-    p = subparsers.add_parser("retry-failed", help="List retry candidates")
+    p = subparsers.add_parser("retry-failed", help="List or enqueue retry candidates")
     p.add_argument("--stage", default="")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--dry-run", action="store_true", default=True)
