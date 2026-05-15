@@ -38,6 +38,9 @@ CHUNK_SECONDS_VALUE="45"
 OVERLAP_SECONDS_VALUE="2"
 VIDEO_WORKERS_VALUE="1"
 RATE_LIMIT_SAFE_VALUE="0"
+AUDIO_MAX_GB_VALUE="${ASR_AUDIO_MAX_GB:-5}"
+AUDIO_WARN_GB_VALUE="${ASR_AUDIO_WARN_GB:-}"
+SKIP_AUDIO_GUARD_VALUE="0"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -93,6 +96,18 @@ while [[ $# -gt 0 ]]; do
             RATE_LIMIT_SAFE_VALUE="1"
             shift
             ;;
+        --audio-max-gb)
+            AUDIO_MAX_GB_VALUE="$2"
+            shift 2
+            ;;
+        --audio-warn-gb)
+            AUDIO_WARN_GB_VALUE="$2"
+            shift 2
+            ;;
+        --skip-audio-guard)
+            SKIP_AUDIO_GUARD_VALUE="1"
+            shift
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -110,6 +125,9 @@ while [[ $# -gt 0 ]]; do
             echo "  --overlap-seconds N   Chunk overlap in seconds, default: 2"
             echo "  --workers N           Parallel download workers, default: 1"
             echo "  --rate-limit-safe     Enable safer yt-dlp pacing"
+            echo "  --audio-max-gb N      Hard stop when ASR audio cache reaches N GB, default: 5"
+            echo "  --audio-warn-gb N     Warning threshold in GB"
+            echo "  --skip-audio-guard    Disable hard audio cache guard for this run"
             echo "  --help                Show this help message"
             exit 0
             ;;
@@ -158,8 +176,30 @@ mkdir -p "$(dirname "$JOB_LOG_PATH")"
 exec >>"$JOB_LOG_PATH" 2>&1
 
 export ASR_AUDIO_DIR="${ASR_AUDIO_DIR:-$REPO_DIR/uploads/audio}"
+export ASR_AUDIO_MAX_GB="$AUDIO_MAX_GB_VALUE"
+if [ -n "$AUDIO_WARN_GB_VALUE" ]; then
+    export ASR_AUDIO_WARN_GB="$AUDIO_WARN_GB_VALUE"
+fi
+
 if [ "$RATE_LIMIT_SAFE_VALUE" = "1" ]; then
     export YT_ASR_RATE_LIMIT_SAFE=1
+fi
+
+if [ "$SKIP_AUDIO_GUARD_VALUE" != "1" ]; then
+    GUARD_ARGS=("-m" "orchestrator.audio_guard" "check" "--audio-dir" "$ASR_AUDIO_DIR" "--max-gb" "$AUDIO_MAX_GB_VALUE")
+    if [ -n "$AUDIO_WARN_GB_VALUE" ]; then
+        GUARD_ARGS+=("--warn-gb" "$AUDIO_WARN_GB_VALUE")
+    fi
+    echo "🔒 Checking ASR audio cache guard..."
+    set +e
+    "$VENV_PYTHON" "${GUARD_ARGS[@]}"
+    GUARD_EXIT=$?
+    set -e
+    if [ "$GUARD_EXIT" -ne 0 ]; then
+        echo "❌ Audio download blocked: ASR audio cache is over limit (${AUDIO_MAX_GB_VALUE} GB)." >&2
+        echo "   Run ASR first or clean uploads/audio before downloading more audio." >&2
+        exit "$GUARD_EXIT"
+    fi
 fi
 
 CMD_ARGS=(
