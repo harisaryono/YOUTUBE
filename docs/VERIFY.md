@@ -84,6 +84,9 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] `./scripts/orchestrator.sh cancel --job-id <JOB_ID>` bisa menandai job running sebagai `cancelled` dan melepaskan lock.
 - [ ] `./scripts/orchestrator.sh cancel-stage <stage>` dan `cancel-group <group>` hanya menarget job running yang cocok.
 - [ ] `./scripts/orchestrator.sh reconcile` menandai job yang PID-nya sudah mati berdasarkan `exit_code.txt` atau log yang tersedia.
+- [ ] `./scripts/orchestrator.sh validate` lolos dan memeriksa `parallel`, `timeouts`, serta file konteks `AI_CONTEXT/` yang wajib ada.
+- [ ] `./scripts/orchestrator.sh run` menulis PID proses daemon Python ke pidfile, bukan PID shell wrapper.
+- [ ] Stage YouTube sensitif (`transcript`, `audio_download`) yang scope/channel sama tidak boleh berjalan paralel jika scope lock masih aktif.
 - [ ] Claim per video aktif: row yang sudah di-claim punya `processing_stage` / `processing_owner` / `processing_until`, dan wrapper transcript/resume/format me-release claim setelah job selesai.
 - [ ] `timeouts:` di [orchestrator.yaml](/media/harry/DATA120B/GIT/YOUTUBE/orchestrator.yaml) memuat timeout stage dasar untuk discovery, transcript, audio download, resume, ASR, dan format.
 - [ ] `timeouts:` juga bisa dioverride lewat `.env` dengan `ORCH_TIMEOUT_*` keys yang relevan.

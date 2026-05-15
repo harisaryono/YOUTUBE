@@ -1,6 +1,6 @@
 # AI_CONTEXT Handoff
 
-Generated: `2026-05-14T22:02:45.314366+00:00`
+Generated: `2026-05-15T06:20:17+07:00`
 
 ## What to open first
 
@@ -18,6 +18,11 @@ Generated: `2026-05-14T22:02:45.314366+00:00`
 - Manual download flows into resume and formatting automatically.
 - Shell entrypoints live under `scripts/`.
 - Orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
+- Stage 8 adds control-plane hardening:
+  - `./scripts/orchestrator.sh validate`
+  - daemon PID lifecycle cleanup in `scripts/orchestrator.sh run`
+  - async report postprocess hook
+  - scope lock for `transcript` / `audio_download`
 
 ## Important constraints
 
@@ -25,9 +30,11 @@ Generated: `2026-05-14T22:02:45.314366+00:00`
 - Keep manual transcript jobs from being double-submitted.
 - Treat large data dirs (`runs/`, `uploads/`, `logs/`, `tmp/`) as runtime artifacts, not source of truth.
 - Orchestrator state DB: `runs/orchestrator/orchestrator_state.db`
+- `AI_CONTEXT/` is working context for AI tasks, not source of truth.
 
 ## Notes for AI readers
 
 - The repo has many legacy compatibility files in `partial_py/`, `partial_docs/`, and `partial_ops/`.
 - Use `docs/README.md` as the index, then `docs/WORKFLOWS.md` for operational flow.
 - Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`
+- Validate before patching when stage 8 changes touch orchestrator control plane.

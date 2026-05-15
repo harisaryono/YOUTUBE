@@ -12,6 +12,7 @@ Dokumen ini adalah ringkasan operasional cepat untuk alur kerja repo `YOUTUBE`. 
 ## Peta Cepat
 
 - Orchestrator utama: [scripts/run_pipeline.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/run_pipeline.sh)
+- Orchestrator control plane: [scripts/orchestrator.sh](/media/harry/DATA120B/GIT/YOUTUBE/scripts/orchestrator.sh)
 - Indeks dokumen: [docs/README.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/README.md)
 - Panduan umum: [README.md](/media/harry/DATA120B/GIT/YOUTUBE/README.md)
 - Status operasional: [docs/PROGRESS.md](/media/harry/DATA120B/GIT/YOUTUBE/docs/PROGRESS.md)
@@ -47,6 +48,8 @@ Catatan:
   - `youtube:discovery` hanya menahan discovery.
   - `youtube:content` hanya menahan transcript/audio.
   - cooldown `youtube` global tetap dipakai untuk blok berat seperti bot/captcha/IP block.
+- `./scripts/orchestrator.sh validate` memeriksa config parallel, timeout dasar, dan working context `AI_CONTEXT/` sebelum daemon dipakai.
+- `./scripts/orchestrator.sh run` sekarang menyimpan PID proses daemon Python, bukan PID wrapper shell, supaya `stop` dan recovery lebih bersih.
 
 ## Transcript
 
@@ -77,6 +80,7 @@ Output:
 
 Catatan:
 - Wrapper transcript sekarang men-claim row target sebelum menulis `tasks.csv`, lalu melepas claim setelah worker selesai.
+- Job transcript dan audio_download sekarang juga memakai scope lock per channel saat dijalankan oleh orchestrator async, supaya stage sensitif pada channel yang sama tidak paralel.
 - Jalur web/manual untuk video publik yang belum punya transcript sekarang memakai chain `scripts/manual_transcript_then_resume_format.sh`, jadi setelah manual download sukses, resume dan format jalan otomatis.
 - hard block harus ditandai jelas.
 - batch harus berhenti lebih awal jika hard block berturut-turut sudah melewati threshold.

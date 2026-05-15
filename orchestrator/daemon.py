@@ -206,6 +206,104 @@ def _job_age_seconds(row: dict[str, Any]) -> int:
     return max(0, int(delta.total_seconds()))
 
 
+def _job_payload(row: dict[str, Any]) -> dict[str, Any]:
+    raw = str(row.get("payload_json") or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _scope_lock_key_for_job(row: dict[str, Any]) -> str:
+    stage = str(row.get("stage") or "").strip().lower()
+    scope = str(row.get("scope") or "").strip()
+    payload = _job_payload(row)
+    payload_key = str(payload.get("scope_lock_key") or "").strip()
+    if payload_key:
+        return payload_key
+    if stage in {"transcript", "audio_download"} and scope.startswith("channel:"):
+        return f"scope:{scope}"
+    return ""
+
+
+def _release_job_scope_lock(state: OrchestratorState, row: dict[str, Any]) -> None:
+    lock_key = _scope_lock_key_for_job(row)
+    if lock_key:
+        state.release_lock(lock_key)
+
+
+def _report_candidates_for_stage(stage: str, run_dir: str | Path, row: dict[str, Any]) -> list[Path]:
+    run_path = Path(run_dir)
+    stage = str(stage or "").strip().lower()
+    payload = _job_payload(row)
+    explicit = str(payload.get("report_csv") or "").strip()
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit))
+    if stage == "transcript":
+        candidates.extend([run_path / "recover_report.csv"])
+    elif stage == "asr":
+        candidates.extend([run_path / "recover_asr_report.csv"])
+    elif stage == "resume":
+        candidates.extend([run_path / "report.csv", run_path / "resume_report.csv"])
+    elif stage == "format":
+        candidates.extend([run_path / "report.csv", run_path / "format_report.csv"])
+    elif stage == "audio_download":
+        candidates.extend([run_path / "audio_download_report.csv", run_path / "report.csv"])
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _postprocess_finished_job(config: dict[str, Any], state: OrchestratorState, row: dict[str, Any], *, exit_code: int) -> None:
+    stage = str(row.get("stage") or "").strip().lower()
+    run_dir = str(row.get("run_dir") or "").strip()
+    if not run_dir:
+        return
+
+    if stage not in {"transcript", "asr"}:
+        return
+
+    from .error_analyzer import analyze_report_csv
+
+    for report_csv in _report_candidates_for_stage(stage, run_dir, row):
+        if not report_csv.exists():
+            continue
+        try:
+            analyze_report_csv(str(report_csv), state)
+            state.add_event(
+                event_type="report",
+                stage=stage,
+                scope=str(row.get("scope") or ""),
+                message=f"Analyzed report CSV for {stage}: {report_csv.name}",
+                severity="info",
+                payload={
+                    "job_id": str(row.get("job_id") or ""),
+                    "report_csv": str(report_csv),
+                    "exit_code": exit_code,
+                },
+            )
+            break
+        except Exception as exc:
+            state.add_event(
+                event_type="error",
+                stage=stage,
+                scope=str(row.get("scope") or ""),
+                message=f"Failed to analyze report CSV {report_csv}: {exc}",
+                severity="warning",
+            )
+            continue
+
+
 def _format_duration(seconds: int) -> str:
     seconds = max(0, int(seconds))
     if seconds < 60:
@@ -307,6 +405,10 @@ def _job_timeout_remaining_seconds(config: dict[str, Any], row: dict[str, Any]) 
 def _job_timeout_seconds(config: dict[str, Any], row: dict[str, Any]) -> int:
     stage = str(row.get("stage") or "")
     return _stage_timeout_seconds(config, stage)
+
+
+def _stage_needs_scope_lock(stage: str) -> bool:
+    return str(stage or "").strip().lower() in {"transcript", "audio_download"}
 
 
 def _tail_file(path: Path, tail_lines: int) -> list[str]:
@@ -442,7 +544,14 @@ def _cancel_job_row(
     scope = str(row.get("scope") or "")
 
     if pid <= 0:
-        return {"job_id": job_id, "status": "skipped", "reason": "invalid pid"}
+        reconciled = _reconcile_running_job(state, row)
+        if reconciled.get("status") == "alive":
+            return {"job_id": job_id, "status": "pending", "reason": "process still alive"}
+        return {
+            "job_id": job_id,
+            "status": reconciled.get("status", "reconciled"),
+            "reason": f"reconciled as {reconciled.get('status', 'unknown')}",
+        }
     if not _pid_is_alive(pid):
         reconciled = _reconcile_running_job(state, row)
         if reconciled.get("status") == "alive":
@@ -491,6 +600,7 @@ def _cancel_job_row(
     )
     if lock_key:
         state.release_lock(lock_key)
+    _release_job_scope_lock(state, row)
     state.add_event(
         event_type="control",
         stage=stage,
@@ -517,7 +627,7 @@ def _timeout_running_job(
     log_path = str(row.get("log_path") or "")
 
     if pid <= 0:
-        return {"job_id": job_id, "status": "skipped", "reason": "invalid pid"}
+        return _reconcile_running_job(state, row)
     if not _pid_is_alive(pid):
         return _reconcile_running_job(state, row)
 
@@ -546,6 +656,7 @@ def _timeout_running_job(
     )
     if lock_key:
         state.release_lock(lock_key)
+    _release_job_scope_lock(state, row)
     state.add_event(
         event_type="timeout",
         stage=stage,
@@ -602,6 +713,7 @@ def _reconcile_running_job(state: OrchestratorState, row: dict[str, Any]) -> dic
     )
     if lock_key:
         state.release_lock(lock_key)
+    _release_job_scope_lock(state, row)
     state.add_event(
         event_type="reconcile",
         stage=stage,
@@ -703,6 +815,7 @@ def poll_active_jobs(
         )
         if lock_key:
             state.release_lock(lock_key)
+        _release_job_scope_lock(state, row)
 
         if exit_code == 0:
             state.add_event(
@@ -713,6 +826,7 @@ def poll_active_jobs(
                 severity="info",
                 payload={"job_id": job_id, "pid": pid, "slot_index": slot_index},
             )
+            _postprocess_finished_job(config, state, row, exit_code=exit_code)
             _maybe_update_adaptive_batch(config, state, stage, success=True, blocked=False)
             result["finished"] += 1
             continue
@@ -745,6 +859,7 @@ def poll_active_jobs(
                 "error_text": error_text[-1000:],
             },
         )
+        _postprocess_finished_job(config, state, row, exit_code=exit_code)
         _maybe_update_adaptive_batch(config, state, stage, success=False, blocked=classification.cooldown_seconds > 0)
         result["failed"] += 1
 
@@ -1024,6 +1139,17 @@ def run_once(
 
         if result.get("launched"):
             cycle_result["jobs_dispatched"] += 1
+        elif result.get("deferred"):
+            state.release_lock(lock_key)
+            cycle_result["jobs_deferred"] += 1
+            state.add_event(
+                event_type="deferred",
+                message=f"{stage} deferred: {result.get('reason', 'scope lock busy')}",
+                stage=stage,
+                scope=job.get("scope", ""),
+                severity="info",
+                reason_code="DEFER_SCOPE_LOCK",
+            )
         else:
             state.release_lock(lock_key)
             cycle_result["jobs_failed"] += 1

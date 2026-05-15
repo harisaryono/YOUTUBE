@@ -11,6 +11,7 @@
 #   ./scripts/orchestrator.sh cancel-group youtube
 #   ./scripts/orchestrator.sh reconcile     # Reconcile stale running jobs
 #   ./scripts/orchestrator.sh explain       # Explain why jobs are/aren't running
+#   ./scripts/orchestrator.sh validate      # Validate config + AI_CONTEXT
 #   ./scripts/orchestrator.sh report        # Show latest report JSON
 #   ./scripts/orchestrator.sh stop          # Stop running daemon (via PID file)
 
@@ -64,16 +65,24 @@ case "$MODE" in
         echo "============================================="
         echo ""
 
-        # Write PID file
-        echo $$ > "$PID_FILE"
-        # Clean up PID file on exit, even if killed
+        "$VENV_PYTHON" -m orchestrator.daemon run "$@" &
+        CHILD_PID=$!
+        echo "$CHILD_PID" > "$PID_FILE"
+
         cleanup() {
+            if [ -n "${CHILD_PID:-}" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
+                kill "$CHILD_PID" 2>/dev/null || true
+                sleep 1
+                if kill -0 "$CHILD_PID" 2>/dev/null; then
+                    kill -9 "$CHILD_PID" 2>/dev/null || true
+                fi
+            fi
             rm -f "$PID_FILE"
             echo "Orchestrator stopped."
         }
         trap cleanup EXIT INT TERM HUP
 
-        "$VENV_PYTHON" -m orchestrator.daemon run "$@"
+        wait "$CHILD_PID"
 
         ;;
 
@@ -132,6 +141,10 @@ case "$MODE" in
         exec "$VENV_PYTHON" -m orchestrator.daemon reconcile "$@"
         ;;
 
+    validate)
+        exec "$VENV_PYTHON" -m orchestrator.validate "$@"
+        ;;
+
     explain)
         exec "$VENV_PYTHON" -m orchestrator.daemon explain "$@"
         ;;
@@ -167,7 +180,7 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|explain|report|stop} [options]"
+        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|explain|report|stop} [options]"
         echo ""
         echo "Commands:"
         echo "  once              Run one orchestrator cycle and exit"
@@ -179,6 +192,7 @@ case "$MODE" in
         echo "  cancel-stage      Cancel all running jobs in a stage"
         echo "  cancel-group      Cancel all running jobs in a group"
         echo "  reconcile         Reconcile stale running jobs"
+        echo "  validate          Validate config + AI_CONTEXT"
         echo "  explain           Explain current work inventory and blockers"
         echo "  report            Show latest report as JSON"
         echo "  stop              Stop running daemon"

@@ -1,6 +1,6 @@
 # Project State
 
-- generated_at: `2026-05-14T22:02:45.332380+00:00`
+- generated_at: `2026-05-15T06:20:17+07:00`
 - repo_type: YouTube transcript / resume / format / ASR pipeline
 - active web app: Flask under `flask_app/app.py`
 - database layout: active DBs are under `db/` with root symlinks for compat
@@ -9,6 +9,7 @@
 - transcript/summary content: blob-first, file artifacts cleaned where safe
 - discovery: channel/video ingest and repair utilities remain in `scripts/` and `partial_py/`
 - orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
+- stage 8 hardening: AI_CONTEXT working files, `validate` command, PID cleanup, async report hooks, scope lock
 
 ## Directory Snapshot
 - `docs`: 18 files
@@ -47,3 +48,4 @@
 - dispatch via subprocess ke script yang sudah ada
 - auto cooldown berdasarkan klasifikasi error
 - report Markdown + JSON di runs/orchestrator/reports/
+- control-plane hardening: `active`, `logs`, `cancel`, `reconcile`, `validate`, timeout, scope lock, async report analysis

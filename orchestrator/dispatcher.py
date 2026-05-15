@@ -91,6 +91,10 @@ def _parallel_group_for_stage(stage: str) -> str:
     return "local"
 
 
+def _stage_needs_scope_lock(stage: str) -> bool:
+    return str(stage or "").strip().lower() in {"transcript", "audio_download"}
+
+
 def _shell_wrap_command(cmd: list[str], exit_code_path: Path) -> list[str]:
     quoted = " ".join(shlex.quote(str(part)) for part in cmd)
     shell = (
@@ -256,7 +260,26 @@ def launch_job(
     if not stage:
         return {"success": False, "error": "Missing stage"}
 
-    cmd, env, run_dir, log_path = _build_stage_launch_command(job, config, state)
+    scope_lock_key = ""
+    if _stage_needs_scope_lock(stage):
+        scope = str(job.get("scope") or "").strip()
+        if scope:
+            scope_lock_key = f"scope:{scope}"
+            if not state.acquire_lock(scope_lock_key, owner=f"pending:{stage}", ttl_seconds=7200):
+                return {
+                    "success": True,
+                    "launched": False,
+                    "deferred": True,
+                    "reason": f"scope lock busy: {scope_lock_key}",
+                    "scope_lock_key": scope_lock_key,
+                }
+
+    try:
+        cmd, env, run_dir, log_path = _build_stage_launch_command(job, config, state)
+    except Exception as e:
+        if scope_lock_key:
+            state.release_lock(scope_lock_key)
+        return {"success": False, "error": f"Failed to build command for {stage}: {e}"}
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -272,6 +295,8 @@ def launch_job(
     try:
         log_fh = open(log_path, "ab", buffering=0)
     except Exception as e:
+        if scope_lock_key:
+            state.release_lock(scope_lock_key)
         return {"success": False, "error": f"Failed to open log file: {e}"}
 
     try:
@@ -288,6 +313,8 @@ def launch_job(
             log_fh.close()
         except Exception:
             pass
+        if scope_lock_key:
+            state.release_lock(scope_lock_key)
         return {"success": False, "error": f"Failed to launch {stage}: {e}"}
     finally:
         try:
@@ -308,13 +335,19 @@ def launch_job(
             command=command_text,
             run_dir=str(run_dir),
             log_path=str(log_path),
-            payload={"job": job, "exit_code_path": str(exit_code_path)},
+            payload={
+                "job": job,
+                "exit_code_path": str(exit_code_path),
+                "scope_lock_key": scope_lock_key,
+            },
         )
     except Exception as e:
         try:
             process.terminate()
         except Exception:
             pass
+        if scope_lock_key:
+            state.release_lock(scope_lock_key)
         return {"success": False, "error": f"Failed to register active job: {e}"}
     state.add_event(
         event_type="dispatch",
@@ -342,6 +375,7 @@ def launch_job(
         "log_path": str(log_path),
         "slot_index": slot_index,
         "lock_key": lock_key,
+        "scope_lock_key": scope_lock_key,
     }
 
 

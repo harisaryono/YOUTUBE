@@ -59,6 +59,9 @@
   - loop aggressiveness sekarang diturunkan ke `min_sleep_seconds: 5` agar re-plan cepat saat masih ada kerja yang aman
   - command `./scripts/orchestrator.sh explain` sekarang menampilkan inventori kerja, blocker, dan reason code defer aktif
   - command operasional tambahan sekarang tersedia: `active`, `logs`, `cancel`, `cancel-stage`, `cancel-group`, dan `reconcile`
+  - `validate` sekarang tersedia untuk memeriksa `parallel`, `timeouts`, dan working context `AI_CONTEXT/` sebelum patch/control-plane dipakai
+  - `scripts/orchestrator.sh run` sekarang menyimpan PID proses daemon Python, bukan PID wrapper shell
+  - stage YouTube sensitif `transcript` dan `audio_download` sekarang memakai scope lock per channel saat diluncurkan lewat orchestrator async
   - timeout stage dasar sekarang aktif lewat `timeouts:` di config; job yang lewat batas akan diterminasi dan dicatat sebagai `timeout` saat cycle polling normal
 - discovery sekarang punya bootstrap state: channel yang belum punya `full_history_scanned_at` dipindai `scan-all-missing` dulu, lalu setelah itu masuk rotasi `latest-only`
 - cooldown YouTube sekarang dipisah lebih halus:
