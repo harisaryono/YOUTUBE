@@ -179,3 +179,9 @@ janitor:
   keep_run_dirs_days: 7
   keep_reports_days: 14
   cleanup_audio_orphans: true
+
+retry_queue:
+  enabled: true
+  max_per_cycle: 1
+  max_attempts_default: 1
+  prefer_retry_before_normal: false

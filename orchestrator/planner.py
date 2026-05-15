@@ -57,7 +57,7 @@ def _adaptive_priority(stage: str, youtube_pressure: int, boost_threshold: int) 
     return int(JOB_PRIORITY_AVAILABLE_WORK_FIRST.get(stage, 99))
 
 
-def _retry_queue_job_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
+def build_retry_queue_job(item: dict[str, Any]) -> dict[str, Any] | None:
     payload = item.get("payload") or {}
     if not isinstance(payload, dict):
         payload = {}
@@ -222,10 +222,17 @@ def plan_jobs(
         })
 
     # 1b. Retry queue — safe requeue candidates requested by operator.
-    retry_queue_items = state.list_retry_queue(status="pending", limit=max_jobs * 4)
-    if retry_queue_items:
+    retry_cfg = config.get("retry_queue", {}) or {}
+    retry_enabled = bool(retry_cfg.get("enabled", True) is not False)
+    retry_max_per_cycle = max(0, int(retry_cfg.get("max_per_cycle", 1) or 1))
+    retry_prefer_before = bool(retry_cfg.get("prefer_retry_before_normal", False))
+    if retry_enabled and retry_max_per_cycle > 0:
+        retry_queue_items = state.list_retry_queue(status="pending", limit=retry_max_per_cycle * 4)
+        retry_added = 0
         for item in retry_queue_items:
-            retry_job = _retry_queue_job_from_item(item)
+            if retry_added >= retry_max_per_cycle:
+                break
+            retry_job = build_retry_queue_job(item)
             if not retry_job:
                 continue
             blockers = policy_blockers_for_job(
@@ -235,13 +242,14 @@ def plan_jobs(
             )
             if blockers:
                 continue
-            retry_job["priority"] = 0
+            retry_job["priority"] = 0 if retry_prefer_before else 999
             retry_job["count"] = int(item.get("attempts") or 0)
             retry_job["description"] = (
                 f"Retry {retry_job.get('stage', '')} for {retry_job.get('scope', '') or 'global'}"
                 f" (attempt {int(item.get('attempts') or 0) + 1})"
             )
             jobs.append(retry_job)
+            retry_added += 1
 
     # Precompute backlog counts so the planner can adjust priorities adaptively.
     resume_count = db_queries.count_videos_need_resume(config, state)

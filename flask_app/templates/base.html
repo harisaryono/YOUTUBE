@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}YouTube Transcript Manager{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon.png') }}">
+    <link rel="shortcut icon" type="image/png" href="{{ url_for('static', filename='icon.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.png') }}">
     
     <!-- Performance Hints -->
     <link rel="preconnect" href="https://www.youtube-nocookie.com">
@@ -41,11 +45,23 @@
         .navbar-brand {
             color: white !important;
             font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
         }
 
         .navbar-brand i {
             color: var(--primary-color);
             margin-right: 8px;
+        }
+
+        .brand-icon {
+            width: 1.5rem;
+            height: 1.5rem;
+            object-fit: contain;
+            border-radius: .35rem;
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.16);
+            flex: 0 0 auto;
         }
 
         .nav-link {
@@ -405,7 +421,7 @@
     <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('index') }}">
-                <i class="bi bi-youtube"></i>
+                <img class="brand-icon" src="{{ url_for('static', filename='icon.png') }}" alt="" aria-hidden="true">
                 YouTube Transcript Manager
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
