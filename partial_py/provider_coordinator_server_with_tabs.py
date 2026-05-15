@@ -702,7 +702,10 @@ def provider_model_limits_payload(
         SELECT provider, model_name,
                context_window_tokens, max_output_tokens,
                recommended_prompt_tokens, recommended_completion_tokens,
-               chars_per_token, notes, updated_at
+               chars_per_token,
+               request_quota_per_minute, request_quota_per_hour, request_quota_per_day,
+               token_quota_per_minute, token_quota_per_hour, token_quota_per_day,
+               notes, updated_at
         FROM {PROVIDER_MODEL_LIMITS_TABLE}
         WHERE provider = ? AND model_name = ?
         LIMIT 1
@@ -719,6 +722,12 @@ def provider_model_limits_payload(
         "recommended_prompt_tokens": int(row["recommended_prompt_tokens"] or 0),
         "recommended_completion_tokens": int(row["recommended_completion_tokens"] or 0),
         "chars_per_token": float(row["chars_per_token"] or 4.0),
+        "request_quota_per_minute": int(row["request_quota_per_minute"] or 0),
+        "request_quota_per_hour": int(row["request_quota_per_hour"] or 0),
+        "request_quota_per_day": int(row["request_quota_per_day"] or 0),
+        "token_quota_per_minute": int(row["token_quota_per_minute"] or 0),
+        "token_quota_per_hour": int(row["token_quota_per_hour"] or 0),
+        "token_quota_per_day": int(row["token_quota_per_day"] or 0),
         "notes": str(row["notes"] or ""),
         "updated_at": str(row["updated_at"] or ""),
     }

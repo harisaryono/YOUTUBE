@@ -1095,6 +1095,93 @@ class OrchestratorState:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    # --- Safety flags (Stage 15) ---
+
+    _SAFETY_ES_KEY = "safety:emergency_stop"
+    _SAFETY_READONLY_KEY = "safety:readonly"
+
+    def set_emergency_stop(self, reason: str = "", actor: str = "cli") -> None:
+        """Activate emergency stop with a reason."""
+        payload = json.dumps({
+            "active": True,
+            "reason": str(reason or "").strip(),
+            "actor": str(actor or "").strip(),
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        })
+        self.set(self._SAFETY_ES_KEY, payload)
+        self.add_event(
+            event_type="safety.emergency_stop.enabled",
+            message=f"Emergency stop activated by {actor}: {reason}" if reason else f"Emergency stop activated by {actor}",
+            stage="control",
+            severity="blocking",
+            payload={"actor": actor, "reason": reason},
+        )
+
+    def clear_emergency_stop(self, reason: str = "", actor: str = "cli") -> None:
+        """Clear emergency stop."""
+        payload = json.dumps({
+            "active": False,
+            "reason": str(reason or "").strip(),
+            "actor": str(actor or "").strip(),
+            "cleared_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        })
+        self.set(self._SAFETY_ES_KEY, payload)
+        self.add_event(
+            event_type="safety.emergency_stop.cleared",
+            message=f"Emergency stop cleared by {actor}: {reason}" if reason else f"Emergency stop cleared by {actor}",
+            stage="control",
+            severity="info",
+            payload={"actor": actor, "reason": reason},
+        )
+
+    def is_emergency_stop_active(self) -> bool:
+        """Return True if emergency stop is active."""
+        raw = self.get(self._SAFETY_ES_KEY, "").strip()
+        if not raw:
+            return False
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return False
+        return bool(payload.get("active", False))
+
+    def get_safety_status(self) -> dict[str, Any]:
+        """Return full safety status dict."""
+        es_raw = self.get(self._SAFETY_ES_KEY, "").strip()
+        es_payload: dict[str, Any] = {}
+        if es_raw:
+            try:
+                es_payload = json.loads(es_raw)
+            except Exception:
+                es_payload = {"raw": es_raw}
+        ro_raw = self.get(self._SAFETY_READONLY_KEY, "").strip()
+        ro_payload: dict[str, Any] = {}
+        if ro_raw:
+            try:
+                ro_payload = json.loads(ro_raw)
+            except Exception:
+                ro_payload = {"raw": ro_raw}
+        return {
+            "emergency_stop": {
+                "active": bool(es_payload.get("active", False)),
+                "reason": str(es_payload.get("reason") or "").strip(),
+                "actor": str(es_payload.get("actor") or "").strip(),
+                "updated_at": str(es_payload.get("updated_at") or "").strip(),
+                "cleared_at": str(es_payload.get("cleared_at") or "").strip(),
+            },
+            "readonly": {
+                "active": bool(ro_payload.get("active", False)),
+                "reason": str(ro_payload.get("reason") or "").strip(),
+            },
+        }
+
+    def list_safety_events(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent safety-related events."""
+        return self.get_recent_events(
+            limit=limit,
+            event_type="safety.emergency_stop.enabled,safety.emergency_stop.cleared,safety.launch_blocked,safety.drain_blocked",
+        )
+
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)
         if conn is not None:

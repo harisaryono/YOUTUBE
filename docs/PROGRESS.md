@@ -394,3 +394,39 @@ yang sudah ada.
 - Web hanya wrapper, tidak membuat logic sendiri
 - Drain nyata limit=1, butuh JS confirm
 - Semua action audit event di orchestrator_events
+
+## Stage 15 — Safety Gate & Emergency Stop
+
+Stage 15 menambahkan safety gate yang lebih eksplisit untuk
+sistem, provider, dan YouTube health, serta emergency stop
+untuk menghentikan semua job launch saat darurat.
+
+**Implemented:**
+- `orchestrator/safety.py` — modul safety gate:
+  - `SystemHealth`, `ProviderHealth`, `YouTubeHealth` — health snapshot classes
+  - `SafetyDecision` — verdict RUN/WAIT/SKIP_PERMANENT/REPORT
+  - `check_system_health()` — disk, memory, load
+  - `check_provider_health()` — coordinator availability, blocked providers
+  - `check_youtube_health()` — global cooldown status
+  - `safety_gate_for_job()` — per-job safety decision (disk low, cooldowns, memory, coordinator, idle hours)
+  - `ensure_launch_allowed()` — emergency stop guard for launch_job and retry_queue_drain
+  - CLI: `python -m orchestrator.safety status [--json]`
+  - CLI: `python -m orchestrator.safety emergency-stop --reason "..."`
+  - CLI: `python -m orchestrator.safety clear-emergency-stop --reason "..."`
+- `orchestrator/state.py` — emergency stop, readonly, safety_events methods:
+  - `set_emergency_stop()`, `clear_emergency_stop()`, `is_emergency_stop_active()`
+  - `set_readonly()`, `clear_readonly()`, `is_readonly_active()`
+  - `get_safety_status()`, `add_safety_event()`, `list_safety_events()`
+- `orchestrator/dispatcher.py` — guard di `launch_job()` via `ensure_launch_allowed()`
+- `orchestrator/retry_executor.py` — guard di `drain_retry_queue()` via `ensure_launch_allowed()`
+- `orchestrator/daemon.py` — mode `safety` sebagai CLI endpoint:
+  - `./scripts/orchestrator.sh safety status`
+  - `./scripts/orchestrator.sh safety emergency-stop --reason "..." --actor "..."`
+  - `./scripts/orchestrator.sh safety clear-emergency-stop --reason "..." --actor "..."`
+
+**Invariant:**
+- Emergency stop hanya memblokir launch baru, tidak mematikan job yang sudah berjalan
+- Dry-run retry queue tetap diizinkan saat emergency stop aktif
+- Safety event direcord ke orchestrator_events untuk audit trail
+- CLI standalone `python -m orchestrator.safety` bisa dipakai tanpa daemon
+- Config `safety.emergency_stop_blocks_launch` dan `safety.emergency_stop_blocks_retry_drain` bisa disable guard

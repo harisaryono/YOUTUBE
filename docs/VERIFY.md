@@ -104,6 +104,22 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - [ ] `./scripts/orchestrator.sh doctor --json` menampilkan `claimed`, `blocked_pending`, dan `oldest_pending`.
 - [ ] Dashboard `/admin/orchestrator` menampilkan retry queue summary yang lebih operasional.
 
+## Stage 14 Web Admin Control Actions & Retry Queue UI Validation
+
+- [ ] `python3 -m compileall flask_app/app.py` berhasil.
+- [ ] `GET /admin/orchestrator/retry-queue` menampilkan halaman retry queue dengan stats, pending, blocked, pauses, policy blockers tanpa error.
+- [ ] `GET /admin/orchestrator/retry-queue?format=json` mengembalikan JSON valid dengan `stats`, `pending`, `blocked`, `pauses`, `policy_blockers`.
+- [ ] Tombol `Dry-Run Drain` di retry queue page memanggil `drain_retry_queue()` dengan `dry_run=true` dan tidak meluncurkan job nyata.
+- [ ] Tombol `Drain 1 Item` di retry queue page memicu JS `confirm()` sebelum drain nyata dengan `limit=1`.
+- [ ] Form `Pause Stage` di retry queue page memanggil `orchestrator.actions.pause_stage()` dan pause terlihat di doctor.
+- [ ] Form `Resume Stage` di retry queue page memanggil `orchestrator.actions.resume_stage()` dan pause hilang.
+- [ ] Form `Pause Group` dan `Resume Group` di retry queue page berfungsi dan state berubah sesuai.
+- [ ] Form `Quarantine Channel` dan `Unquarantine Channel` di retry queue page memanggil `orchestrator.actions` dan state berubah.
+- [ ] Dashboard `/admin/orchestrator` menampilkan retry queue summary (pending/claimed/running/completed/failed/blocked_pending).
+- [ ] Semua action di web admin hanya memanggil `orchestrator.actions` / `orchestrator.retry_executor`, tidak membuat logic sendiri.
+- [ ] Semua action web tercatat sebagai event di `orchestrator_events`.
+- [ ] `./scripts/orchestrator.sh doctor --json` menampilkan retry queue summary yang konsisten dengan halaman web.
+
 ## Batch Validations
 - **Phase 1 Validation**:
   - [ ] 5 videos processed.

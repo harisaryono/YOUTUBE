@@ -55,7 +55,8 @@ def _parallel_config(config: dict[str, Any]) -> dict[str, Any]:
         "max_total_jobs": config.get("orchestrator", {}).get("max_parallel_jobs", 1),
         "groups": {
             "discovery": {"max_running": 1, "stages": ["discovery"]},
-            "youtube": {"max_running": groups.get("youtube", 1), "stages": ["discovery", "transcript", "audio_download"]},
+            "youtube": {"max_running": groups.get("youtube", 2), "stages": ["transcript"]},
+            "youtube_download": {"max_running": groups.get("youtube_download", 1), "stages": ["audio_download"]},
             "provider": {"max_running": groups.get("provider", 1), "stages": ["resume", "asr"]},
             "local": {"max_running": groups.get("local", 1), "stages": ["format", "janitor", "import_pending"]},
         },
@@ -101,8 +102,10 @@ def _stage_group_name(config: dict[str, Any], stage: str) -> str:
             return str(group_name)
     if stage == "discovery":
         return "discovery"
-    if stage in {"transcript", "audio_download"}:
+    if stage == "transcript":
         return "youtube"
+    if stage == "audio_download":
+        return "youtube_download"
     if stage in {"resume", "asr"}:
         return "provider"
     return "local"
@@ -1403,6 +1406,7 @@ def main() -> None:
             "pause",
             "resume",
             "janitor",
+            "safety",
         ],
         help="Operation mode (default: once)",
     )
@@ -1715,7 +1719,7 @@ def main() -> None:
         stage_defs = [
             ("Import Pending", "import_pending", "local"),
             ("Transcript", "transcript", "youtube"),
-            ("Audio Download", "audio_download", "youtube"),
+            ("Audio Download", "audio_download", "youtube_download"),
             ("ASR", "asr", "provider"),
             ("Resume", "resume", "provider"),
             ("Format", "format", "local"),
@@ -1783,6 +1787,26 @@ def main() -> None:
             print(json.dumps(report, indent=2, default=str))
         else:
             print("No report yet.")
+
+    elif args.mode == "safety":
+        from .safety import (
+            build_parser as _safety_parser,
+            cmd_status,
+            cmd_emergency_stop,
+            cmd_clear_emergency_stop,
+        )
+        safety_parser = _safety_parser()
+        safety_args = safety_parser.parse_args(sys.argv[2:] if len(sys.argv) > 2 else ["status"])
+        safety_args.config = args.config
+        if safety_args.command == "status":
+            raise SystemExit(cmd_status(config, safety_args))
+        elif safety_args.command == "emergency-stop":
+            raise SystemExit(cmd_emergency_stop(config, safety_args))
+        elif safety_args.command == "clear-emergency-stop":
+            raise SystemExit(cmd_clear_emergency_stop(config, safety_args))
+        else:
+            print(f"Unknown safety command: {safety_args.command}", file=sys.stderr)
+            raise SystemExit(1)
 
     state.close()
 

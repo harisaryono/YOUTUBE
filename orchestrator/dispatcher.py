@@ -15,6 +15,7 @@ from typing import Any
 
 from .state import OrchestratorState
 from .policies import policy_blockers_for_job
+from .safety import ensure_launch_allowed
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -85,8 +86,10 @@ def _parallel_group_for_stage(stage: str) -> str:
     stage = str(stage or "").strip().lower()
     if stage == "discovery":
         return "discovery"
-    if stage in {"transcript", "audio_download"}:
+    if stage == "transcript":
         return "youtube"
+    if stage == "audio_download":
+        return "youtube_download"
     if stage in {"resume", "asr"}:
         return "provider"
     return "local"
@@ -260,6 +263,25 @@ def launch_job(
     stage = str(job.get("stage", "")).strip()
     if not stage:
         return {"success": False, "error": "Missing stage"}
+
+    # Safety guard: emergency stop — block any new job launch if active
+    launch_allowed, launch_blockers = ensure_launch_allowed(config, state, action="launch_job")
+    if not launch_allowed:
+        state.add_event(
+            event_type="safety.launch_blocked",
+            message=f"Job launch blocked for {stage}: {'; '.join(launch_blockers)}",
+            stage="control",
+            severity="blocking",
+            payload={"stage": stage, "scope": str(job.get("scope") or ""), "blockers": launch_blockers},
+        )
+        return {
+            "success": True,
+            "launched": False,
+            "deferred": True,
+            "reason": launch_blockers[0] if launch_blockers else "Emergency stop",
+            "reason_code": "SAFETY_EMERGENCY_STOP",
+            "policy_blockers": [{"type": "safety", "message": blocker} for blocker in launch_blockers],
+        }
 
     blockers = policy_blockers_for_job(state, stage=stage, scope=str(job.get("scope") or "").strip())
     if blockers:

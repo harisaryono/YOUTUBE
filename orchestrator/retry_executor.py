@@ -16,6 +16,7 @@ from .config import DEFAULT_CONFIG_PATH, load_config
 from .dispatcher import launch_job
 from .planner import build_retry_queue_job
 from .policies import policy_blockers_for_job
+from .safety import ensure_launch_allowed
 from .state import OrchestratorState
 
 
@@ -29,7 +30,8 @@ def _parallel_config(config: dict[str, Any]) -> dict[str, Any]:
         "max_total_jobs": config.get("orchestrator", {}).get("max_parallel_jobs", 1),
         "groups": {
             "discovery": {"max_running": 1, "stages": ["discovery"]},
-            "youtube": {"max_running": groups.get("youtube", 1), "stages": ["transcript", "audio_download"]},
+            "youtube": {"max_running": groups.get("youtube", 2), "stages": ["transcript"]},
+            "youtube_download": {"max_running": groups.get("youtube_download", 1), "stages": ["audio_download"]},
             "provider": {"max_running": groups.get("provider", 1), "stages": ["resume", "asr"]},
             "local": {"max_running": groups.get("local", 1), "stages": ["format", "janitor", "import_pending"]},
         },
@@ -79,8 +81,10 @@ def _parallel_group_for_stage(stage: str) -> str:
     stage = str(stage or "").strip().lower()
     if stage == "discovery":
         return "discovery"
-    if stage in {"transcript", "audio_download"}:
+    if stage == "transcript":
         return "youtube"
+    if stage == "audio_download":
+        return "youtube_download"
     if stage in {"resume", "asr"}:
         return "provider"
     return "local"
@@ -265,6 +269,29 @@ def drain_retry_queue(
         "skipped": 0,
         "items": [],
     }
+
+    # Safety guard: block real drain if emergency stop is active, allow dry-run
+    if not dry_run:
+        drain_allowed, drain_blockers = ensure_launch_allowed(config, state, action="retry_queue_drain")
+        if not drain_allowed:
+            state.record_event(
+                event_type="safety.drain_blocked",
+                message=f"Retry queue drain blocked: {'; '.join(drain_blockers)}",
+                stage="control",
+                scope="retry_queue",
+                payload={"blockers": drain_blockers},
+                recommendation="Clear emergency stop before draining retry queue.",
+            )
+            result["blocked"] = len(candidates)
+            for item in candidates:
+                result["items"].append(
+                    _summarize_item(item)
+                    | {
+                        "status": "blocked",
+                        "policy_blockers": [{"type": "safety", "message": block} for block in drain_blockers],
+                    }
+                )
+            return result
 
     max_total = _max_total_jobs(config)
     for item in candidates:

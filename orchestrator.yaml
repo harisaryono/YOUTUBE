@@ -33,7 +33,7 @@ orchestrator:
 parallel:
   enabled: true
   # Global rem so the server is not overloaded.
-  max_total_jobs: 8
+  max_total_jobs: 9
   groups:
     discovery:
       max_running: 1
@@ -43,6 +43,9 @@ parallel:
       max_running: 2
       stages:
         - transcript
+    youtube_download:
+      max_running: 1
+      stages:
         - audio_download
     provider:
       max_running: 3
@@ -141,6 +144,7 @@ format:
 asr:
   # ASR untuk video no_subtitle — aktif
   enabled: true
+  provider_plan: groq_first
   groq_model: "whisper-large-v3"
   nvidia_model: "whisper-large-v3-multi-asr-offline"
   max_video_workers: 2

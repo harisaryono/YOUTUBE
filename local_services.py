@@ -81,6 +81,22 @@ DEFAULT_PROVIDER_MODEL_LIMITS: tuple[dict[str, Any], ...] = (
         "notes": "Baseline formatting/resume backbone. Operationally stable.",
     },
     {
+        "provider": "cerebras",
+        "model_name": "gpt-oss-120b",
+        "context_window_tokens": 65536,
+        "max_output_tokens": 32768,
+        "recommended_prompt_tokens": 12000,
+        "recommended_completion_tokens": 2400,
+        "chars_per_token": 4.0,
+        "request_quota_per_minute": 5,
+        "request_quota_per_hour": 150,
+        "request_quota_per_day": 2400,
+        "token_quota_per_minute": 30000,
+        "token_quota_per_hour": 1000000,
+        "token_quota_per_day": 1000000,
+        "notes": "Cerebras Production. Quota: 5 req/min, 150 req/hour, 2400 req/day; 30k tok/min, 1M tok/hour, 1M tok/day.",
+    },
+    {
         "provider": "groq",
         "model_name": "openai/gpt-oss-20b",
         "context_window_tokens": 131072,
@@ -148,17 +164,29 @@ DEFAULT_PROVIDER_MODEL_LIMITS: tuple[dict[str, Any], ...] = (
         "recommended_prompt_tokens": 3000,
         "recommended_completion_tokens": 1200,
         "chars_per_token": 4.0,
-        "notes": "Cerebras docs: 8k free tier context, 32k paid tiers. Use conservative prompt budget.",
+        "request_quota_per_minute": 5,
+        "request_quota_per_hour": 150,
+        "request_quota_per_day": 2400,
+        "token_quota_per_minute": 30000,
+        "token_quota_per_hour": 1000000,
+        "token_quota_per_day": 1000000,
+        "notes": "Cerebras Production. Quota: 5 req/min, 150 req/hour, 2400 req/day; 30k tok/min, 1M tok/hour, 1M tok/day.",
     },
     {
         "provider": "cerebras",
         "model_name": "qwen-3-235b-a22b-instruct-2507",
-        "context_window_tokens": 32768,
+        "context_window_tokens": 65536,
         "max_output_tokens": 8192,
         "recommended_prompt_tokens": 6000,
         "recommended_completion_tokens": 1500,
         "chars_per_token": 4.0,
-        "notes": "Cerebras docs incomplete for context window on instruct page. Conservative operational budget.",
+        "request_quota_per_minute": 5,
+        "request_quota_per_hour": 150,
+        "request_quota_per_day": 2400,
+        "token_quota_per_minute": 30000,
+        "token_quota_per_hour": 1000000,
+        "token_quota_per_day": 1000000,
+        "notes": "Cerebras Preview. Quota: 5 req/min, 150 req/hour, 2400 req/day; 30k tok/min, 1M tok/hour, 1M tok/day.",
     },
     {
         "provider": "z.ai",
@@ -170,6 +198,15 @@ DEFAULT_PROVIDER_MODEL_LIMITS: tuple[dict[str, Any], ...] = (
         "chars_per_token": 4.0,
         "notes": "Operational fallback for transcript formatting.",
     },
+)
+
+_PROVIDER_MODEL_LIMIT_QUOTA_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("request_quota_per_minute", "INTEGER NOT NULL DEFAULT 0"),
+    ("request_quota_per_hour", "INTEGER NOT NULL DEFAULT 0"),
+    ("request_quota_per_day", "INTEGER NOT NULL DEFAULT 0"),
+    ("token_quota_per_minute", "INTEGER NOT NULL DEFAULT 0"),
+    ("token_quota_per_hour", "INTEGER NOT NULL DEFAULT 0"),
+    ("token_quota_per_day", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -747,6 +784,12 @@ def ensure_provider_model_limits_table(db_path: Path | None = None) -> Path:
                 recommended_prompt_tokens INTEGER NOT NULL DEFAULT 0,
                 recommended_completion_tokens INTEGER NOT NULL DEFAULT 0,
                 chars_per_token REAL NOT NULL DEFAULT 4.0,
+                request_quota_per_minute INTEGER NOT NULL DEFAULT 0,
+                request_quota_per_hour INTEGER NOT NULL DEFAULT 0,
+                request_quota_per_day INTEGER NOT NULL DEFAULT 0,
+                token_quota_per_minute INTEGER NOT NULL DEFAULT 0,
+                token_quota_per_hour INTEGER NOT NULL DEFAULT 0,
+                token_quota_per_day INTEGER NOT NULL DEFAULT 0,
                 notes TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -754,6 +797,14 @@ def ensure_provider_model_limits_table(db_path: Path | None = None) -> Path:
             )
             """
         )
+        existing_columns = {
+            str(row[1] or "").strip()
+            for row in con.execute(f"PRAGMA table_info({PROVIDER_MODEL_LIMITS_TABLE})").fetchall()
+        }
+        for column_name, column_def in _PROVIDER_MODEL_LIMIT_QUOTA_COLUMNS:
+            if column_name in existing_columns:
+                continue
+            con.execute(f"ALTER TABLE {PROVIDER_MODEL_LIMITS_TABLE} ADD COLUMN {column_name} {column_def}")
         con.execute(
             f"CREATE INDEX IF NOT EXISTS idx_{PROVIDER_MODEL_LIMITS_TABLE}_provider "
             f"ON {PROVIDER_MODEL_LIMITS_TABLE}(provider)"
@@ -780,14 +831,23 @@ def seed_provider_model_limits(db_path: Path | None = None) -> int:
                     provider, model_name,
                     context_window_tokens, max_output_tokens,
                     recommended_prompt_tokens, recommended_completion_tokens,
-                    chars_per_token, notes, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    chars_per_token,
+                    request_quota_per_minute, request_quota_per_hour, request_quota_per_day,
+                    token_quota_per_minute, token_quota_per_hour, token_quota_per_day,
+                    notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(provider, model_name) DO UPDATE SET
                     context_window_tokens=excluded.context_window_tokens,
                     max_output_tokens=excluded.max_output_tokens,
                     recommended_prompt_tokens=excluded.recommended_prompt_tokens,
                     recommended_completion_tokens=excluded.recommended_completion_tokens,
                     chars_per_token=excluded.chars_per_token,
+                    request_quota_per_minute=excluded.request_quota_per_minute,
+                    request_quota_per_hour=excluded.request_quota_per_hour,
+                    request_quota_per_day=excluded.request_quota_per_day,
+                    token_quota_per_minute=excluded.token_quota_per_minute,
+                    token_quota_per_hour=excluded.token_quota_per_hour,
+                    token_quota_per_day=excluded.token_quota_per_day,
                     notes=excluded.notes,
                     updated_at=CURRENT_TIMESTAMP
                 """,
@@ -799,6 +859,12 @@ def seed_provider_model_limits(db_path: Path | None = None) -> int:
                     int(item.get("recommended_prompt_tokens") or 0),
                     int(item.get("recommended_completion_tokens") or 0),
                     float(item.get("chars_per_token") or 4.0),
+                    int(item.get("request_quota_per_minute") or 0),
+                    int(item.get("request_quota_per_hour") or 0),
+                    int(item.get("request_quota_per_day") or 0),
+                    int(item.get("token_quota_per_minute") or 0),
+                    int(item.get("token_quota_per_hour") or 0),
+                    int(item.get("token_quota_per_day") or 0),
                     str(item.get("notes") or "")[:4000],
                 ),
             )
@@ -824,7 +890,10 @@ def load_provider_model_limit(
             SELECT provider, model_name,
                    context_window_tokens, max_output_tokens,
                    recommended_prompt_tokens, recommended_completion_tokens,
-                   chars_per_token, notes, updated_at
+                   chars_per_token,
+                   request_quota_per_minute, request_quota_per_hour, request_quota_per_day,
+                   token_quota_per_minute, token_quota_per_hour, token_quota_per_day,
+                   notes, updated_at
             FROM {PROVIDER_MODEL_LIMITS_TABLE}
             WHERE provider = ? AND model_name = ?
             LIMIT 1
@@ -843,6 +912,12 @@ def load_provider_model_limit(
         "recommended_prompt_tokens": int(row["recommended_prompt_tokens"] or 0),
         "recommended_completion_tokens": int(row["recommended_completion_tokens"] or 0),
         "chars_per_token": float(row["chars_per_token"] or 4.0),
+        "request_quota_per_minute": int(row["request_quota_per_minute"] or 0),
+        "request_quota_per_hour": int(row["request_quota_per_hour"] or 0),
+        "request_quota_per_day": int(row["request_quota_per_day"] or 0),
+        "token_quota_per_minute": int(row["token_quota_per_minute"] or 0),
+        "token_quota_per_hour": int(row["token_quota_per_hour"] or 0),
+        "token_quota_per_day": int(row["token_quota_per_day"] or 0),
         "notes": str(row["notes"] or ""),
         "updated_at": str(row["updated_at"] or ""),
     }

@@ -18,7 +18,7 @@ from .state import OrchestratorState
 from .policies import policy_blockers_for_job
 
 
-KNOWN_GROUPS = {"discovery", "youtube", "provider", "local"}
+KNOWN_GROUPS = {"discovery", "youtube", "youtube_download", "provider", "local"}
 KNOWN_STAGES = {"discovery", "transcript", "audio_download", "resume", "asr", "format", "janitor", "import_pending"}
 
 

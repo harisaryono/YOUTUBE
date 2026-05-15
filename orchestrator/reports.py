@@ -405,7 +405,7 @@ def _render_markdown(report: dict[str, Any], config: dict[str, Any]) -> str:
     stages = {
         "Discovery": ("discovery", "youtube"),
         "Transcript": ("transcript", "youtube"),
-        "Audio Download": ("audio_download", "youtube"),
+        "Audio Download": ("audio_download", "youtube_download"),
         "Resume": ("resume", "provider"),
         "Format": ("format", "provider"),
         "ASR": ("asr", "system"),

@@ -28,7 +28,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
     required_groups: dict[str, set[str]] = {
         "discovery": {"discovery"},
-        "youtube": {"transcript", "audio_download"},
+        "youtube": {"transcript"},
+        "youtube_download": {"audio_download"},
         "provider": {"resume", "asr"},
         "local": {"format", "janitor", "import_pending"},
     }

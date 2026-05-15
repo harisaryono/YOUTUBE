@@ -29,6 +29,8 @@ ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
     (r"(?i)(context\s*length|context\s*too\s*large|max\s*context)", "provider_context_too_large", "Context too large", 0),
     (r"(?i)(auth|api\s*key|unauthorized|401)", "provider_auth_error", "Provider auth error", 86400),
     (r"(?i)(timeout|timed\s*out)", "provider_timeout", "Provider timeout", 300),
+    (r"(?i)(DEGRADED\s+function\s+cannot\s+be\s+invoked|StatusCode\.INVALID_ARGUMENT.*DEGRADED|nvidia.*riva.*degraded)", "nvidia_riva_degraded", "NVIDIA Riva service degraded", 1800),
+    (r"(?i)(StatusCode\.\w+.*rpc\s*error|_MultiThreadedRendezvous.*StatusCode)", "nvidia_riva_rpc_error", "NVIDIA Riva RPC error", 600),
     (
         r"(?i)(no\s*active\s*asr\s*provider\s*capacity\s*available\s*from\s*coordinator|"
         r"no\s*asr\s*lease\s*available|"
@@ -93,6 +95,8 @@ RECOMMENDATIONS: dict[str, str] = {
     "provider_context_too_large": "Reduce chunk size, split transcript",
     "provider_auth_error": "Check API key, rotate if needed",
     "provider_timeout": "Retry with longer timeout, reduce batch size",
+    "nvidia_riva_degraded": "NVIDIA Riva service is degraded; wait for recovery or switch provider",
+    "nvidia_riva_rpc_error": "NVIDIA Riva RPC error; check Riva endpoint or retry later",
     "asr_provider_unavailable": "Wait for ASR provider lease to become available",
     "lease_unavailable": "Wait for lease availability or check coordinator account pool",
     "memory_low": "Reduce workers, wait for other jobs to finish",
@@ -159,25 +163,7 @@ def classify_error(
     Classify a single error from a log line or exit code.
     Returns an ErrorClassification with type, severity, and recommended cooldown.
     """
-    # Check exit code first
-    if exit_code != 0:
-        if exit_code == 1:
-            return ErrorClassification(
-                "general_error", f"Exit code {exit_code}", 60, "warning",
-                "Check logs for details"
-            )
-        if exit_code == 137:
-            return ErrorClassification(
-                "memory_low", "Process killed (OOM)", 900, "blocking",
-                RECOMMENDATIONS["memory_low"]
-            )
-        if exit_code in (139, 134, 6):
-            return ErrorClassification(
-                "process_crash", f"Process crashed (signal {exit_code - 128})", 300, "warning",
-                "Check for bugs or memory issues"
-            )
-
-    # Check patterns
+    # Check patterns first (more specific than exit code)
     for pattern, error_type, description, cooldown in ERROR_PATTERNS:
         if re.search(pattern, log_line):
             severity = "blocking" if cooldown >= 3600 else "warning"
@@ -196,6 +182,10 @@ def classify_error(
                 suggested_scope = "stage:llm"
             elif error_type == "disk_low":
                 suggested_scope = "global"
+            elif error_type == "nvidia_riva_degraded":
+                suggested_scope = "provider:asr"
+            elif error_type == "nvidia_riva_rpc_error":
+                suggested_scope = "provider:asr"
             elif error_type == "asr_provider_unavailable":
                 suggested_scope = "stage:asr"
             elif error_type == "lease_unavailable":
@@ -206,6 +196,24 @@ def classify_error(
                 error_type, description, cooldown, severity,
                 RECOMMENDATIONS.get(error_type, ""),
                 suggested_scope=suggested_scope,
+            )
+
+    # Fallback to exit code if no pattern matched
+    if exit_code != 0:
+        if exit_code == 1:
+            return ErrorClassification(
+                "general_error", f"Exit code {exit_code}", 60, "warning",
+                "Check logs for details"
+            )
+        if exit_code == 137:
+            return ErrorClassification(
+                "memory_low", "Process killed (OOM)", 900, "blocking",
+                RECOMMENDATIONS["memory_low"]
+            )
+        if exit_code in (139, 134, 6):
+            return ErrorClassification(
+                "process_crash", f"Process crashed (signal {exit_code - 128})", 300, "warning",
+                "Check for bugs or memory issues"
             )
 
     return ErrorClassification(

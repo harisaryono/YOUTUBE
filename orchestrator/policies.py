@@ -29,7 +29,7 @@ def pause_keys_for_stage(stage: str) -> list[str]:
     stage = str(stage or "").strip().lower()
     group = stage_to_group(stage)
     keys = ["scope:all", f"stage:{stage}", f"group:{group}"]
-    if group in {"youtube", "provider", "local", "discovery"}:
+    if group in {"youtube", "youtube_download", "provider", "local", "discovery"}:
         keys.append(f"scope:{group}")
     return list(dict.fromkeys(keys))
 
