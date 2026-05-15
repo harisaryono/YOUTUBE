@@ -1,5 +1,11 @@
 """
-Janitor — lightweight maintenance for orchestrator run artifacts and stale state.
+Janitor — lightweight maintenance for orchestrator artifacts and stale state.
+
+Stage 19 changes:
+- Raw run directories are no longer deleted blindly by age.
+- Daily log archive is run first when due.
+- Raw logs/run dirs are compressed/deleted only through log_archive retention,
+  which requires a .log_archive.json marker.
 """
 
 from __future__ import annotations
@@ -99,66 +105,82 @@ def cleanup_audio_orphans(audio_dir: Path, older_than_seconds: int) -> int:
     return removed
 
 
+def _cleanup_archive_files(config: dict[str, Any]) -> dict[str, int]:
+    """Clean old compact archive outputs; raw run dirs are handled by log_archive."""
+    archive_cfg = config.get("log_archive", {}) or {}
+    archive_dir_raw = str(archive_cfg.get("archive_dir", "logs/archive") or "logs/archive")
+    archive_dir = Path(archive_dir_raw)
+    if not archive_dir.is_absolute():
+        archive_dir = PROJECT_ROOT / archive_dir
+    retention = archive_cfg.get("archive_retention", {}) or {}
+    md_days = int(retention.get("markdown_days", archive_cfg.get("keep_daily_markdown_days", 180)) or 180)
+    jsonl_days = int(retention.get("jsonl_days", archive_cfg.get("keep_jsonl_days", 365)) or 365)
+    incidents_days = int(retention.get("incidents_json_days", archive_cfg.get("keep_incidents_json_days", 365)) or 365)
+    result = {"archive_markdown_deleted": 0, "archive_jsonl_deleted": 0, "archive_incidents_deleted": 0}
+    if not archive_dir.exists():
+        return result
+    result["archive_markdown_deleted"] = _cleanup_files_by_age(archive_dir, _to_seconds(md_days), preserve_patterns=("reports",))
+    # The generic markdown cleanup above also sees json/jsonl files if they are older.
+    # Run targeted cleanup for formats with longer retention after that pass.
+    for pattern, days, key in (
+        ("*.jsonl", jsonl_days, "archive_jsonl_deleted"),
+        ("*-incidents.json", incidents_days, "archive_incidents_deleted"),
+    ):
+        cutoff = time.time() - _to_seconds(days)
+        for path in archive_dir.glob(pattern):
+            if _file_mtime(path) < cutoff:
+                try:
+                    path.unlink(missing_ok=True)
+                    result[key] += 1
+                except Exception:
+                    continue
+    return result
+
+
 def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, Any]:
-    """Run a maintenance pass and return cleanup counts."""
+    """Run a maintenance pass and return cleanup/archive counts."""
     janitor_cfg = config.get("janitor", {})
     if not janitor_cfg.get("enabled", True):
         return {"success": True, "skipped": True, "reason": "janitor disabled"}
 
     events_days = int(janitor_cfg.get("keep_events_days", 30) or 30)
-    logs_days = int(janitor_cfg.get("keep_logs_days", 14) or 14)
-    runs_days = int(janitor_cfg.get("keep_run_dirs_days", 7) or 7)
     reports_days = int(janitor_cfg.get("keep_reports_days", 14) or 14)
     cleanup_audio = bool(janitor_cfg.get("cleanup_audio_orphans", True))
 
-    result = {
+    result: dict[str, Any] = {
         "success": True,
         "events_deleted": 0,
         "log_files_deleted": 0,
         "run_dirs_deleted": 0,
         "report_files_deleted": 0,
         "audio_orphans_deleted": 0,
+        "daily_archive": {},
+        "archive_prune": {},
+        "archive_files_deleted": {},
     }
+
+    # Build compact daily archive first, then prune only raw logs that have been
+    # marked archived. This prevents accidental deletion of unarchived evidence.
+    try:
+        from .log_archive import log_archive_due, prune_archived_raw_logs, run_daily_archive
+
+        if log_archive_due(config, state):
+            result["daily_archive"] = run_daily_archive(config, state, prune=False)
+        result["archive_prune"] = prune_archived_raw_logs(config, state)
+        result["log_files_deleted"] = int(result["archive_prune"].get("compressed", 0) or 0)
+        result["run_dirs_deleted"] = int(result["archive_prune"].get("run_dirs_deleted", 0) or 0)
+    except Exception as exc:
+        state.add_event(
+            event_type="janitor",
+            message=f"Janitor failed running log archive/prune: {exc}",
+            severity="warning",
+        )
+        result["success"] = False
 
     try:
         result["events_deleted"] = state.cleanup_old_events(days=events_days)
     except Exception as exc:
-        state.add_event(
-            event_type="janitor",
-            message=f"Janitor failed deleting old events: {exc}",
-            severity="warning",
-        )
-        result["success"] = False
-
-    try:
-        if LOGS_DIR.exists():
-            result["log_files_deleted"] = _cleanup_files_by_age(LOGS_DIR, _to_seconds(logs_days))
-    except Exception as exc:
-        state.add_event(
-            event_type="janitor",
-            message=f"Janitor failed cleaning logs: {exc}",
-            severity="warning",
-        )
-        result["success"] = False
-
-    try:
-        if RUNS_DIR.exists():
-            cutoff = time.time() - _to_seconds(runs_days)
-            for path in RUNS_DIR.iterdir():
-                if path.name == "reports":
-                    continue
-                if _file_mtime(path) < cutoff:
-                    if path.is_dir():
-                        shutil.rmtree(path, ignore_errors=True)
-                    else:
-                        path.unlink(missing_ok=True)
-                    result["run_dirs_deleted"] += 1
-    except Exception as exc:
-        state.add_event(
-            event_type="janitor",
-            message=f"Janitor failed cleaning run dirs: {exc}",
-            severity="warning",
-        )
+        state.add_event(event_type="janitor", message=f"Janitor failed deleting old events: {exc}", severity="warning")
         result["success"] = False
 
     try:
@@ -169,11 +191,13 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
                     path.unlink(missing_ok=True)
                     result["report_files_deleted"] += 1
     except Exception as exc:
-        state.add_event(
-            event_type="janitor",
-            message=f"Janitor failed cleaning reports: {exc}",
-            severity="warning",
-        )
+        state.add_event(event_type="janitor", message=f"Janitor failed cleaning reports: {exc}", severity="warning")
+        result["success"] = False
+
+    try:
+        result["archive_files_deleted"] = _cleanup_archive_files(config)
+    except Exception as exc:
+        state.add_event(event_type="janitor", message=f"Janitor failed cleaning archive files: {exc}", severity="warning")
         result["success"] = False
 
     try:
@@ -182,13 +206,11 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
             audio_dir = Path(audio_dir_cfg)
             if not audio_dir.is_absolute():
                 audio_dir = PROJECT_ROOT / audio_dir
+            # Audio orphan cleanup keeps the old janitor run-dir window as its age threshold.
+            runs_days = int(janitor_cfg.get("keep_run_dirs_days", 7) or 7)
             result["audio_orphans_deleted"] = cleanup_audio_orphans(audio_dir, _to_seconds(runs_days))
     except Exception as exc:
-        state.add_event(
-            event_type="janitor",
-            message=f"Janitor failed cleaning audio orphans: {exc}",
-            severity="warning",
-        )
+        state.add_event(event_type="janitor", message=f"Janitor failed cleaning audio orphans: {exc}", severity="warning")
         result["success"] = False
 
     state.set("janitor_last_run_at", str(int(time.time())))
@@ -197,7 +219,7 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
         message=(
             "Janitor completed: "
             f"events={result['events_deleted']}, "
-            f"logs={result['log_files_deleted']}, "
+            f"compressed_logs={result['log_files_deleted']}, "
             f"run_dirs={result['run_dirs_deleted']}, "
             f"reports={result['report_files_deleted']}, "
             f"audio_orphans={result['audio_orphans_deleted']}"
