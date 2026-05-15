@@ -45,6 +45,25 @@ Verify that transcripts are correctly downloaded, formatted, and stored in the d
 - Batch discovery/transcript harus berhenti lebih awal setelah hard block berturut-turut melewati threshold operasional.
 - `youtube_search_util.py` / `scripts/search.sh` harus bisa menampilkan hasil discovery keyword dari `yt-dlp` tanpa error sintaks.
 
+## Stage 8 Control Plane Validation
+
+- [ ] `python -m compileall orchestrator` berhasil.
+- [ ] `bash -n scripts/orchestrator.sh` berhasil.
+- [ ] `./scripts/orchestrator.sh validate` berhasil.
+- [ ] `./scripts/orchestrator.sh explain` menampilkan inventory tanpa exception.
+- [ ] `./scripts/orchestrator.sh once --dry-run --max-jobs 7` tidak meluncurkan job nyata.
+- [ ] `scripts/orchestrator.sh run` menyimpan PID daemon Python.
+- [ ] `scripts/orchestrator.sh stop` menghentikan daemon dan tidak meninggalkan child process.
+- [ ] File `AI_CONTEXT/*.md` terbaca rapi dan tidak collapse menjadi satu baris panjang.
+
+## Stage 9 Observability Validation
+
+- [ ] `./scripts/orchestrator.sh doctor` menampilkan daemon, backlog, cooldown, dan rekomendasi tanpa error.
+- [ ] `./scripts/orchestrator.sh doctor --json` mengeluarkan JSON valid.
+- [ ] `./scripts/orchestrator.sh doctor` menampilkan backlog per stage dan usage per group.
+- [ ] `./scripts/orchestrator.sh doctor` menampilkan recent failures dari event store.
+- [ ] `scripts/orchestrator.sh` help text memasukkan `doctor` sebagai control-plane command.
+
 ## Batch Validations
 - **Phase 1 Validation**:
   - [ ] 5 videos processed.

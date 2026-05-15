@@ -12,6 +12,7 @@
 #   ./scripts/orchestrator.sh reconcile     # Reconcile stale running jobs
 #   ./scripts/orchestrator.sh explain       # Explain why jobs are/aren't running
 #   ./scripts/orchestrator.sh validate      # Validate config + AI_CONTEXT
+#   ./scripts/orchestrator.sh doctor        # Diagnose backlog, cooldown, and failures
 #   ./scripts/orchestrator.sh report        # Show latest report JSON
 #   ./scripts/orchestrator.sh stop          # Stop running daemon (via PID file)
 
@@ -145,6 +146,10 @@ case "$MODE" in
         exec "$VENV_PYTHON" -m orchestrator.validate "$@"
         ;;
 
+    doctor)
+        exec "$VENV_PYTHON" -m orchestrator.doctor "$@"
+        ;;
+
     explain)
         exec "$VENV_PYTHON" -m orchestrator.daemon explain "$@"
         ;;
@@ -180,7 +185,7 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|explain|report|stop} [options]"
+        echo "Usage: $0 {once|run|status|active|logs|cancel|cancel-stage|cancel-group|reconcile|validate|doctor|explain|report|stop} [options]"
         echo ""
         echo "Commands:"
         echo "  once              Run one orchestrator cycle and exit"
@@ -193,6 +198,7 @@ case "$MODE" in
         echo "  cancel-group      Cancel all running jobs in a group"
         echo "  reconcile         Reconcile stale running jobs"
         echo "  validate          Validate config + AI_CONTEXT"
+        echo "  doctor            Diagnose backlog, cooldown, and failures"
         echo "  explain           Explain current work inventory and blockers"
         echo "  report            Show latest report as JSON"
         echo "  stop              Stop running daemon"

@@ -12,6 +12,7 @@
 - `./scripts/orchestrator.sh cancel-group <group>`
 - `./scripts/orchestrator.sh reconcile`
 - `./scripts/orchestrator.sh explain`
+- `./scripts/orchestrator.sh doctor`
 - `./scripts/orchestrator.sh report`
 - `./scripts/orchestrator.sh validate`
 
@@ -37,4 +38,3 @@
   - release lock,
   - mark status terminal,
   - dan bila ada report CSV, dianalisis untuk cooldown / event.
-

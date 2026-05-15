@@ -10,6 +10,7 @@
 - discovery: channel/video ingest and repair utilities remain in `scripts/` and `partial_py/`
 - orchestrator daemon: pipeline controller (discovery, transcript, resume, format, ASR)
 - stage 8 hardening: AI_CONTEXT working files, `validate` command, PID cleanup, async report hooks, scope lock
+- stage 9 observability: `doctor` command for backlog/cooldown/failure diagnosis
 
 ## Directory Snapshot
 - `docs`: 18 files
@@ -49,3 +50,4 @@
 - auto cooldown berdasarkan klasifikasi error
 - report Markdown + JSON di runs/orchestrator/reports/
 - control-plane hardening: `active`, `logs`, `cancel`, `reconcile`, `validate`, timeout, scope lock, async report analysis
+- operational observability: `doctor` summary and recommendations

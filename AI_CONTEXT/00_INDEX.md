@@ -14,13 +14,14 @@ Tujuan folder ini:
 
 ## Objective Saat Ini
 
-- Stage 8: repo tetap bisa dikerjakan AI tanpa tersesat.
+- Stage 9: observability operasional dan recovery dashboard.
 - Fokus:
   - context kecil per tugas,
   - validate command sebelum patch,
   - lifecycle daemon bersih,
   - report hook async,
-  - scope lock opsional untuk stage YouTube sensitif.
+  - scope lock opsional untuk stage YouTube sensitif,
+  - `doctor` command untuk backlog, cooldown, failures, dan rekomendasi.
 
 ## Source of Truth
 
@@ -29,4 +30,3 @@ Tujuan folder ini:
 - [docs/PROGRESS.md](../docs/PROGRESS.md)
 - [docs/VERIFY.md](../docs/VERIFY.md)
 - [scripts/README.md](../scripts/README.md)
-

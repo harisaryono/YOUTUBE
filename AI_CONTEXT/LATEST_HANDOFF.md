@@ -23,6 +23,9 @@ Generated: `2026-05-15T06:20:17+07:00`
   - daemon PID lifecycle cleanup in `scripts/orchestrator.sh run`
   - async report postprocess hook
   - scope lock for `transcript` / `audio_download`
+- Stage 9 adds observability:
+  - `./scripts/orchestrator.sh doctor`
+  - daemon/backlog/cooldown/failure summary
 
 ## Important constraints
 
@@ -38,3 +41,4 @@ Generated: `2026-05-15T06:20:17+07:00`
 - Use `docs/README.md` as the index, then `docs/WORKFLOWS.md` for operational flow.
 - Orchestrator: `orchestrator/` directory, config `orchestrator.yaml`, shell wrapper `scripts/orchestrator.sh`
 - Validate before patching when stage 8 changes touch orchestrator control plane.
+- Use `doctor` for quick operational diagnosis before reading long logs.

@@ -99,6 +99,7 @@
 - `orchestrator/__init__.py` (0 bytes)
 - `orchestrator/config.py` (8850 bytes)
 - `orchestrator/cooldown.py` (3747 bytes)
+- `orchestrator/doctor.py`
 - `orchestrator/daemon.py` (33074 bytes)
 - `orchestrator/db_queries.py` (16680 bytes)
 - `orchestrator/dispatcher.py` (23420 bytes)
