@@ -61,6 +61,14 @@ PROVIDER_MODEL_LIMITS_TABLE = "provider_model_limits"
 _DOTENV_CACHE: dict[str, str] | None = None
 _COOKIE_ROTATION_INDEX = 0
 
+
+class CoordinatorUnavailable(RuntimeError):
+    """Coordinator endpoint unreachable or returned a server-side failure."""
+
+
+class CoordinatorResponseError(RuntimeError):
+    """Coordinator returned an unexpected HTTP response."""
+
 DEFAULT_PROVIDER_MODEL_LIMITS: tuple[dict[str, Any], ...] = (
     {
         "provider": "nvidia",
@@ -365,7 +373,7 @@ def coordinator_request(
     path: str,
     payload: dict[str, Any] | None = None,
     *,
-    timeout: int = 20,
+    timeout: int = 60,
 ) -> dict[str, Any]:
     base = coordinator_base_url().rstrip("/")
     if not base:
@@ -389,9 +397,11 @@ def coordinator_request(
     except urllib_error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         detail = raw.strip() or exc.reason
-        raise RuntimeError(f"Coordinator HTTP {exc.code}: {detail}") from exc
+        if int(exc.code or 0) >= 500:
+            raise CoordinatorUnavailable(f"Coordinator HTTP {exc.code}: {detail}") from exc
+        raise CoordinatorResponseError(f"Coordinator HTTP {exc.code}: {detail}") from exc
     except urllib_error.URLError as exc:
-        raise RuntimeError(f"Coordinator tidak bisa dihubungi: {exc.reason}") from exc
+        raise CoordinatorUnavailable(f"Coordinator tidak bisa dihubungi: {exc.reason}") from exc
 
 
 def coordinator_acquire_accounts(
