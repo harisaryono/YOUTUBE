@@ -1,10 +1,10 @@
 """
 Error Analyzer — Classify errors from logs, reports, and exit codes.
 
-Stage 16 hardening:
-- Terminal/video-scoped YouTube failures do not create global/channel cooldowns.
-- Real request-pressure failures (bot/rate-limit/IP block) remain cooldown-capable.
-- Pattern matching is evaluated before exit-code fallback.
+Stage 17:
+- Terminal/video-scoped YouTube failures are governed by terminal_failures.py.
+- Terminal failures are recorded as events but do not create global/channel cooldowns.
+- Report payloads include terminal failure policy metadata for planner/dashboard use.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from .state import OrchestratorState
+from .terminal_failures import is_terminal_failure, terminal_failure_policy
 
 
 # Error classification patterns.
@@ -154,19 +155,6 @@ ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
 ]
 
 
-TERMINAL_VIDEO_ERROR_TYPES = {
-    "youtube_geo_blocked",
-    "member_only",
-    "private_video",
-    "age_restricted",
-    "copyright_blocked",
-    "not_ready_yet",
-    "format_unavailable",
-    "no_subtitle",
-    "video_unavailable",
-}
-
-
 class ErrorClassification:
     """Result of error classification."""
 
@@ -238,9 +226,8 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
     scope = str(scope or "").strip()
     error_type = str(classification.error_type or "").strip()
 
-    # Terminal per-video/channel states are not pressure signals. Record an event,
-    # but do not set cooldown on youtube, channel, or global scopes.
-    if error_type in TERMINAL_VIDEO_ERROR_TYPES or error_type == "channel_unavailable":
+    # Terminal states are audit/routing signals, not pressure signals.
+    if is_terminal_failure(error_type):
         return []
 
     scopes: list[str] = []
@@ -294,10 +281,9 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
 
 
 def _suggested_scope_for_error(error_type: str, log_line: str) -> str:
-    if error_type in TERMINAL_VIDEO_ERROR_TYPES:
-        return "video"
-    if error_type == "channel_unavailable":
-        return "channel"
+    if is_terminal_failure(error_type):
+        policy = terminal_failure_policy(error_type)
+        return str(policy.get("scope") or "video")
     if error_type.startswith("youtube_"):
         return "youtube"
     if error_type.startswith("provider_"):
@@ -395,13 +381,16 @@ def analyze_report_csv(report_path: str, state: OrchestratorState) -> list[dict[
                     continue
 
                 classification = classify_error(error_msg or status)
+                terminal = is_terminal_failure(classification.error_type)
+                terminal_policy = terminal_failure_policy(classification.error_type) if terminal else {}
 
                 # Determine scope
                 scope = "global"
-                if classification.error_type in TERMINAL_VIDEO_ERROR_TYPES:
-                    scope = _video_scope(video_id)
-                elif classification.error_type in ("channel_unavailable",):
-                    scope = f"channel:{channel_id}" if channel_id else "global"
+                if terminal:
+                    if str(terminal_policy.get("scope") or "") == "channel":
+                        scope = f"channel:{channel_id}" if channel_id else "global"
+                    else:
+                        scope = _video_scope(video_id)
                 elif classification.error_type.startswith("provider_"):
                     provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", error_msg)
                     provider = provider_match.group(1).lower() if provider_match else "unknown"
@@ -421,7 +410,7 @@ def analyze_report_csv(report_path: str, state: OrchestratorState) -> list[dict[
                 # Record event
                 message_detail = error_msg or status
                 event_id = state.add_event(
-                    event_type="error",
+                    event_type="terminal_failure" if terminal else "error",
                     message=f"[{classification.error_type}] {classification.description}: {message_detail[:200]}",
                     stage=row.get("stage", ""),
                     scope=scope,
@@ -433,6 +422,12 @@ def analyze_report_csv(report_path: str, state: OrchestratorState) -> list[dict[
                         "error_type": classification.error_type,
                         "cooldown_seconds": classification.cooldown_seconds,
                         "suggested_scope": classification.suggested_scope,
+                        "terminal": terminal,
+                        "retry_strategy": str(terminal_policy.get("retry_strategy") or ""),
+                        "route_to_asr": bool(terminal_policy.get("route_to_asr", False)),
+                        "retryable": bool(terminal_policy.get("retryable", False)),
+                        "normal_retry": bool(terminal_policy.get("normal_retry", False)),
+                        "target_stage": str(terminal_policy.get("target_stage") or ""),
                     },
                 )
                 events.append({
@@ -440,6 +435,9 @@ def analyze_report_csv(report_path: str, state: OrchestratorState) -> list[dict[
                     "scope": scope,
                     "error_type": classification.error_type,
                     "cooldown_seconds": classification.cooldown_seconds,
+                    "terminal": terminal,
+                    "retry_strategy": str(terminal_policy.get("retry_strategy") or ""),
+                    "route_to_asr": bool(terminal_policy.get("route_to_asr", False)),
                 })
 
     except FileNotFoundError:
