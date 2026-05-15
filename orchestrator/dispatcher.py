@@ -714,6 +714,15 @@ def run_asr(
         env["ASR_MODEL_NVIDIA_RIVA"] = nvidia_model
 
     cmd = ["bash", str(script), "--local-audio-only"]
+    provider_plan = str(config.get("asr", {}).get("provider_plan", "groq_first")).strip()
+    if provider_plan == "groq_first":
+        cmd.extend(["--providers", "groq,nvidia"])
+    elif provider_plan == "nvidia_first":
+        cmd.extend(["--providers", "nvidia,groq"])
+    elif provider_plan == "groq_only":
+        cmd.extend(["--providers", "groq"])
+    elif provider_plan == "nvidia_only":
+        cmd.extend(["--providers", "nvidia"])
     if video_id:
         cmd.extend(["--video-id", video_id])
     _append_limit(cmd, limit)

@@ -14,6 +14,23 @@ from .state import OrchestratorState
 ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
     # YouTube errors
     (r"(?i)(429|too\s*many\s*requests|rate\s*limit)", "youtube_429", "YouTube rate limited", 7200),
+    (
+        r"(?i)(not\s*made\s*this\s*video\s*available\s*in\s*your\s*country|"
+        r"this\s*video\s*is\s*not\s*available\s*in\s*your\s*country|"
+        r"video\s*is\s*not\s*available\s*in\s*your\s*country|"
+        r"not\s*available\s*in\s*your\s*country|"
+        r"not\s*available\s*in\s*your\s*region|"
+        r"available\s*only\s*in|"
+        r"only\s*available\s*in|"
+        r"country\s*restricted|"
+        r"region\s*restricted|"
+        r"region\s*locked|"
+        r"geo\s*blocked|"
+        r"geo-blocked)",
+        "youtube_geo_blocked",
+        "YouTube geo/region restricted",
+        0,
+    ),
     (r"(?i)(403|forbidden|access\s*denied)", "youtube_403", "YouTube access denied", 3600),
     (r"(?i)(bot\s*detect|unusual\s*traffic|captcha)", "youtube_bot_detection", "YouTube bot detection", 86400),
     (r"(?i)(sign\s*in|login\s*required|cookie)", "youtube_signin_required", "YouTube sign-in required", 21600),
@@ -87,6 +104,7 @@ RECOMMENDATIONS: dict[str, str] = {
     "youtube_signin_required": "Refresh cookies, check cookie file, use different proxy",
     "no_subtitle": "Mark as no_subtitle in DB, skip permanently",
     "member_only": "Mark as member_only in DB, skip permanently",
+    "youtube_geo_blocked": "Use a proxy/IP from an allowed region or skip this video for now",
     "video_unavailable": "Mark as unavailable in DB, skip permanently",
     "channel_unavailable": "Disable channel scan, skip permanently",
     "youtube_ip_blocked": "Change IP/proxy, wait 12h before retry",
@@ -125,8 +143,19 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
     error_type = str(classification.error_type or "").strip()
 
     scopes: list[str] = []
-    if scope.startswith("channel:"):
-        scopes.append(scope)
+    stage_scope = f"stage:{stage}" if stage else ""
+    channel_scope = scope if scope.startswith("channel:") else ""
+    stage_local_scopes = {"resume", "format", "asr"}
+    youtube_scoped_stages = {"transcript", "audio_download"}
+
+    # Keep non-YouTube stages isolated from the channel scope that happened to
+    # produce the job. A resume/ASR failure should only block the stage itself
+    # unless the error is explicitly provider- or YouTube-scoped.
+    if stage in stage_local_scopes:
+        if stage_scope:
+            scopes.append(stage_scope)
+    elif channel_scope:
+        scopes.append(channel_scope)
 
     severe_youtube_errors = {
         "youtube_bot_detection",
@@ -139,14 +168,22 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
             scopes.append("youtube")
         elif stage == "discovery":
             scopes.append("youtube:discovery")
-        elif stage in {"transcript", "audio_download"}:
+        elif stage in youtube_scoped_stages:
             scopes.append("youtube:content")
         else:
             scopes.append("youtube")
     elif classification.suggested_scope:
-        scopes.append(classification.suggested_scope)
+        suggested_scope = str(classification.suggested_scope).strip()
+        if stage in stage_local_scopes and suggested_scope in {"coordinator", "provider"}:
+            if stage_scope:
+                scopes.append(stage_scope)
+        else:
+            scopes.append(suggested_scope)
     elif not scopes:
-        scopes.append(scope or "global")
+        if stage_scope:
+            scopes.append(stage_scope)
+        else:
+            scopes.append(scope or "global")
 
     deduped: list[str] = []
     for item in scopes:
@@ -169,10 +206,14 @@ def classify_error(
             severity = "blocking" if cooldown >= 3600 else "warning"
             if cooldown == 0:
                 severity = "info"
+            if error_type == "youtube_geo_blocked":
+                severity = "warning"
             # Determine suggested scope based on error type
             suggested_scope = ""
+            if error_type == "youtube_geo_blocked":
+                suggested_scope = "youtube:content"
             if error_type.startswith("youtube_"):
-                suggested_scope = "youtube"
+                suggested_scope = suggested_scope or "youtube"
             elif error_type.startswith("provider_"):
                 # Try to extract provider name from log line
                 provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", log_line)

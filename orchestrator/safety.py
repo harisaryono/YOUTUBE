@@ -302,6 +302,18 @@ def safety_gate_for_job(
             text = text[len(prefix):].strip()
         return text
 
+    # Stage-scoped cooldown — prevents cross-contamination between unrelated stages.
+    # e.g. stage:resume cooldown only blocks resume, not transcript or ASR.
+    stage_scope = f"stage:{stage}"
+    if state.is_cooldown_active(stage_scope):
+        cd = state.get_cooldown(stage_scope)
+        return SafetyDecision.wait(
+            f"Stage cooldown: {cd['reason']}",
+            cooldown_seconds=300,
+            recommendation=cd.get("recommendation", ""),
+            reason_code="DEFER_STAGE_COOLDOWN",
+        )
+
     if stage in ("discovery", "transcript", "audio_download"):
         youtube_cd = state.get_cooldown("youtube")
         if stage == "discovery":
@@ -373,20 +385,51 @@ def safety_gate_for_job(
                     recommendation="Check coordinator service",
                     reason_code="DEFER_PROVIDER_UNAVAILABLE",
                 )
-            if stage == "asr" and any(
-                p in provider_health.blocked_providers
-                for p in ("asr", "nvidia_riva")
-            ):
-                blocked_name = next(
-                    (p for p in ("nvidia_riva", "asr") if p in provider_health.blocked_providers),
-                    "asr",
-                )
-                return SafetyDecision.wait(
-                    f"ASR provider service degraded ({blocked_name}), retry later",
-                    cooldown_seconds=600,
-                    recommendation="Wait for provider recovery or check provider cooldown",
-                    reason_code="DEFER_ASR_PROVIDER_DEGRADED",
-                )
+            if stage == "asr":
+                # Granular ASR provider degraded check based on provider_plan
+                blocked = set(provider_health.blocked_providers)
+                provider_plan = str(config.get("asr", {}).get("provider_plan", "groq_first")).strip().lower()
+
+                # Global ASR block — all providers down
+                if "asr" in blocked:
+                    return SafetyDecision.wait(
+                        "ASR provider service degraded (asr), retry later",
+                        cooldown_seconds=600,
+                        recommendation="Wait for provider recovery or check provider cooldown",
+                        reason_code="DEFER_ASR_PROVIDER_DEGRADED",
+                    )
+
+                # NVIDIA-only plan and NVIDIA is degraded — must wait
+                if provider_plan == "nvidia_only" and "nvidia_riva" in blocked:
+                    return SafetyDecision.wait(
+                        "NVIDIA Riva degraded and ASR is configured as nvidia_only",
+                        cooldown_seconds=600,
+                        recommendation="Switch ASR provider_plan to groq_first or wait for NVIDIA recovery",
+                        reason_code="DEFER_NVIDIA_RIVA_DEGRADED",
+                    )
+
+                # Groq-only plan and Groq is down — must wait
+                if provider_plan == "groq_only" and "groq" in blocked:
+                    return SafetyDecision.wait(
+                        "Groq unavailable and ASR is configured as groq_only",
+                        cooldown_seconds=600,
+                        recommendation="Switch ASR provider_plan or wait for Groq recovery",
+                        reason_code="DEFER_GROQ_UNAVAILABLE",
+                    )
+
+                # Multi-provider plans: allow ASR if at least one provider is healthy
+                if provider_plan in {"groq_first", "nvidia_first"}:
+                    nvidia_ok = "nvidia_riva" not in blocked
+                    groq_ok = "groq" not in blocked
+                    if nvidia_ok or groq_ok:
+                        pass  # At least one provider available — allow ASR
+                    else:
+                        return SafetyDecision.wait(
+                            "All ASR providers degraded, retry later",
+                            cooldown_seconds=600,
+                            recommendation="Wait for any provider recovery",
+                            reason_code="DEFER_ASR_ALL_PROVIDERS_DEGRADED",
+                        )
 
     if stage == "format":
         if config.get("format", {}).get("prefer_idle_hours", False):

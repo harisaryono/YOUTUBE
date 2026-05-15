@@ -448,6 +448,7 @@ class TranscriptRecoverer:
             return None, "webshare_unavailable"
 
         saw_retry_later = False
+        saw_geo_blocked = False
         saw_proxy_block = False
         errors: list[str] = []
 
@@ -498,7 +499,10 @@ class TranscriptRecoverer:
             except Exception as exc:
                 err = str(exc)
                 errors.append(err)
-                if self._looks_like_retry_later_error(err.lower()):
+                failure_kind = self._transcript_failure_kind(err)
+                if failure_kind == "geo_blocked":
+                    saw_geo_blocked = True
+                elif failure_kind == "retry_later":
                     saw_retry_later = True
                 if self._looks_like_proxy_block_error(err):
                     saw_proxy_block = True
@@ -520,6 +524,10 @@ class TranscriptRecoverer:
         if saw_proxy_block:
             self.last_transcript_failure_reason = "; ".join(errors[:3]) or "webshare_proxy_block"
             return None, "proxy_block"
+
+        if saw_geo_blocked:
+            self.last_transcript_failure_reason = "; ".join(errors[:3]) or "geo_blocked"
+            return None, "geo_blocked"
 
         if saw_retry_later:
             return None, "retry_later"
@@ -585,6 +593,36 @@ class TranscriptRecoverer:
                 "rate limit",
             ]
         )
+
+    def _looks_like_geo_region_block_error(self, text: str) -> bool:
+        msg = " ".join(str(text or "").lower().split())
+        return any(
+            phrase in msg
+            for phrase in [
+                "not made this video available in your country",
+                "not available in your country",
+                "not available in your region",
+                "this video is not available in your country",
+                "video is not available in your country",
+                "video unavailable in your country",
+                "available only in",
+                "only available in",
+                "country restricted",
+                "region restricted",
+                "region locked",
+                "geo blocked",
+                "geo-blocked",
+                "country block",
+            ]
+        )
+
+    def _transcript_failure_kind(self, text: str) -> str:
+        msg = str(text or "")
+        if self._looks_like_geo_region_block_error(msg):
+            return "geo_blocked"
+        if self._looks_like_retry_later_error(msg):
+            return "retry_later"
+        return ""
 
     def _looks_like_video_too_long_error(self, text: str) -> bool:
         msg = str(text or "").lower()
@@ -751,6 +789,7 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
         """Coba satu profile auth untuk satu video."""
         delay_factor = 1.0
         retry_later = False
+        geo_blocked = False
         proxy_block = False
         save_subs_blocked = False
         self.last_transcript_failure_reason = ""
@@ -767,6 +806,9 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
             if outcome == "proxy_block":
                 self.last_transcript_failure_reason = self.last_transcript_failure_reason or "proxy_block"
                 return None, "proxy_block"
+            if outcome == "geo_blocked":
+                self.last_transcript_failure_reason = self.last_transcript_failure_reason or "geo_blocked"
+                return None, "geo_blocked"
             if outcome == "retry_later":
                 self.last_transcript_failure_reason = self.last_transcript_failure_reason or "retry_later"
                 return None, "retry_later"
@@ -787,6 +829,9 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
             if outcome == "proxy_block":
                 logger.warning(f"   🧱 Webshare proxy diblok untuk {video_id}; lanjut ke jalur non-paid.")
                 proxy_block = True
+            elif outcome == "geo_blocked":
+                geo_blocked = True
+                self.last_transcript_failure_reason = self.last_transcript_failure_reason or "geo_blocked"
             elif outcome == "retry_later":
                 retry_later = True
             elif outcome == "webshare_unavailable":
@@ -833,7 +878,11 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
         except Exception as e:
             err_msg = str(e).lower()
             self.last_transcript_failure_reason = self._log_transcript_exception("API", video_id, e)
-            if self._looks_like_retry_later_error(err_msg):
+            failure_kind = self._transcript_failure_kind(err_msg)
+            if failure_kind == "geo_blocked":
+                geo_blocked = True
+                delay_factor = max(delay_factor, 1.5)
+            elif failure_kind == "retry_later":
                 retry_later = True
                 delay_factor = max(delay_factor, 2.0)
 
@@ -855,9 +904,24 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                     )
                     self.last_transcript_failure_reason = self.last_transcript_failure_reason or "subtitle_inventory_missing"
                     return None, "no_subtitle"
-                if inventory_state == "unknown" and self._looks_like_retry_later_error(inventory_detail):
-                    retry_later = True
-                    self.last_transcript_failure_reason = inventory_detail or self.last_transcript_failure_reason or "retry_later"
+                if inventory_state == "unknown":
+                    if self._looks_like_geo_region_block_error(inventory_detail):
+                        geo_blocked = True
+                        self.last_transcript_failure_reason = inventory_detail or self.last_transcript_failure_reason or "geo_blocked"
+                        logger.warning(
+                            f"   🌍 Inventory subtitle mengarah ke geo/region block untuk {video_id}; "
+                            f"akan dijadwalkan ulang dengan region/proxy yang cocok."
+                        )
+                    elif self._looks_like_retry_later_error(inventory_detail):
+                        retry_later = True
+                        self.last_transcript_failure_reason = inventory_detail or self.last_transcript_failure_reason or "retry_later"
+
+            if geo_blocked:
+                self.last_transcript_failure_reason = self.last_transcript_failure_reason or "geo_blocked"
+                logger.warning(
+                    f"   ⏭️  Expensive fallback dimatikan untuk {video_id}; tandai geo_blocked tanpa yt-dlp/Webshare."
+                )
+                return None, "geo_blocked"
 
             self.last_transcript_failure_reason = self.last_transcript_failure_reason or "expensive_fallback_skipped"
             logger.warning(
@@ -876,7 +940,15 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
             logger.info(f"   ℹ️  yt-dlp inventory eksplisit kosong untuk {video_id}; no_subtitle valid.")
             return None, "no_subtitle"
         if inventory_state == "unknown":
-            if self._looks_like_retry_later_error(inventory_detail):
+            failure_kind = self._transcript_failure_kind(inventory_detail)
+            if failure_kind == "geo_blocked":
+                geo_blocked = True
+                self.last_transcript_failure_reason = inventory_detail or "geo_blocked"
+                logger.warning(
+                    f"   🌍 Inventory subtitle mengarah ke geo/region block untuk {video_id}; "
+                    f"akan dijadwalkan ulang dengan region/proxy yang cocok."
+                )
+            elif failure_kind == "retry_later":
                 retry_later = True
                 self.last_transcript_failure_reason = inventory_detail or "retry_later"
                 logger.warning(
@@ -974,12 +1046,20 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                         detail = (proc.stderr or proc.stdout or "").strip()[:300]
                         logger.warning(f"   ⚠️  yt-dlp {l} returncode={proc.returncode}: {detail}")
                         self.last_transcript_failure_reason = detail or self.last_transcript_failure_reason or "yt_dlp_subtitle_download_failed"
-                        if self._looks_like_retry_later_error(detail):
+                        failure_kind = self._transcript_failure_kind(detail)
+                        if failure_kind == "geo_blocked":
+                            geo_blocked = True
+                            break
+                        if failure_kind == "retry_later":
                             retry_later = True
                             break
                 except Exception as e_yt:
                     self.last_transcript_failure_reason = self._log_transcript_exception(f"yt-dlp {l}", video_id, e_yt)
-                    if self._looks_like_retry_later_error(str(e_yt)):
+                    failure_kind = self._transcript_failure_kind(str(e_yt))
+                    if failure_kind == "geo_blocked":
+                        geo_blocked = True
+                        break
+                    if failure_kind == "retry_later":
                         retry_later = True
                         break
                     continue
@@ -1056,10 +1136,19 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                 if result:
                     self._reset_webshare_pressure()
                     return result, "ok"
-                if outcome == "retry_later":
+                if outcome == "geo_blocked":
+                    geo_blocked = True
+                elif outcome == "retry_later":
                     retry_later = True
                 elif outcome == "webshare_unavailable" and self.last_transcript_failure_reason:
                     logger.warning(f"   ⚠️  Webshare tidak tersedia untuk {video_id}; lanjut pakai status direct.")
+
+        if geo_blocked:
+            logger.warning(
+                f"   🌍 Subtitle fetch untuk {video_id} terdeteksi geo/region block; "
+                f"akan dicoba lagi dengan region/proxy yang cocok."
+            )
+            return None, "geo_blocked"
 
         if proxy_block:
             logger.warning(
@@ -1093,6 +1182,7 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
         - no_subtitle
         - blocked
         - proxy_block
+        - geo_blocked
         - retry_later
         - fatal
         """
@@ -1107,6 +1197,7 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
 
             start_index = self._auth_cursor % len(sources)
             saw_retry_later = False
+            saw_geo_blocked = False
             saw_proxy_block = False
             saw_fatal = False
             last_reason = ""
@@ -1141,6 +1232,11 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                     last_reason = self.last_transcript_failure_reason or "proxy_block"
                     self._auth_cursor = (start_index + offset + 1) % len(sources)
                     continue
+                if outcome == "geo_blocked":
+                    saw_geo_blocked = True
+                    last_reason = self.last_transcript_failure_reason or "geo_blocked"
+                    self._auth_cursor = (start_index + offset + 1) % len(sources)
+                    continue
                 if outcome == "retry_later":
                     saw_retry_later = True
                     last_reason = self.last_transcript_failure_reason or last_reason
@@ -1154,6 +1250,11 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                 self.last_transcript_failure_reason = last_reason or "proxy_block"
                 self._record_webshare_pressure("proxy_block")
                 return None, "proxy_block"
+
+            if saw_geo_blocked:
+                self.last_transcript_failure_reason = last_reason or "geo_blocked"
+                self._record_webshare_pressure("geo_blocked")
+                return None, "geo_blocked"
 
             if saw_retry_later:
                 self.last_transcript_failure_reason = last_reason or "retry_later"
@@ -1194,6 +1295,7 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
         fail_count = 0
         consecutive_fatal_errors = 0
         consecutive_hard_blocks = 0
+        geo_blocked_count = 0
         MAX_CONSECUTIVE_FATAL = 30
         MAX_CONSECUTIVE_HARD_BLOCKS = max(
             1,
@@ -1269,6 +1371,30 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
                         "   ⏭️  Dipindahkan ke retry later karena proxy block. "
                         "State video tidak diubah."
                     )
+                elif outcome == "geo_blocked":
+                    consecutive_hard_blocks += 1
+                    geo_blocked_count += 1
+                    try:
+                        buffer_dir = Path("pending_updates")
+                        buffer_dir.mkdir(exist_ok=True)
+
+                        update_data = {
+                            "video_id": vid,
+                            "type": "transcript",
+                            "status": "geo_blocked",
+                            "note": str(getattr(self, "last_transcript_failure_reason", "") or "geo_blocked"),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+
+                        buffer_file = buffer_dir / f"update_geo_blocked_{vid}_{int(time.time())}.json"
+                        buffer_file.write_text(json.dumps(update_data), encoding="utf-8")
+                        logger.info(f"   [BUFFERED] Geo-blocked status saved to {buffer_file.name}")
+                    except Exception as e_buffer:
+                        logger.warning(f"   ⚠️  Gagal menyimpan buffer geo-blocked ({vid}): {e_buffer}")
+
+                    logger.info(
+                        "   🌍 Geo/region block terdeteksi. Dijadwalkan ulang dengan region/proxy yang sesuai."
+                    )
                 elif outcome == "retry_later":
                     consecutive_hard_blocks = 0
                     logger.info(
@@ -1341,7 +1467,10 @@ print(json.dumps({"status": status, "path": str(path) if path else ""}))
 
             # Inter-video pacing is handled inside download_transcript()
 
-        logger.info(f"\n📊 RINGKASAN: {success_count} Berhasil, {fail_count} Gagal/No Subtitle.")
+        logger.info(
+            f"\n📊 RINGKASAN: {success_count} Berhasil, {fail_count} Gagal/No Subtitle, "
+            f"geo_blocked={geo_blocked_count}."
+        )
         if stopped_early:
             logger.error("🛑 Batch dihentikan lebih awal karena hard block berulang.")
         return 2 if stopped_early else 0

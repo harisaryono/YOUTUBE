@@ -3,7 +3,7 @@
 Recover transcript untuk daftar video spesifik dari CSV.
 Jika transcript berhasil didownload, DB dan file transcript diperbarui.
 Jika subtitle memang tidak ada, video ditandai no_subtitle dan state stale dibersihkan.
-Jika terjadi error fatal/rate-limit, state tidak diubah.
+Jika terjadi error fatal/rate-limit/geo block, state ditandai sesuai outcome.
 """
 
 from __future__ import annotations
@@ -272,6 +272,7 @@ def main() -> int:
     blocked_count = 0
     proxy_block_count = 0
     retry_later_count = 0
+    geo_blocked_count = 0
     asr_split_count = 0
     skipped_long_video_count = 0
     error_count = 0
@@ -444,6 +445,33 @@ def main() -> int:
                     logger.info(
                         f"   ⏭️  Tantangan/rate-limit terdeteksi. Dijadwalkan ulang {RETRY_LATER_HOURS} jam lagi."
                     )
+                elif outcome == "geo_blocked":
+                    consecutive_fatal = 0
+                    consecutive_hard_blocks += 1
+                    geo_blocked_count += 1
+                    reason = str(getattr(recoverer, "last_transcript_failure_reason", "") or "").strip() or "geo_blocked"
+                    mark_retry_later(recoverer, video_id, reason)
+                    retry_writer.writerow(
+                        {
+                            "video_id": video_id,
+                            "channel_name": row["channel_name"],
+                            "reason": reason[:500],
+                            "retry_after_hours": RETRY_LATER_HOURS,
+                        }
+                    )
+                    writer.writerow(
+                        {
+                            "video_id": video_id,
+                            "channel_name": row["channel_name"],
+                            "status": "geo_blocked",
+                            "language": "",
+                            "transcript_file_path": str(row.get("transcript_file_path") or ""),
+                            "note": f"geo/region block; retry_after={RETRY_LATER_HOURS}h",
+                        }
+                    )
+                    logger.info(
+                        f"   🌍 Geo/region block terdeteksi. Dijadwalkan ulang {RETRY_LATER_HOURS} jam lagi dengan region/proxy yang sesuai."
+                    )
                 elif outcome == "proxy_block":
                     consecutive_fatal = 0
                     consecutive_hard_blocks += 1
@@ -561,7 +589,8 @@ def main() -> int:
     logger.info(
         f"RINGKASAN: downloaded={success_count}, "
         f"asr_split={asr_split_count}, skipped_long_video={skipped_long_video_count}, "
-        f"no_subtitle={no_subtitle_count}, blocked={blocked_count}, proxy_block={proxy_block_count}, retry_later={retry_later_count}, fatal_error={error_count}"
+        f"no_subtitle={no_subtitle_count}, blocked={blocked_count}, proxy_block={proxy_block_count}, "
+        f"geo_blocked={geo_blocked_count}, retry_later={retry_later_count}, fatal_error={error_count}"
     )
     with savesubs_status_path.open("w", encoding="utf-8", newline="") as status_f:
         status_writer = csv.DictWriter(status_f, fieldnames=["status", "count"])

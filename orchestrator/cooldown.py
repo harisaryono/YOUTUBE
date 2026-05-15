@@ -16,6 +16,7 @@ STANDARD_COOLDOWNS: dict[str, int] = {
     "youtube_bot_detection": 86400,
     "youtube_signin_required": 21600,
     "youtube_ip_blocked": 43200,
+    "youtube_geo_blocked": 0,
     "channel_unavailable": 86400,
     "provider_429": 3600,
     "provider_quota_exceeded": 86400,

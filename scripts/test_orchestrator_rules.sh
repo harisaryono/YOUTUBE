@@ -66,9 +66,29 @@ try:
     assert safety_gate_for_job({"stage": "audio_download", "scope": "youtube"}, cfg, sys_h, prov_h, yt_h, state).verdict == "RUN"
     state.clear_pause("stage:transcript")
 
+    # Scenario 4: stage cooldowns must not cross-contaminate unrelated stages.
+    state.set_cooldown("stage:resume", "test resume cooldown", 60)
+    sys_h = check_system_health(cfg)
+    prov_h = check_provider_health(cfg, state)
+    yt_h = check_youtube_health(cfg, state)
+    assert safety_gate_for_job({"stage": "transcript", "scope": "channel:demo"}, cfg, sys_h, prov_h, yt_h, state).verdict == "RUN"
+    assert safety_gate_for_job({"stage": "audio_download", "scope": "channel:demo"}, cfg, sys_h, prov_h, yt_h, state).verdict == "RUN"
+    assert safety_gate_for_job({"stage": "resume", "scope": "channel:demo"}, cfg, sys_h, prov_h, yt_h, state).reason_code == "DEFER_STAGE_COOLDOWN"
+    state.clear_cooldown("stage:resume")
+
+    state.set_cooldown("stage:transcript", "test transcript cooldown", 60)
+    sys_h = check_system_health(cfg)
+    prov_h = check_provider_health(cfg, state)
+    yt_h = check_youtube_health(cfg, state)
+    assert safety_gate_for_job({"stage": "resume", "scope": "provider"}, cfg, sys_h, prov_h, yt_h, state).verdict == "RUN"
+    assert safety_gate_for_job({"stage": "format", "scope": "global"}, cfg, sys_h, prov_h, yt_h, state).verdict == "RUN"
+    assert safety_gate_for_job({"stage": "transcript", "scope": "channel:demo"}, cfg, sys_h, prov_h, yt_h, state).reason_code == "DEFER_STAGE_COOLDOWN"
+
     print("orchestrator rules smoke-test: OK")
 finally:
     state.clear_cooldown("youtube")
+    state.clear_cooldown("stage:resume")
+    state.clear_cooldown("stage:transcript")
     state.clear_pause("stage:transcript")
     state.close()
 PY

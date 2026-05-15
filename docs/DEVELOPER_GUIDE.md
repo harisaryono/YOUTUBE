@@ -27,7 +27,7 @@ Panduan ini ditujukan bagi programmer berikutnya untuk memahami, menjalankan, da
 - Sebelum membuat program baru yang menyentuh provider, lease, preflight, block, model, queue, transcript formatting, atau resume generation, programmer **wajib** membaca guide coordinator yang aktif di server:
 
 ```bash
-ssh yt-server 'sed -n "1,260p" /root/services/COORDINATOR_GUIDE.md'
+ssh lease-server 'sed -n "1,260p" /root/services/COORDINATOR_GUIDE.md'
 ```
 
 - Copy server di `/root/services/COORDINATOR_GUIDE.md` adalah source of truth operasional. Jangan membuat script baru dengan asumsi lokal jika belum membaca guide server itu.
@@ -41,7 +41,7 @@ ssh yt-server 'sed -n "1,260p" /root/services/COORDINATOR_GUIDE.md'
 
 Sistem ini bekerja dengan skema Client‑Coordinator:
 
-- **Coordinator (**`yt-server`**)**: Menyimpan seluruh API Key secara terenkripsi. Mengelola antrean (leasing) akun agar tidak terjadi tabrakan kuota/rate-limit.
+- **Coordinator (**`lease-server`**)**: Menyimpan seluruh API Key secara terenkripsi. Mengelola antrean (leasing) akun agar tidak terjadi tabrakan kuota/rate-limit.
 - **Worker (**`harry-pc`**)**: Menjalankan script pemrosesan resume secara paralel yang mengambil API Key dari coordinator sesuai kebutuhan.
 
 ## 2. Sinkronisasi & Koneksi Server
@@ -50,10 +50,10 @@ Coordinator berjalan melalui URL yang diset di `YT_PROVIDER_COORDINATOR_URL`; un
 
 ### Memeriksa Status Server
 
-Login ke `yt-server` dan cek apakah layanan aktif:
+Login ke `lease-server` dan cek apakah layanan aktif:
 
 ```bash
-# Di server (yt-server)
+# Di server (lease-server)
 ps aux | grep provider_coordinator_server.py
 curl -s http://localhost:8788/v1/status/accounts
 ```
@@ -63,7 +63,7 @@ curl -s http://localhost:8788/v1/status/accounts
 Jika port `8788` terblokir firewall, jalankan tunnel dari terminal lokal:
 
 ```bash
-ssh -L 8788:localhost:8788 yt-server
+ssh -L 8788:localhost:8788 lease-server
 ```
 
 Lalu pastikan `.env` lokal Anda mengarah ke nilai `YT_PROVIDER_COORDINATOR_URL` yang benar.

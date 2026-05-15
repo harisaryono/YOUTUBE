@@ -355,9 +355,16 @@ def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) ->
     stage = str(stage or "").strip().lower()
     scope = str(scope or "").strip()
     error_type = str(getattr(classification, "error_type", "") or "").strip()
+    suggested_scope = str(getattr(classification, "suggested_scope", "") or "").strip()
+    stage_scope = f"stage:{stage}" if stage else ""
+    stage_local_scopes = {"resume", "format", "asr"}
 
     scopes: list[str] = []
-    if scope.startswith("channel:") and stage not in {"resume", "audio_download", "asr"}:
+
+    # Only transcript/audio_download (YouTube-sensitive stages) get channel-level cooldowns.
+    # Other stages (resume, format, asr, discovery) use stage-level scopes to avoid
+    # cross-contamination: a resume failure must not block transcript for the same channel.
+    if scope.startswith("channel:") and stage in {"transcript", "audio_download"}:
         scopes.append(scope)
 
     severe_youtube_errors = {
@@ -375,10 +382,15 @@ def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) ->
             scopes.append("youtube:content")
         else:
             scopes.append("youtube")
-    elif getattr(classification, "suggested_scope", ""):
-        scopes.append(str(classification.suggested_scope))
-    elif stage in {"resume", "audio_download", "asr"}:
-        scopes.append(f"stage:{stage}")
+    elif suggested_scope:
+        if stage in stage_local_scopes and suggested_scope in {"coordinator", "provider"}:
+            if stage_scope:
+                scopes.append(stage_scope)
+        else:
+            scopes.append(suggested_scope)
+    elif stage in {"resume", "audio_download", "asr", "format"}:
+        if stage_scope:
+            scopes.append(stage_scope)
     elif not scopes:
         scopes.append(scope or "global")
 
@@ -387,6 +399,42 @@ def _cooldown_scopes_for_failure(stage: str, scope: str, classification: Any) ->
         if item and item not in deduped:
             deduped.append(item)
     return deduped
+
+
+def _cooldown_scope_for_deferred_job(stage: str, reason_code: str, job_scope: str) -> str:
+    """Map a deferred job to the right cooldown scope based on its stage.
+
+    Stage-scoped cooldowns prevent cross-contamination:
+    - Resume failure  → cooldown stage:resume    (does NOT block transcript)
+    - ASR failure     → cooldown stage:asr       (does NOT block resume/transcript)
+    - Format failure  → cooldown stage:format    (does NOT block anything else)
+    - Transcript failure → cooldown stage:transcript or channel:* (only blocks youtube group)
+    - Audio download  → cooldown stage:audio_download
+    - Discovery       → cooldown stage:discovery
+
+    The only exception is ASR provider-level unavailability which scopes to `provider:asr`.
+    """
+    stage = str(stage or "").strip().lower()
+    reason_code = str(reason_code or "").strip()
+    job_scope = str(job_scope or "").strip()
+
+    # ASR-specific provider-level scopes
+    asr_provider_reasons = {
+        "DEFER_PROVIDER_UNAVAILABLE",
+        "DEFER_ASR_PROVIDER_DEGRADED",
+        "DEFER_NVIDIA_RIVA_DEGRADED",
+        "DEFER_GROQ_UNAVAILABLE",
+        "DEFER_ASR_ALL_PROVIDERS_DEGRADED",
+    }
+    if stage == "asr" and reason_code in asr_provider_reasons:
+        return "provider:asr"
+
+    # Transcript and audio_download use channel scopes (only checked by youtube-group stages)
+    if stage in {"transcript", "audio_download"}:
+        return job_scope if job_scope.startswith("channel:") else f"stage:{stage}"
+
+    # All other stages use stage-scoped cooldowns to avoid cross-contamination
+    return f"stage:{stage}"
 
 
 def _stage_timeout_seconds(config: dict[str, Any], stage: str) -> int:
@@ -1093,9 +1141,11 @@ def run_once(
                 reason_code=decision.reason_code,
             )
             if decision.cooldown_seconds > 0 and job.get("scope"):
-                cooldown_scope = str(job["scope"])
-                if stage == "asr" and decision.reason_code == "DEFER_PROVIDER_UNAVAILABLE":
-                    cooldown_scope = "provider:asr"
+                cooldown_scope = _cooldown_scope_for_deferred_job(
+                    stage=stage,
+                    reason_code=decision.reason_code,
+                    job_scope=str(job["scope"]),
+                )
                 state.set_cooldown(
                     scope=cooldown_scope,
                     reason=decision.reason,

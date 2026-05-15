@@ -981,6 +981,10 @@ class ASRPipeline:
             "channel_name",
             "status",
             "provider",
+            "provider_order",
+            "provider_used",
+            "provider_disabled",
+            "fallback_used",
             "chunk_count",
             "processed_chunks",
             "language",
@@ -1009,6 +1013,10 @@ class ASRPipeline:
                         "channel_name": row.get("channel_name", ""),
                         "status": row.get("status", ""),
                         "provider": row.get("provider", ""),
+                        "provider_order": str(row.get("provider_order", "")),
+                        "provider_used": str(row.get("provider_used", "")),
+                        "provider_disabled": str(row.get("provider_disabled", "")),
+                        "fallback_used": str(row.get("fallback_used", "")),
                         "chunk_count": row.get("chunk_count", 0),
                         "processed_chunks": row.get("processed_chunks", 0),
                         "language": row.get("language", ""),
@@ -1954,6 +1962,11 @@ class ASRPipeline:
         channel_name = str(row.get("channel_name") or "").strip()
         logger.info("ASR start: %s | %s", video_id, title)
 
+        provider_order_str = ",".join(self.provider_order)
+        providers_used: set[str] = set()
+        providers_disabled: list[str] = []
+        fallback_used_flag = False
+
         video_work_dir = self.run_dir / "videos" / _slug(video_id)
         video_work_dir.mkdir(parents=True, exist_ok=True)
         transcript_dir = self.video_root / _slug(video_id)
@@ -1980,6 +1993,10 @@ class ASRPipeline:
                     "video_id": video_id,
                     "status": "retry_later",
                     "provider": "yt-dlp",
+                    "provider_order": provider_order_str,
+                    "provider_used": "",
+                    "provider_disabled": "",
+                    "fallback_used": "false",
                     "chunk_count": 0,
                     "processed_chunks": 0,
                     "error_text": reason,
@@ -1993,6 +2010,10 @@ class ASRPipeline:
                 "video_id": video_id,
                 "status": "audio_cached" if source_path.exists() else "audio_downloaded",
                 "provider": "yt-dlp",
+                "provider_order": provider_order_str,
+                "provider_used": "",
+                "provider_disabled": "",
+                "fallback_used": "false",
                 "chunk_count": 0,
                 "processed_chunks": 0,
                 "error_text": "",
@@ -2012,6 +2033,10 @@ class ASRPipeline:
                     "video_id": video_id,
                     "status": "retry_later",
                     "provider": "local-audio",
+                    "provider_order": provider_order_str,
+                    "provider_used": "",
+                    "provider_disabled": "",
+                    "fallback_used": "false",
                     "chunk_count": 0,
                     "processed_chunks": 0,
                     "error_text": reason,
@@ -2048,6 +2073,10 @@ class ASRPipeline:
                         "video_id": video_id,
                         "status": "skip_access_blocked",
                         "provider": "yt-dlp",
+                        "provider_order": provider_order_str,
+                        "provider_used": "",
+                        "provider_disabled": "",
+                        "fallback_used": "false",
                         "chunk_count": 0,
                         "processed_chunks": 0,
                         "error_text": reason,
@@ -2072,6 +2101,10 @@ class ASRPipeline:
                     "video_id": video_id,
                     "status": "retry_later",
                     "provider": ",".join(self.provider_order),
+                    "provider_order": provider_order_str,
+                    "provider_used": "",
+                    "provider_disabled": "",
+                    "fallback_used": "false",
                     "chunk_count": 0,
                     "processed_chunks": 0,
                     "error_text": reason,
@@ -2102,6 +2135,10 @@ class ASRPipeline:
                     "video_id": video_id,
                     "status": "retry_later",
                     "provider": ",".join(self.provider_order),
+                    "provider_order": provider_order_str,
+                    "provider_used": "",
+                    "provider_disabled": "",
+                    "fallback_used": "false",
                     "chunk_count": chunk_count,
                     "processed_chunks": 0,
                     "error_text": reason,
@@ -2141,6 +2178,7 @@ class ASRPipeline:
                         disabled_provider_warnings.add(provider_name)
                     continue
                 if provider_name != self.provider_order[0] or disabled_provider_warnings:
+                    fallback_used_flag = True
                     logger.info("ASR fallback aktif untuk video=%s chunk=%s provider=%s", video_id, chunk_index, provider_name)
                 attempt = self._transcribe_chunk(lease, chunk_path)
                 self.db.upsert_video_asr_chunk(
@@ -2173,6 +2211,7 @@ class ASRPipeline:
                 }
                 if attempt.ok:
                     detected_languages.append(attempt.language)
+                    providers_used.add(lease.provider)
                     chunk_failed = False
                     break
                 last_lease = lease
@@ -2188,6 +2227,7 @@ class ASRPipeline:
                 )
                 disable_provider, cooldown_seconds, disable_reason = self._should_disable_provider_after_failure(provider_name, attempt)
                 if disable_provider:
+                    providers_disabled.append(f"{provider_name}:{disable_reason}")
                     if provider_name == "groq":
                         self._release_provider_lease(
                             provider_name,
@@ -2216,6 +2256,10 @@ class ASRPipeline:
                     "video_id": video_id,
                     "status": "chunk_failed",
                     "provider": ",".join(self.provider_order),
+                    "provider_order": provider_order_str,
+                    "provider_used": ",".join(sorted(providers_used)),
+                    "provider_disabled": "; ".join(providers_disabled),
+                    "fallback_used": str(fallback_used_flag).lower(),
                     "chunk_count": chunk_count,
                     "processed_chunks": sum(1 for item in chunk_records.values() if str(item.get("status") or "") == "done"),
                     "error_text": reason,
@@ -2248,6 +2292,10 @@ class ASRPipeline:
                 "video_id": video_id,
                 "status": "empty",
                 "provider": ",".join(self.provider_order),
+                "provider_order": provider_order_str,
+                "provider_used": ",".join(sorted(providers_used)),
+                "provider_disabled": "; ".join(providers_disabled),
+                "fallback_used": str(fallback_used_flag).lower(),
                 "chunk_count": chunk_count,
                 "processed_chunks": sum(1 for item in chunk_records.values() if str(item.get("status") or "") == "done"),
                 "error_text": reason,
@@ -2324,6 +2372,10 @@ class ASRPipeline:
             "video_id": video_id,
             "status": "done",
             "provider": ",".join(self.provider_order),
+            "provider_order": provider_order_str,
+            "provider_used": ",".join(sorted(providers_used)),
+            "provider_disabled": "; ".join(providers_disabled),
+            "fallback_used": str(fallback_used_flag).lower(),
             "chunk_count": chunk_count,
             "processed_chunks": sum(1 for item in chunk_records.values() if str(item.get("status") or "") == "done"),
             "error_text": "",
@@ -2372,6 +2424,10 @@ class ASRPipeline:
                             "channel_name": result.get("channel_name", ""),
                             "status": result.get("status", ""),
                             "provider": result.get("provider", ""),
+                            "provider_order": str(result.get("provider_order", "")),
+                            "provider_used": str(result.get("provider_used", "")),
+                            "provider_disabled": str(result.get("provider_disabled", "")),
+                            "fallback_used": str(result.get("fallback_used", "")),
                             "chunk_count": result.get("chunk_count", 0),
                             "processed_chunks": result.get("processed_chunks", 0),
                             "language": result.get("language", ""),
@@ -2400,6 +2456,10 @@ class ASRPipeline:
                             "channel_name": row.get("channel_name", ""),
                             "status": "exception",
                             "provider": ",".join(self.provider_order),
+                            "provider_order": ",".join(self.provider_order),
+                            "provider_used": "",
+                            "provider_disabled": "",
+                            "fallback_used": "false",
                             "chunk_count": 0,
                             "processed_chunks": 0,
                             "language": "",
