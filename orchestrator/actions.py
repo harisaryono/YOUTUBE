@@ -11,11 +11,10 @@ import argparse
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from .state import OrchestratorState
-from .policies import policy_blockers_for_job
+from .policies import policy_blockers_for_job, quarantine_stages_from_payload
 
 
 KNOWN_GROUPS = {"discovery", "youtube", "youtube_download", "provider", "local"}
@@ -84,6 +83,18 @@ def _pause_name_from_key(key: str) -> str:
     return value.split(":", 1)[1]
 
 
+def _parse_stage_args(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    payload = {"stages": values}
+    return sorted(quarantine_stages_from_payload(payload))
+
+
+def _infer_quarantine_stages_from_reason(reason: str) -> list[str]:
+    payload = {"reason": reason or ""}
+    return sorted(quarantine_stages_from_payload(payload))
+
+
 def pause_target(state: OrchestratorState, target: str, minutes: int, reason: str, *, actor: str = "cli") -> ActionResult:
     pause_key = _normalized_pause_key(target)
     reason = str(reason or "").strip() or f"Paused via orchestrator ({pause_key})"
@@ -104,21 +115,9 @@ def pause_target(state: OrchestratorState, target: str, minutes: int, reason: st
         message=f"Paused {pause_key}: {reason}",
         stage=name if kind == "stage" else kind,
         scope=pause_key,
-        payload={
-            "action": "pause",
-            "pause_key": pause_key,
-            "reason": reason,
-            "actor": actor,
-            "until": until,
-            "minutes": int(minutes or 1),
-        },
+        payload={"action": "pause", "pause_key": pause_key, "reason": reason, "actor": actor, "until": until, "minutes": int(minutes or 1)},
     )
-    return ActionResult(
-        ok=True,
-        action="pause",
-        message=f"Paused {pause_key} for {minutes} minutes",
-        data={"pause_key": pause_key, "reason": reason, "until": until},
-    )
+    return ActionResult(ok=True, action="pause", message=f"Paused {pause_key} for {minutes} minutes", data={"pause_key": pause_key, "reason": reason, "until": until})
 
 
 def resume_target(state: OrchestratorState, target: str, *, actor: str = "cli") -> ActionResult:
@@ -133,18 +132,9 @@ def resume_target(state: OrchestratorState, target: str, *, actor: str = "cli") 
         message=f"Resumed {pause_key}",
         stage=name if kind == "stage" else kind,
         scope=pause_key,
-        payload={
-            "action": "resume",
-            "pause_key": pause_key,
-            "actor": actor,
-        },
+        payload={"action": "resume", "pause_key": pause_key, "actor": actor},
     )
-    return ActionResult(
-        ok=True,
-        action="resume",
-        message=f"Resumed {pause_key}",
-        data={"pause_key": pause_key},
-    )
+    return ActionResult(ok=True, action="resume", message=f"Resumed {pause_key}", data={"pause_key": pause_key})
 
 
 def pause_stage(state: OrchestratorState, stage: str, minutes: int, reason: str, *, actor: str = "cli") -> ActionResult:
@@ -170,12 +160,7 @@ def pause_group(state: OrchestratorState, group: str, minutes: int, reason: str,
     if not group:
         return ActionResult(ok=False, action="pause-group", message="Group kosong", data={})
     if group not in KNOWN_GROUPS:
-        return ActionResult(
-            ok=False,
-            action="pause-group",
-            message=f"Group tidak dikenal: {group}",
-            data={"group": group},
-        )
+        return ActionResult(ok=False, action="pause-group", message=f"Group tidak dikenal: {group}", data={"group": group})
     result = pause_target(state, f"group:{group}", minutes, reason, actor=actor)
     result.action = "pause-group"
     return result
@@ -196,14 +181,22 @@ def quarantine_channel(
     reason: str,
     *,
     actor: str = "cli",
+    stages: list[str] | None = None,
 ) -> ActionResult:
     channel_id = str(channel_id or "").strip()
     if not channel_id:
         return ActionResult(ok=False, action="quarantine-channel", message="Channel ID kosong", data={})
     reason = str(reason or "").strip() or f"Quarantined via orchestrator ({channel_id})"
-    state.quarantine_channel(channel_id, reason, actor=actor)
-    # Quarantine supersedes any transient channel cooldown so the same blocker
-    # is not reported twice.
+    scoped_stages = sorted(set(stages or []))
+    if not scoped_stages:
+        scoped_stages = _infer_quarantine_stages_from_reason(reason)
+    metadata: dict[str, Any] = {}
+    if scoped_stages:
+        metadata["stages"] = scoped_stages
+        metadata["scope_mode"] = "stage_scoped"
+    else:
+        metadata["scope_mode"] = "channel_global"
+    state.quarantine_channel(channel_id, reason, actor=actor, metadata=metadata)
     state.clear_cooldown(f"channel:{channel_id}")
     _emit_event(
         state,
@@ -211,27 +204,18 @@ def quarantine_channel(
         message=f"Quarantined channel {channel_id}: {reason}",
         stage="control",
         scope=f"channel:{channel_id}",
-        payload={
-            "action": "quarantine",
-            "channel_id": channel_id,
-            "reason": reason,
-            "actor": actor,
-        },
+        payload={"action": "quarantine", "channel_id": channel_id, "reason": reason, "actor": actor, **metadata},
     )
+    stage_suffix = f" for stage(s): {', '.join(scoped_stages)}" if scoped_stages else " globally"
     return ActionResult(
         ok=True,
         action="quarantine-channel",
-        message=f"Quarantined channel {channel_id}",
-        data={"channel_id": channel_id, "reason": reason},
+        message=f"Quarantined channel {channel_id}{stage_suffix}",
+        data={"channel_id": channel_id, "reason": reason, **metadata},
     )
 
 
-def unquarantine_channel(
-    state: OrchestratorState,
-    channel_id: str,
-    *,
-    actor: str = "cli",
-) -> ActionResult:
+def unquarantine_channel(state: OrchestratorState, channel_id: str, *, actor: str = "cli") -> ActionResult:
     channel_id = str(channel_id or "").strip()
     if not channel_id:
         return ActionResult(ok=False, action="unquarantine-channel", message="Channel ID kosong", data={})
@@ -242,28 +226,12 @@ def unquarantine_channel(
         message=f"Unquarantined channel {channel_id}",
         stage="control",
         scope=f"channel:{channel_id}",
-        payload={
-            "action": "unquarantine",
-            "channel_id": channel_id,
-            "actor": actor,
-        },
+        payload={"action": "unquarantine", "channel_id": channel_id, "actor": actor},
     )
-    return ActionResult(
-        ok=True,
-        action="unquarantine-channel",
-        message=f"Unquarantined channel {channel_id}",
-        data={"channel_id": channel_id},
-    )
+    return ActionResult(ok=True, action="unquarantine-channel", message=f"Unquarantined channel {channel_id}", data={"channel_id": channel_id})
 
 
-def retry_failed(
-    state: OrchestratorState,
-    *,
-    stage: str = "",
-    limit: int = 20,
-    dry_run: bool = True,
-    actor: str = "cli",
-) -> ActionResult:
+def retry_failed(state: OrchestratorState, *, stage: str = "", limit: int = 20, dry_run: bool = True, actor: str = "cli") -> ActionResult:
     stage = str(stage or "").strip().lower()
     limit = max(1, int(limit or 1))
     failed_jobs = state.list_jobs(status="failed", stage=stage or None)
@@ -271,9 +239,8 @@ def retry_failed(
     combined: dict[str, dict[str, Any]] = {}
     for row in failed_jobs + timed_out_jobs:
         job_id = str(row.get("job_id") or "").strip()
-        if not job_id:
-            continue
-        combined[job_id] = dict(row)
+        if job_id:
+            combined[job_id] = dict(row)
     candidates = list(combined.values())
     candidates.sort(key=lambda row: str(row.get("started_at") or ""))
     candidates = candidates[:limit]
@@ -295,12 +262,7 @@ def retry_failed(
     queued: list[dict[str, Any]] = []
     if not dry_run:
         for row in eligible:
-            queued_item = state.enqueue_retry_queue_item(
-                row,
-                requested_by=actor,
-                reason=f"retry_failed:{stage or 'all'}",
-                max_attempts=3,
-            )
+            queued_item = state.enqueue_retry_queue_item(row, requested_by=actor, reason=f"retry_failed:{stage or 'all'}", max_attempts=3)
             queued.append(queued_item)
 
     payload = {
@@ -320,29 +282,16 @@ def retry_failed(
     _emit_event(
         state,
         event_type="control.retry_failed",
-        message=(
-            f"Retry failed requested for stage={stage or 'all'} limit={limit} dry_run={dry_run} "
-            f"eligible={len(eligible)} blocked={len(blocked)} queued={len(queued)}"
-        ),
+        message=f"Retry failed requested for stage={stage or 'all'} limit={limit} dry_run={dry_run} eligible={len(eligible)} blocked={len(blocked)} queued={len(queued)}",
         stage=stage or "control",
         scope=f"stage:{stage}" if stage else "scope:all",
         payload=payload,
         recommendation="Dry-run only; actual requeue uses retry queue and daemon planner",
     )
-    message = f"Retry candidates: {len(candidates)} job(s)"
-    if dry_run:
-        message = f"Dry-run retry candidates: {len(candidates)} job(s)"
-    else:
-        message = f"Queued {len(queued)} retry job(s)"
-        if blocked:
-            message += f" ({len(blocked)} blocked by policy)"
-    return ActionResult(
-        ok=True,
-        action="retry-failed",
-        message=message,
-        data=payload,
-        warnings=[] if dry_run else ([f"{len(blocked)} candidate(s) blocked by policy and not queued"] if blocked else []),
-    )
+    message = f"Dry-run retry candidates: {len(candidates)} job(s)" if dry_run else f"Queued {len(queued)} retry job(s)"
+    if not dry_run and blocked:
+        message += f" ({len(blocked)} blocked by policy)"
+    return ActionResult(ok=True, action="retry-failed", message=message, data=payload, warnings=[] if dry_run else ([f"{len(blocked)} candidate(s) blocked by policy and not queued"] if blocked else []))
 
 
 def _print_result(result: ActionResult) -> None:
@@ -384,7 +333,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason", default="")
     add_common_flags(p)
 
-    p = subparsers.add_parser("resume-group", help="Resume a paused control group")
+    p = subparsers.add_parser("resume-group", help="Resume a control group")
     p.add_argument("group")
     add_common_flags(p)
 
@@ -398,12 +347,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p = subparsers.add_parser("quarantine-channel", help="Quarantine a channel")
     p.add_argument("channel_id")
     p.add_argument("--reason", default="")
+    p.add_argument("--stage", action="append", choices=sorted(KNOWN_STAGES), help="Limit quarantine to a stage; can be repeated")
+    p.add_argument("--stages", default="", help="Comma-separated stage list for scoped quarantine")
     add_common_flags(p)
 
     p = subparsers.add_parser("unquarantine-channel", help="Release a channel from quarantine")
     p.add_argument("channel_id")
     add_common_flags(p)
-
     return parser
 
 
@@ -421,15 +371,12 @@ def main() -> None:
         elif args.command == "resume-group":
             result = resume_group(state, args.group, actor=args.actor)
         elif args.command == "retry-failed":
-            result = retry_failed(
-                state,
-                stage=args.stage,
-                limit=args.limit,
-                dry_run=bool(args.dry_run),
-                actor=args.actor,
-            )
+            result = retry_failed(state, stage=args.stage, limit=args.limit, dry_run=bool(args.dry_run), actor=args.actor)
         elif args.command == "quarantine-channel":
-            result = quarantine_channel(state, args.channel_id, args.reason, actor=args.actor)
+            stage_values = list(args.stage or [])
+            if str(args.stages or "").strip():
+                stage_values.extend([item.strip() for item in str(args.stages).split(",") if item.strip()])
+            result = quarantine_channel(state, args.channel_id, args.reason, actor=args.actor, stages=_parse_stage_args(stage_values))
         elif args.command == "unquarantine-channel":
             result = unquarantine_channel(state, args.channel_id, actor=args.actor)
         else:
