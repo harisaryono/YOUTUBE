@@ -1,0 +1,66 @@
+name: Orchestrator Tests
+
+on:
+  push:
+    paths:
+      - "orchestrator/**"
+      - "tests/**"
+      - ".github/workflows/orchestrator-tests.yml"
+  pull_request:
+    paths:
+      - "orchestrator/**"
+      - "tests/**"
+      - ".github/workflows/orchestrator-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orchestrator-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Compile and run orchestrator unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      YT_PROVIDER_COORDINATOR_URL: ""
+      YT_PROVIDER_COORDINATOR_REQUIRED: "0"
+      YT_ORCHESTRATOR_CI: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install minimal test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest PyYAML
+
+      - name: Compile orchestrator package
+        run: |
+          python -m compileall orchestrator
+
+      - name: Run focused orchestrator tests
+        run: |
+          if compgen -G "tests/test_stage*.py" > /dev/null; then
+            pytest -q tests/test_stage*.py
+          else
+            echo "No stage tests found; running import smoke only."
+            python - <<'PY'
+          import orchestrator.error_analyzer
+          import orchestrator.terminal_failures
+          print("orchestrator import smoke ok")
+          PY
+          fi
