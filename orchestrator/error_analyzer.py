@@ -1,5 +1,10 @@
 """
 Error Analyzer — Classify errors from logs, reports, and exit codes.
+
+Stage 16 hardening:
+- Terminal/video-scoped YouTube failures do not create global/channel cooldowns.
+- Real request-pressure failures (bot/rate-limit/IP block) remain cooldown-capable.
+- Pattern matching is evaluated before exit-code fallback.
 """
 
 from __future__ import annotations
@@ -10,10 +15,11 @@ from typing import Any
 from .state import OrchestratorState
 
 
-# Error classification patterns
+# Error classification patterns.
+# Order matters: precise terminal/video-scoped failures must stay above broad
+# 403/access-denied/video-unavailable patterns.
 ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
-    # YouTube errors
-    (r"(?i)(429|too\s*many\s*requests|rate\s*limit)", "youtube_429", "YouTube rate limited", 7200),
+    # YouTube terminal / video-scoped errors that should not create global cooldowns.
     (
         r"(?i)(not\s*made\s*this\s*video\s*available\s*in\s*your\s*country|"
         r"this\s*video\s*is\s*not\s*available\s*in\s*your\s*country|"
@@ -31,14 +37,85 @@ ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
         "YouTube geo/region restricted",
         0,
     ),
+    (
+        r"(?i)(members[-\s]?only|member\s+only|membership|"
+        r"available\s+to\s+(this\s+channel'?s\s+)?members|"
+        r"join\s+this\s+channel\s+to\s+get\s+access)",
+        "member_only",
+        "Member-only video",
+        0,
+    ),
+    (
+        r"(?i)(private\s+video|video\s+is\s+private|"
+        r"sign\s+in\s+if\s+you'?ve\s+been\s+granted\s+access)",
+        "private_video",
+        "Private video",
+        0,
+    ),
+    (
+        r"(?i)(confirm\s+your\s+age|age[-\s]?restricted|age\s+restriction|"
+        r"inappropriate\s+for\s+some\s+users)",
+        "age_restricted",
+        "Age-restricted video",
+        0,
+    ),
+    (
+        r"(?i)(copyright|blocked\s+on\s+copyright\s+grounds|contains\s+content\s+from|"
+        r"has\s+been\s+blocked\s+by\s+.*copyright)",
+        "copyright_blocked",
+        "Video blocked by copyright/rights restriction",
+        0,
+    ),
+    (
+        r"(?i)(premiere\s+will\s+begin|premieres\s+in|"
+        r"live\s+stream\s+recording\s+is\s+not\s+available|"
+        r"this\s+live\s+event\s+will\s+begin|waiting\s+for\s+.*live|"
+        r"not\s+yet\s+available)",
+        "not_ready_yet",
+        "Video/live/premiere not ready yet",
+        0,
+    ),
+    (
+        r"(?i)(requested\s+format\s+is\s+not\s+available|no\s+video\s+formats\s+found|"
+        r"no\s+formats\s+available|format\s+not\s+available)",
+        "format_unavailable",
+        "Requested YouTube format is unavailable",
+        0,
+    ),
+    (
+        r"(?i)(no\s*subtitle|subtitles\s*disabled|transcript\s+is\s+disabled|"
+        r"no\s+transcripts\s+were\s+found)",
+        "no_subtitle",
+        "Video has no subtitles",
+        0,
+    ),
+    (
+        r"(?i)(video\s*unavailable|video\s+is\s+unavailable|not\s*found|404|"
+        r"removed\s+by\s+the\s+uploader|has\s+been\s+removed)",
+        "video_unavailable",
+        "Video unavailable",
+        0,
+    ),
+    (r"(?i)(channel\s*unavailable|channel\s*not\s*found)", "channel_unavailable", "Channel unavailable", 0),
+
+    # YouTube errors that represent environment/IP/request pressure and may need cooldown.
+    (
+        r"(?i)(bot\s*detect|unusual\s*traffic|captcha|"
+        r"sign\s+in\s+to\s+confirm\s+you.?re\s+not\s+a\s+bot)",
+        "youtube_bot_detection",
+        "YouTube bot detection",
+        86400,
+    ),
+    (
+        r"(?i)(ip\s*blocked|blocked\s*ip|blocked\s+requests\s+from\s+your\s+ip|"
+        r"your\s+ip\s+has\s+been\s+blocked|ipblocked|requestblocked)",
+        "youtube_ip_blocked",
+        "YouTube IP blocked",
+        43200,
+    ),
+    (r"(?i)(429|too\s*many\s*requests|rate\s*limit)", "youtube_429", "YouTube rate limited", 7200),
     (r"(?i)(403|forbidden|access\s*denied)", "youtube_403", "YouTube access denied", 3600),
-    (r"(?i)(bot\s*detect|unusual\s*traffic|captcha)", "youtube_bot_detection", "YouTube bot detection", 86400),
     (r"(?i)(sign\s*in|login\s*required|cookie)", "youtube_signin_required", "YouTube sign-in required", 21600),
-    (r"(?i)(no\s*subtitle|subtitles\s*disabled)", "no_subtitle", "Video has no subtitles", 0),
-    (r"(?i)(member\s*only|membership)", "member_only", "Member-only video", 0),
-    (r"(?i)(video\s*unavailable|not\s*found|404)", "video_unavailable", "Video unavailable", 0),
-    (r"(?i)(channel\s*unavailable|channel\s*not\s*found)", "channel_unavailable", "Channel unavailable", 86400),
-    (r"(?i)(ip\s*blocked|blocked\s*ip)", "youtube_ip_blocked", "YouTube IP blocked", 43200),
 
     # Provider errors
     (r"(?i)(429|rate\s*limit|too\s*many\s*requests).*provider", "provider_429", "Provider rate limited", 3600),
@@ -75,6 +152,19 @@ ERROR_PATTERNS: list[tuple[str, str, str, int]] = [
 ]
 
 
+TERMINAL_VIDEO_ERROR_TYPES = {
+    "youtube_geo_blocked",
+    "member_only",
+    "private_video",
+    "age_restricted",
+    "copyright_blocked",
+    "not_ready_yet",
+    "format_unavailable",
+    "no_subtitle",
+    "video_unavailable",
+}
+
+
 class ErrorClassification:
     """Result of error classification."""
 
@@ -95,18 +185,22 @@ class ErrorClassification:
         self.suggested_scope = suggested_scope
 
 
-
 # Recommendation map
 RECOMMENDATIONS: dict[str, str] = {
+    "youtube_geo_blocked": "Do not cooldown globally; retry only with a proxy/IP from an allowed region",
+    "member_only": "Mark as member_only in DB, skip permanently unless authorized access is intended",
+    "private_video": "Mark as private/unavailable; do not global cooldown",
+    "age_restricted": "Use valid cookies/account if permitted; do not global cooldown",
+    "copyright_blocked": "Mark copyright_blocked; do not global cooldown",
+    "not_ready_yet": "Retry this video later; do not global cooldown",
+    "format_unavailable": "Change yt-dlp format selector; do not global cooldown",
+    "no_subtitle": "Mark as no_subtitle in DB, skip subtitle retry and route to ASR if needed",
+    "video_unavailable": "Mark as unavailable in DB, skip permanently",
+    "channel_unavailable": "Disable channel scan, skip permanently",
     "youtube_429": "Reduce workers, enable --rate-limit-safe, increase inter-video delay",
     "youtube_403": "Check cookies/proxy/IP, wait before retry",
     "youtube_bot_detection": "Stop all YouTube activity for 12-24h, use different IP/proxy",
     "youtube_signin_required": "Refresh cookies, check cookie file, use different proxy",
-    "no_subtitle": "Mark as no_subtitle in DB, skip permanently",
-    "member_only": "Mark as member_only in DB, skip permanently",
-    "youtube_geo_blocked": "Use a proxy/IP from an allowed region or skip this video for now",
-    "video_unavailable": "Mark as unavailable in DB, skip permanently",
-    "channel_unavailable": "Disable channel scan, skip permanently",
     "youtube_ip_blocked": "Change IP/proxy, wait 12h before retry",
     "provider_429": "Reduce workers, switch to different provider",
     "provider_quota_exceeded": "Wait for quota reset or use different provider",
@@ -141,6 +235,11 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
     stage = str(stage or "").strip().lower()
     scope = str(scope or "").strip()
     error_type = str(classification.error_type or "").strip()
+
+    # Terminal per-video/channel states are not pressure signals. Record an event,
+    # but do not set cooldown on youtube, channel, or global scopes.
+    if error_type in TERMINAL_VIDEO_ERROR_TYPES or error_type == "channel_unavailable":
+        return []
 
     scopes: list[str] = []
     stage_scope = f"stage:{stage}" if stage else ""
@@ -192,51 +291,52 @@ def _cooldown_scopes_for_row(stage: str, scope: str, classification: ErrorClassi
     return deduped
 
 
-def classify_error(
-    log_line: str,
-    exit_code: int = 0,
-) -> ErrorClassification:
+def _suggested_scope_for_error(error_type: str, log_line: str) -> str:
+    if error_type in TERMINAL_VIDEO_ERROR_TYPES:
+        return "video"
+    if error_type == "channel_unavailable":
+        return "channel"
+    if error_type.startswith("youtube_"):
+        return "youtube"
+    if error_type.startswith("provider_"):
+        provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", log_line)
+        provider = provider_match.group(1).lower() if provider_match else "unknown"
+        return f"provider:{provider}"
+    if error_type == "memory_low":
+        return "stage:llm"
+    if error_type == "disk_low":
+        return "global"
+    if error_type in {"nvidia_riva_degraded", "nvidia_riva_rpc_error"}:
+        return "provider:nvidia_riva"
+    if error_type == "asr_provider_unavailable":
+        return "stage:asr"
+    if error_type == "lease_unavailable":
+        return "provider"
+    if error_type == "coordinator_unavailable":
+        return "coordinator"
+    return ""
+
+
+def classify_error(log_line: str, exit_code: int = 0) -> ErrorClassification:
     """
     Classify a single error from a log line or exit code.
     Returns an ErrorClassification with type, severity, and recommended cooldown.
     """
+    text = str(log_line or "")
+
     # Check patterns first (more specific than exit code)
     for pattern, error_type, description, cooldown in ERROR_PATTERNS:
-        if re.search(pattern, log_line):
+        if re.search(pattern, text):
             severity = "blocking" if cooldown >= 3600 else "warning"
             if cooldown == 0:
                 severity = "info"
-            if error_type == "youtube_geo_blocked":
-                severity = "warning"
-            # Determine suggested scope based on error type
-            suggested_scope = ""
-            if error_type == "youtube_geo_blocked":
-                suggested_scope = "youtube:content"
-            if error_type.startswith("youtube_"):
-                suggested_scope = suggested_scope or "youtube"
-            elif error_type.startswith("provider_"):
-                # Try to extract provider name from log line
-                provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", log_line)
-                provider = provider_match.group(1).lower() if provider_match else "unknown"
-                suggested_scope = f"provider:{provider}"
-            elif error_type == "memory_low":
-                suggested_scope = "stage:llm"
-            elif error_type == "disk_low":
-                suggested_scope = "global"
-            elif error_type == "nvidia_riva_degraded":
-                suggested_scope = "provider:nvidia_riva"
-            elif error_type == "nvidia_riva_rpc_error":
-                suggested_scope = "provider:nvidia_riva"
-            elif error_type == "asr_provider_unavailable":
-                suggested_scope = "stage:asr"
-            elif error_type == "lease_unavailable":
-                suggested_scope = "provider"
-            elif error_type == "coordinator_unavailable":
-                suggested_scope = "coordinator"
             return ErrorClassification(
-                error_type, description, cooldown, severity,
+                error_type,
+                description,
+                cooldown,
+                severity,
                 RECOMMENDATIONS.get(error_type, ""),
-                suggested_scope=suggested_scope,
+                suggested_scope=_suggested_scope_for_error(error_type, text),
             )
 
     # Fallback to exit code if no pattern matched
@@ -244,30 +344,32 @@ def classify_error(
         if exit_code == 1:
             return ErrorClassification(
                 "general_error", f"Exit code {exit_code}", 60, "warning",
-                "Check logs for details"
+                "Check logs for details",
             )
         if exit_code == 137:
             return ErrorClassification(
                 "memory_low", "Process killed (OOM)", 900, "blocking",
-                RECOMMENDATIONS["memory_low"]
+                RECOMMENDATIONS["memory_low"],
+                suggested_scope="stage:llm",
             )
         if exit_code in (139, 134, 6):
             return ErrorClassification(
                 "process_crash", f"Process crashed (signal {exit_code - 128})", 300, "warning",
-                "Check for bugs or memory issues"
+                "Check for bugs or memory issues",
             )
 
     return ErrorClassification(
-        "unknown_error", f"Unclassified: {log_line[:100]}", 300, "warning",
-        "Check logs manually"
+        "unknown_error", f"Unclassified: {text[:100]}", 300, "warning",
+        "Check logs manually",
     )
 
 
+def _video_scope(video_id: str) -> str:
+    video_id = str(video_id or "").strip()
+    return f"video:{video_id}" if video_id else "global"
 
-def analyze_report_csv(
-    report_path: str,
-    state: OrchestratorState,
-) -> list[dict[str, Any]]:
+
+def analyze_report_csv(report_path: str, state: OrchestratorState) -> list[dict[str, Any]]:
     """
     Analyze a report CSV from a run and set cooldowns accordingly.
     Returns list of events created.
@@ -280,26 +382,25 @@ def analyze_report_csv(
             reader = csv.DictReader(f)
             for row in reader:
                 status = (row.get("status") or "").strip().lower()
-                error_msg = (row.get("error") or row.get("message") or "").strip()
+                error_msg = (row.get("error") or row.get("message") or row.get("error_text") or "").strip()
                 video_id = (row.get("video_id") or row.get("id") or "").strip()
                 channel_id = (row.get("channel_id") or "").strip()
 
                 if status in SUCCESS_STATUSES:
                     continue
 
-                if not error_msg:
+                if not error_msg and not status:
                     continue
 
-                classification = classify_error(error_msg)
+                classification = classify_error(error_msg or status)
 
                 # Determine scope
                 scope = "global"
-                if classification.error_type in ("no_subtitle", "member_only", "video_unavailable"):
-                    scope = f"video:{video_id}" if video_id else "global"
+                if classification.error_type in TERMINAL_VIDEO_ERROR_TYPES:
+                    scope = _video_scope(video_id)
                 elif classification.error_type in ("channel_unavailable",):
                     scope = f"channel:{channel_id}" if channel_id else "global"
                 elif classification.error_type.startswith("provider_"):
-                    # Try to extract provider name
                     provider_match = re.search(r"(?i)(nvidia|groq|cerebras|openrouter|z\.ai)", error_msg)
                     provider = provider_match.group(1).lower() if provider_match else "unknown"
                     scope = f"provider:{provider}"
@@ -316,9 +417,10 @@ def analyze_report_csv(
                         )
 
                 # Record event
+                message_detail = error_msg or status
                 event_id = state.add_event(
                     event_type="error",
-                    message=f"[{classification.error_type}] {classification.description}: {error_msg[:200]}",
+                    message=f"[{classification.error_type}] {classification.description}: {message_detail[:200]}",
                     stage=row.get("stage", ""),
                     scope=scope,
                     severity=classification.severity,
@@ -328,6 +430,7 @@ def analyze_report_csv(
                         "channel_id": channel_id,
                         "error_type": classification.error_type,
                         "cooldown_seconds": classification.cooldown_seconds,
+                        "suggested_scope": classification.suggested_scope,
                     },
                 )
                 events.append({
