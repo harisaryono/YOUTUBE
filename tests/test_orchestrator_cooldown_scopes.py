@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -89,6 +91,58 @@ class TestCooldownScopeSeparation(unittest.TestCase):
         self.assertEqual(classification.error_type, "format_unavailable")
         self.assertEqual(classification.cooldown_seconds, 0)
         self.assertEqual(classification.suggested_scope, "video")
+
+    def test_stage_cooldown_reason_is_normalized(self) -> None:
+        from orchestrator.state import OrchestratorState
+
+        with TemporaryDirectory() as tmpdir:
+            state = OrchestratorState(Path(tmpdir) / "orch.sqlite3")
+            state.set_cooldown(
+                "stage:resume",
+                "Stage cooldown: Stage cooldown: Coordinator unavailable",
+                300,
+            )
+            cooldown = state.get_cooldown("stage:resume")
+            self.assertIsNotNone(cooldown)
+            self.assertEqual(cooldown["reason"], "Coordinator unavailable")
+
+    def test_quarantine_clears_redundant_channel_cooldown(self) -> None:
+        from orchestrator.actions import quarantine_channel
+        from orchestrator.state import OrchestratorState
+
+        with TemporaryDirectory() as tmpdir:
+            state = OrchestratorState(Path(tmpdir) / "orch.sqlite3")
+            state.set_cooldown("channel:HISTORY", "Coordinator unavailable", 300)
+            result = quarantine_channel(
+                state,
+                "HISTORY",
+                "geo/region blocks dominate transcript backlog; isolate channel",
+            )
+
+            self.assertTrue(result.ok)
+            self.assertTrue(state.is_quarantined_channel("HISTORY"))
+            self.assertIsNone(state.get_cooldown("channel:HISTORY"))
+
+    def test_quarantined_history_is_excluded_from_transcript_candidates(self) -> None:
+        from orchestrator import db_queries
+        from orchestrator.state import OrchestratorState
+
+        with TemporaryDirectory() as tmpdir:
+            state = OrchestratorState(Path(tmpdir) / "orch.sqlite3")
+
+            pre_rows = db_queries.find_videos_need_transcript({}, state, limit=500)
+            self.assertTrue(
+                any(str(row.get("channel_identifier") or "") == "HISTORY" for row in pre_rows),
+                "Expected HISTORY to appear in transcript candidates before quarantine",
+            )
+
+            state.quarantine_channel("HISTORY", "geo/region blocks dominate transcript backlog; isolate channel")
+            post_rows = db_queries.find_videos_need_transcript({}, state, limit=500)
+
+            self.assertFalse(
+                any(str(row.get("channel_identifier") or "") == "HISTORY" for row in post_rows),
+                "Quarantined HISTORY should not appear in transcript candidates",
+            )
 
 
 if __name__ == "__main__":

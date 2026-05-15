@@ -210,6 +210,14 @@ class OrchestratorState:
 
     # --- Cooldowns ---
 
+    @staticmethod
+    def _normalize_cooldown_reason(reason: str) -> str:
+        text = str(reason or "").strip()
+        for prefix in ("Stage cooldown: ", "Channel cooldown: ", "Cooldown: "):
+            while text.startswith(prefix):
+                text = text[len(prefix):].strip()
+        return text
+
     def set_cooldown(
         self,
         scope: str,
@@ -220,6 +228,7 @@ class OrchestratorState:
     ) -> None:
         """Set a cooldown for a scope that expires after duration_seconds."""
         until = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        normalized_reason = self._normalize_cooldown_reason(reason)
         conn = self._connect()
         conn.execute(
             """INSERT INTO orchestrator_cooldowns (scope, reason, cooldown_until, severity, recommendation, updated_at)
@@ -230,7 +239,7 @@ class OrchestratorState:
                    severity = excluded.severity,
                    recommendation = excluded.recommendation,
                    updated_at = datetime('now')""",
-            (scope, reason, int(duration_seconds), severity, recommendation),
+            (scope, normalized_reason, int(duration_seconds), severity, recommendation),
         )
         conn.commit()
 

@@ -369,14 +369,8 @@ class OptimizedDatabase:
                 ON video_audio_assets(status, retry_after)
             """)
 
-            cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_insert")
-            cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_update")
-            cursor.execute("DROP TRIGGER IF EXISTS trg_videos_bump_stats_delete")
-            cursor.execute("DROP TRIGGER IF EXISTS trg_channels_bump_stats_insert")
-            cursor.execute("DROP TRIGGER IF EXISTS trg_channels_bump_stats_update")
-            cursor.execute("DROP TRIGGER IF EXISTS trg_channels_bump_stats_delete")
             cursor.execute("""
-                CREATE TRIGGER trg_videos_bump_stats_insert
+                CREATE TRIGGER IF NOT EXISTS trg_videos_bump_stats_insert
                 AFTER INSERT ON videos
                 BEGIN
                     UPDATE cached_stats
@@ -395,7 +389,7 @@ class OptimizedDatabase:
                 END;
             """)
             cursor.execute("""
-                CREATE TRIGGER trg_videos_bump_stats_update
+                CREATE TRIGGER IF NOT EXISTS trg_videos_bump_stats_update
                 AFTER UPDATE ON videos
                 BEGIN
                     UPDATE cached_stats
@@ -414,7 +408,7 @@ class OptimizedDatabase:
                 END;
             """)
             cursor.execute("""
-                CREATE TRIGGER trg_videos_bump_stats_delete
+                CREATE TRIGGER IF NOT EXISTS trg_videos_bump_stats_delete
                 AFTER DELETE ON videos
                 BEGIN
                     UPDATE cached_stats
@@ -434,7 +428,7 @@ class OptimizedDatabase:
             """)
 
             cursor.execute("""
-                CREATE TRIGGER trg_channels_bump_stats_insert
+                CREATE TRIGGER IF NOT EXISTS trg_channels_bump_stats_insert
                 AFTER INSERT ON channels
                 BEGIN
                     UPDATE cached_stats
@@ -453,7 +447,7 @@ class OptimizedDatabase:
                 END;
             """)
             cursor.execute("""
-                CREATE TRIGGER trg_channels_bump_stats_update
+                CREATE TRIGGER IF NOT EXISTS trg_channels_bump_stats_update
                 AFTER UPDATE ON channels
                 BEGIN
                     UPDATE cached_stats
@@ -472,7 +466,7 @@ class OptimizedDatabase:
                 END;
             """)
             cursor.execute("""
-                CREATE TRIGGER trg_channels_bump_stats_delete
+                CREATE TRIGGER IF NOT EXISTS trg_channels_bump_stats_delete
                 AFTER DELETE ON channels
                 BEGIN
                     UPDATE cached_stats

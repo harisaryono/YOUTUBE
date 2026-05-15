@@ -202,6 +202,9 @@ def quarantine_channel(
         return ActionResult(ok=False, action="quarantine-channel", message="Channel ID kosong", data={})
     reason = str(reason or "").strip() or f"Quarantined via orchestrator ({channel_id})"
     state.quarantine_channel(channel_id, reason, actor=actor)
+    # Quarantine supersedes any transient channel cooldown so the same blocker
+    # is not reported twice.
+    state.clear_cooldown(f"channel:{channel_id}")
     _emit_event(
         state,
         event_type="control.quarantine_channel",

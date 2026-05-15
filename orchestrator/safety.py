@@ -302,13 +302,20 @@ def safety_gate_for_job(
             text = text[len(prefix):].strip()
         return text
 
+    def _trim_stage_cooldown_reason(value: str) -> str:
+        text = str(value or "").strip()
+        prefix = "Stage cooldown: "
+        while text.startswith(prefix):
+            text = text[len(prefix):].strip()
+        return text
+
     # Stage-scoped cooldown — prevents cross-contamination between unrelated stages.
     # e.g. stage:resume cooldown only blocks resume, not transcript or ASR.
     stage_scope = f"stage:{stage}"
     if state.is_cooldown_active(stage_scope):
         cd = state.get_cooldown(stage_scope)
         return SafetyDecision.wait(
-            f"Stage cooldown: {cd['reason']}",
+            f"Stage cooldown: {_trim_stage_cooldown_reason(cd['reason'])}",
             cooldown_seconds=300,
             recommendation=cd.get("recommendation", ""),
             reason_code="DEFER_STAGE_COOLDOWN",

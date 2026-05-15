@@ -46,6 +46,24 @@ def _active_channel_cooldown_ids(state: OrchestratorState) -> set[str]:
     return active
 
 
+def _blocked_channel_ids(state: OrchestratorState) -> set[str]:
+    """Return channel IDs that should be excluded from planner candidates."""
+    blocked = _active_channel_cooldown_ids(state)
+    for item in state.list_quarantined_channels():
+        channel_id = str(item.get("channel_id") or "").strip()
+        if channel_id:
+            blocked.add(channel_id)
+    return blocked
+
+
+def _blocked_channel_filter(state: OrchestratorState, alias: str = "c") -> tuple[str, tuple[str, ...]]:
+    blocked = tuple(sorted(_blocked_channel_ids(state)))
+    if not blocked:
+        return "", blocked
+    placeholders = ", ".join("?" for _ in blocked)
+    return f" AND {alias}.channel_id NOT IN ({placeholders})", blocked
+
+
 def _ensure_video_claim_columns(conn: sqlite3.Connection) -> None:
     ensure_video_processing_columns(conn)
 
@@ -75,7 +93,7 @@ def count_channels_need_full_history_discovery(
     """Count channels that have never completed a full-history discovery scan."""
     conn = _connect(db_path)
     _ensure_channel_runtime_discovery_columns(conn)
-    active_cooldowns = _active_channel_cooldown_ids(state)
+    blocked_channel_ids = _blocked_channel_ids(state)
     rows = conn.execute(
         """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
                   COALESCE(crs.scan_enabled, 1) as scan_enabled,
@@ -90,7 +108,7 @@ def count_channels_need_full_history_discovery(
              AND COALESCE(crs.full_history_scanned_at, '') = ''"""
     ).fetchall()
     conn.close()
-    return sum(1 for row in rows if str(row["channel_id"]) not in active_cooldowns)
+    return sum(1 for row in rows if str(row["channel_id"]) not in blocked_channel_ids)
 
 
 def count_channels_need_latest_discovery(
@@ -102,7 +120,7 @@ def count_channels_need_latest_discovery(
     conn = _connect(db_path)
     _ensure_channel_runtime_discovery_columns(conn)
     interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
-    active_cooldowns = _active_channel_cooldown_ids(state)
+    blocked_channel_ids = _blocked_channel_ids(state)
     rows = conn.execute(
         """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
                   COALESCE(crs.scan_enabled, 1) as scan_enabled,
@@ -122,7 +140,7 @@ def count_channels_need_latest_discovery(
         (interval_hours,),
     ).fetchall()
     conn.close()
-    return sum(1 for row in rows if str(row["channel_id"]) not in active_cooldowns)
+    return sum(1 for row in rows if str(row["channel_id"]) not in blocked_channel_ids)
 
 
 def count_videos_need_transcript(
@@ -133,14 +151,18 @@ def count_videos_need_transcript(
     """Count videos that need transcript download."""
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
     row = conn.execute(
         f"""SELECT COUNT(*) as cnt FROM videos v
+           JOIN channels c ON v.channel_id = c.id
            WHERE v.transcript_downloaded = 0
              AND (v.transcript_language IS NULL OR v.transcript_language != 'no_subtitle')
              AND COALESCE(v.is_member_only, 0) = 0
              AND COALESCE(v.is_short, 0) = 0
              AND (v.transcript_retry_after IS NULL OR v.transcript_retry_after <= datetime('now'))
-             AND {active_video_claim_clause('v')}"""
+             {blocked_clause}
+             AND {active_video_claim_clause('v')}""",
+        blocked_args,
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
@@ -155,16 +177,19 @@ def count_videos_need_audio_download(
     max_duration = config.get("audio_download", {}).get("max_duration_minutes", 60) * 60
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
     row = conn.execute(
         f"""
         SELECT COUNT(*) as cnt
         FROM videos v
+        JOIN channels c ON v.channel_id = c.id
         LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
         WHERE COALESCE(v.transcript_downloaded, 0) = 0
           AND v.transcript_language = 'no_subtitle'
           AND COALESCE(v.is_member_only, 0) = 0
           AND COALESCE(v.is_short, 0) = 0
           AND (v.duration IS NULL OR v.duration <= ?)
+          {blocked_clause}
           AND (
               a.video_id IS NULL
               OR COALESCE(a.status, '') IN ('pending', 'failed')
@@ -175,7 +200,7 @@ def count_videos_need_audio_download(
           )
           AND {active_video_claim_clause('v')}
         """,
-        (max_duration,),
+        (max_duration, *blocked_args),
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
@@ -189,12 +214,16 @@ def count_videos_need_resume(
     """Count videos that have transcript but no resume."""
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
     row = conn.execute(
         f"""SELECT COUNT(*) as cnt FROM videos v
+           JOIN channels c ON v.channel_id = c.id
            WHERE transcript_downloaded = 1
              AND (summary_file_path IS NULL OR summary_file_path = '')
              AND (summary_text IS NULL OR summary_text = '')
-             AND {active_video_claim_clause('v')}"""
+             {blocked_clause}
+             AND {active_video_claim_clause('v')}""",
+        blocked_args,
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
@@ -208,11 +237,15 @@ def count_videos_need_format(
     """Count videos that have transcript but no formatted version."""
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
     row = conn.execute(
         f"""SELECT COUNT(*) as cnt FROM videos v
+           JOIN channels c ON v.channel_id = c.id
            WHERE transcript_downloaded = 1
              AND (transcript_formatted_path IS NULL OR transcript_formatted_path = '')
-             AND {active_video_claim_clause('v')}"""
+             {blocked_clause}
+             AND {active_video_claim_clause('v')}""",
+        blocked_args,
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
@@ -227,14 +260,17 @@ def count_videos_need_asr(
     max_duration = config.get("asr", {}).get("max_duration_minutes", 60) * 60
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
     row = conn.execute(
         f"""SELECT COUNT(*) as cnt FROM videos v
+           JOIN channels c ON v.channel_id = c.id
            WHERE transcript_language = 'no_subtitle'
              AND COALESCE(is_member_only, 0) = 0
              AND COALESCE(is_short, 0) = 0
              AND (duration IS NULL OR duration <= ?)
+             {blocked_clause}
              AND {active_video_claim_clause('v')}""",
-        (max_duration,),
+        (max_duration, *blocked_args),
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
@@ -253,10 +289,10 @@ def find_channels_need_discovery(
     conn = _connect(db_path)
     _ensure_channel_runtime_discovery_columns(conn)
     interval_hours = config.get("youtube", {}).get("discovery_interval_hours", 24)
-    active_cooldowns = _active_channel_cooldown_ids(state)
+    blocked_clause, blocked_args = _blocked_channel_filter(state)
 
     rows = conn.execute(
-        """SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
+        f"""SELECT c.id, c.channel_id, c.channel_name, c.channel_url,
                   COALESCE(crs.scan_enabled, 1) as scan_enabled,
                   COALESCE(crs.skip_reason, '') as skip_reason,
                   c.updated_at as last_discovery_at,
@@ -271,19 +307,18 @@ def find_channels_need_discovery(
                  OR c.updated_at IS NULL
                  OR c.updated_at < datetime('now', '-' || ? || ' hours')
              )
+             {blocked_clause}
            ORDER BY
                CASE WHEN COALESCE(crs.full_history_scanned_at, '') = '' THEN 0 ELSE 1 END,
                CASE WHEN c.updated_at IS NULL THEN 0 ELSE 1 END,
                c.updated_at ASC
            LIMIT ?""",
-        (interval_hours, limit),
+        (interval_hours, *blocked_args, limit),
     ).fetchall()
 
     result = []
     for row in rows:
         d = dict(row)
-        if str(d.get("channel_id") or "") in active_cooldowns:
-            continue
         d["stage"] = "discovery"
         d["scope"] = f"channel:{d['channel_id']}"
         d["scan_mode"] = "full_history" if not str(d.get("full_history_scanned_at") or "").strip() else "latest_only"
@@ -306,6 +341,7 @@ def find_videos_need_transcript(
     """
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
 
     rows = conn.execute(
         f"""SELECT v.id, v.video_id, v.title, v.channel_id,
@@ -320,13 +356,14 @@ def find_videos_need_transcript(
              AND COALESCE(v.is_member_only, 0) = 0
              AND COALESCE(v.is_short, 0) = 0
              AND (v.transcript_retry_after IS NULL OR v.transcript_retry_after <= datetime('now'))
+             {blocked_clause}
              AND {active_video_claim_clause('v')}
            ORDER BY
                COALESCE(v.transcript_retry_count, 0) ASC,
                v.upload_date DESC NULLS LAST,
                v.id DESC
            LIMIT ?""",
-        (limit,),
+        (*blocked_args, limit),
     ).fetchall()
 
     result = []
@@ -351,6 +388,7 @@ def find_videos_need_resume(
     """
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
 
     rows = conn.execute(
         f"""SELECT v.id, v.video_id, v.title, v.channel_id,
@@ -362,10 +400,11 @@ def find_videos_need_resume(
            WHERE v.transcript_downloaded = 1
              AND (v.summary_file_path IS NULL OR v.summary_file_path = '')
              AND (v.summary_text IS NULL OR v.summary_text = '')
+             {blocked_clause}
              AND {active_video_claim_clause('v')}
            ORDER BY v.word_count DESC, v.id DESC
            LIMIT ?""",
-        (limit,),
+        (*blocked_args, limit),
     ).fetchall()
 
     result = []
@@ -389,6 +428,7 @@ def find_videos_need_audio_download(
     max_duration = config.get("audio_download", {}).get("max_duration_minutes", 60) * 60
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
 
     rows = conn.execute(
         f"""
@@ -406,6 +446,7 @@ def find_videos_need_audio_download(
           AND COALESCE(v.is_member_only, 0) = 0
           AND COALESCE(v.is_short, 0) = 0
           AND (v.duration IS NULL OR v.duration <= ?)
+          {blocked_clause}
           AND (
               a.video_id IS NULL
               OR COALESCE(a.status, '') IN ('pending', 'failed')
@@ -421,7 +462,7 @@ def find_videos_need_audio_download(
             v.id DESC
         LIMIT ?
         """,
-        (max_duration, limit),
+        (max_duration, *blocked_args, limit),
     ).fetchall()
 
     result = []
@@ -446,6 +487,7 @@ def find_videos_need_format(
     """
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
 
     rows = conn.execute(
         f"""SELECT v.id, v.video_id, v.title, v.channel_id,
@@ -456,10 +498,11 @@ def find_videos_need_format(
            JOIN channels c ON v.channel_id = c.id
            WHERE v.transcript_downloaded = 1
              AND (v.transcript_formatted_path IS NULL OR v.transcript_formatted_path = '')
+             {blocked_clause}
              AND {active_video_claim_clause('v')}
            ORDER BY v.word_count DESC, v.id DESC
            LIMIT ?""",
-        (limit,),
+        (*blocked_args, limit),
     ).fetchall()
 
     result = []
@@ -487,6 +530,7 @@ def find_videos_need_asr(
 
     conn = _connect(db_path)
     _ensure_video_claim_columns(conn)
+    blocked_clause, blocked_args = _blocked_channel_filter(state, alias="c")
 
     rows = conn.execute(
         f"""SELECT v.id, v.video_id, v.title, v.channel_id,
@@ -506,10 +550,11 @@ def find_videos_need_asr(
              AND (v.duration IS NULL OR v.duration <= ?)
              AND COALESCE(a.status, '') = 'downloaded'
              AND COALESCE(a.audio_file_path, '') != ''
+             {blocked_clause}
              AND {active_video_claim_clause('v')}
            ORDER BY COALESCE(a.updated_at, v.created_at) ASC, v.id DESC
            LIMIT ?""",
-        (max_duration, limit),
+        (max_duration, *blocked_args, limit),
     ).fetchall()
 
     result = []
@@ -523,87 +568,31 @@ def find_videos_need_asr(
     return result
 
 
-def get_job_counts(db_path: str | Path | None = None) -> dict[str, int]:
+def get_job_counts(
+    config: dict[str, Any] | None = None,
+    state: OrchestratorState | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, int]:
     """Get counts of pending work by category."""
-    conn = _connect(db_path)
-    _ensure_video_claim_columns(conn)
+    config = config or {}
+    state = state or OrchestratorState()
     counts: dict[str, int] = {}
 
-    # Channels total
-    row = conn.execute(
-        """SELECT COUNT(*) as cnt FROM channels c
-           LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
-           WHERE COALESCE(crs.scan_enabled, 1) = 1
-             AND (crs.skip_reason IS NULL OR crs.skip_reason = '')"""
-    ).fetchone()
-    counts["channels_total"] = row["cnt"] if row else 0
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM channels c
+               LEFT JOIN channel_runtime_state crs ON c.channel_id = crs.channel_id
+               WHERE COALESCE(crs.scan_enabled, 1) = 1
+                 AND (crs.skip_reason IS NULL OR crs.skip_reason = '')"""
+        ).fetchone()
+        counts["channels_total"] = row["cnt"] if row else 0
+    finally:
+        conn.close()
 
-    # Videos needing transcript
-    row = conn.execute(
-        f"""SELECT COUNT(*) as cnt FROM videos v
-           WHERE transcript_downloaded = 0
-             AND (transcript_language IS NULL OR transcript_language != 'no_subtitle')
-             AND COALESCE(is_member_only, 0) = 0
-             AND COALESCE(is_short, 0) = 0
-             AND {active_video_claim_clause('v')}"""
-    ).fetchone()
-    counts["videos_need_transcript"] = row["cnt"] if row else 0
-
-    # Videos needing audio download for ASR
-    row = conn.execute(
-        f"""
-        SELECT COUNT(*) as cnt
-        FROM videos v
-        LEFT JOIN video_audio_assets a ON a.video_id = v.video_id
-        WHERE COALESCE(v.transcript_downloaded, 0) = 0
-          AND v.transcript_language = 'no_subtitle'
-          AND COALESCE(v.is_member_only, 0) = 0
-          AND COALESCE(v.is_short, 0) = 0
-          AND (
-              a.video_id IS NULL
-              OR COALESCE(a.status, '') IN ('pending', 'failed')
-          )
-          AND (
-              a.retry_after IS NULL
-              OR a.retry_after <= datetime('now')
-          )
-          AND {active_video_claim_clause('v')}
-        """
-    ).fetchone()
-    counts["videos_need_audio_download"] = row["cnt"] if row else 0
-
-    # Videos needing resume
-    row = conn.execute(
-        f"""SELECT COUNT(*) as cnt FROM videos v
-           WHERE transcript_downloaded = 1
-             AND (summary_file_path IS NULL OR summary_file_path = '')
-             AND (summary_text IS NULL OR summary_text = '')
-             AND {active_video_claim_clause('v')}"""
-    ).fetchone()
-    counts["videos_need_resume"] = row["cnt"] if row else 0
-
-    # Videos needing format
-    row = conn.execute(
-        f"""SELECT COUNT(*) as cnt FROM videos v
-           WHERE transcript_downloaded = 1
-             AND (transcript_formatted_path IS NULL OR transcript_formatted_path = '')
-             AND {active_video_claim_clause('v')}"""
-    ).fetchone()
-    counts["videos_need_format"] = row["cnt"] if row else 0
-
-    # Videos needing ASR
-    row = conn.execute(
-        f"""SELECT COUNT(*) as cnt FROM videos v
-           JOIN video_audio_assets a ON a.video_id = v.video_id
-           WHERE v.transcript_downloaded = 0
-             AND v.transcript_language = 'no_subtitle'
-             AND COALESCE(v.is_member_only, 0) = 0
-             AND COALESCE(v.is_short, 0) = 0
-             AND COALESCE(a.status, '') = 'downloaded'
-             AND COALESCE(a.audio_file_path, '') != ''
-             AND {active_video_claim_clause('v')}"""
-    ).fetchone()
-    counts["videos_need_asr"] = row["cnt"] if row else 0
-
-    conn.close()
+    counts["videos_need_transcript"] = count_videos_need_transcript(config, state, db_path)
+    counts["videos_need_audio_download"] = count_videos_need_audio_download(config, state, db_path)
+    counts["videos_need_resume"] = count_videos_need_resume(config, state, db_path)
+    counts["videos_need_format"] = count_videos_need_format(config, state, db_path)
+    counts["videos_need_asr"] = count_videos_need_asr(config, state, db_path)
     return counts

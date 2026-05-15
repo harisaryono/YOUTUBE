@@ -379,7 +379,7 @@ def plan_jobs(
 
 def get_summary_counts(config: dict[str, Any], state: OrchestratorState) -> dict[str, int]:
     """Get summary counts of pending work."""
-    counts = db_queries.get_job_counts()
+    counts = db_queries.get_job_counts(config, state)
     counts["pending_imports"] = db_queries.count_pending_imports(state)
     counts["channels_need_discovery"] = db_queries.count_channels_need_discovery(config, state)
     counts["channels_need_discovery_full_history"] = db_queries.count_channels_need_full_history_discovery(config, state)
