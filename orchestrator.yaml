@@ -184,6 +184,46 @@ janitor:
   keep_reports_days: 14
   cleanup_audio_orphans: true
 
+log_archive:
+  enabled: true
+  archive_dir: logs/archive
+  timezone: Asia/Jakarta
+  # Daily archive is written near the end of the day.
+  run_hour: 23
+  run_minute: 55
+  copy_report_csv: true
+
+  raw_log_retention:
+    # Raw successful run dirs are cheap to summarize and expensive to keep.
+    success_days: 3
+    # Ordinary failed run dirs are kept longer for audit/debug.
+    normal_failure_days: 14
+    # Important incidents keep raw evidence longest.
+    incident_days: 30
+
+  report_retention:
+    csv_days: 90
+
+  archive_retention:
+    markdown_days: 180
+    jsonl_days: 365
+    incidents_json_days: 365
+
+  compression:
+    enabled: true
+    compress_after_days: 1
+    delete_original_after_compress: true
+
+  tail_capture:
+    success_lines: 20
+    normal_failure_lines: 150
+    incident_lines: 300
+
+  disk_guard:
+    max_runs_dir_gb: 5
+    min_free_disk_gb: 3
+    emergency_delete_success_logs_first: true
+
 retry_queue:
   enabled: true
   max_per_cycle: 1
