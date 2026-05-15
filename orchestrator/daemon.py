@@ -972,6 +972,43 @@ def _maybe_run_janitor(config: dict[str, Any], state: OrchestratorState) -> None
     run_janitor(config, state)
 
 
+def _maybe_drain_retry_queue(
+    config: dict[str, Any],
+    state: OrchestratorState,
+    force: bool = False,
+) -> dict[str, Any] | None:
+    """Auto-drain retry queue conservatively after normal planning/launch.
+
+    Respects:
+    - retry_queue.enabled
+    - retry_queue.max_per_cycle (default 1)
+    - retry_queue.prefer_retry_before_normal (false = run after normal jobs)
+    - policy blockers (pause/quarantine are checked inside drain_retry_queue)
+    """
+    retry_cfg = config.get("retry_queue", {}) or {}
+    if not retry_cfg.get("enabled", False):
+        return None
+
+    limit = int(retry_cfg.get("max_per_cycle", 1) or 1)
+    if limit <= 0 and not force:
+        return None
+
+    # Don't drain if we're already at max total jobs
+    max_total = _max_total_jobs(config)
+    if not force and state.count_running_total() >= max_total:
+        return {"launched": 0, "blocked": 0, "skipped": "max_total_jobs"}
+
+    from .retry_executor import drain_retry_queue
+
+    return drain_retry_queue(
+        config,
+        state,
+        limit=limit,
+        dry_run=False,
+        actor="daemon",
+    )
+
+
 def run_once(
     config: dict[str, Any],
     state: OrchestratorState,
@@ -1230,6 +1267,30 @@ def run_once(
 
     cycle_result["active_jobs"] = state.count_running_total()
     cycle_result["duration_seconds"] = time.time() - start_time
+
+    # Auto-drain retry queue after normal planning/launch (conservative)
+    try:
+        retry_result = _maybe_drain_retry_queue(config, state)
+        if retry_result:
+            retry_launched = retry_result.get("launched", 0)
+            retry_blocked = retry_result.get("blocked", 0)
+            if retry_launched > 0 or retry_blocked > 0:
+                cycle_result["jobs_dispatched"] = cycle_result.get("jobs_dispatched", 0) + retry_launched
+                cycle_result["retry_launched"] = retry_launched
+                cycle_result["retry_blocked"] = retry_blocked
+                state.add_event(
+                    event_type="retry_drain",
+                    message=f"Retry drain: {retry_launched} launched, {retry_blocked} blocked",
+                    severity="info",
+                    payload={"launched": retry_launched, "blocked": retry_blocked},
+                )
+    except Exception as exc:
+        state.add_event(
+            event_type="error",
+            message=f"Retry drain failed: {exc}",
+            severity="warning",
+        )
+
     generate_report(config, state, cycle_result)
     return cycle_result
 
