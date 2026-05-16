@@ -204,29 +204,29 @@ adaptive:
 
 janitor:
   enabled: true
-  interval_minutes: 60
+  interval_minutes: 30
   keep_events_days: 30
   keep_logs_days: 14
   keep_run_dirs_days: 7
   keep_reports_days: 14
   cleanup_audio_orphans: true
+  auto_compact_logs: true
+  auto_clean_chunks: true
+  compact_older_than_hours: 0.5
+  chunk_clean_older_than_hours: 2
 
 log_archive:
   enabled: true
   archive_dir: logs/archive
   timezone: Asia/Jakarta
-  # Daily archive is written near the end of the day.
   run_hour: 23
   run_minute: 55
   copy_report_csv: true
 
   raw_log_retention:
-    # Raw successful run dirs are cheap to summarize and expensive to keep.
-    success_days: 3
-    # Ordinary failed run dirs are kept longer for audit/debug.
-    normal_failure_days: 14
-    # Important incidents keep raw evidence longest.
-    incident_days: 30
+    success_days: 1
+    normal_failure_days: 7
+    incident_days: 14
 
   report_retention:
     csv_days: 90
@@ -247,7 +247,7 @@ log_archive:
     incident_lines: 300
 
   disk_guard:
-    max_runs_dir_gb: 5
+    max_runs_dir_gb: 8
     min_free_disk_gb: 3
     emergency_delete_success_logs_first: true
 

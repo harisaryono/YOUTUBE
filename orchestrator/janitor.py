@@ -157,6 +157,8 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
         "daily_archive": {},
         "archive_prune": {},
         "archive_files_deleted": {},
+        "log_compact": {},
+        "chunk_clean": {},
     }
 
     # Build compact daily archive first, then prune only raw logs that have been
@@ -176,6 +178,40 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
             severity="warning",
         )
         result["success"] = False
+
+    if bool(janitor_cfg.get("auto_compact_logs", True)):
+        try:
+            from .log_compact import compact_raw_logs
+
+            compact_hours = float(janitor_cfg.get("compact_older_than_hours", 0.5) or 0.5)
+            result["log_compact"] = compact_raw_logs(
+                config,
+                state,
+                older_than_hours=compact_hours,
+                include_unarchived=True,
+                min_size_kb=16,
+            )
+        except Exception as exc:
+            state.add_event(
+                event_type="janitor",
+                message=f"Janitor failed running log compact: {exc}",
+                severity="warning",
+            )
+            result["success"] = False
+
+    if bool(janitor_cfg.get("auto_clean_chunks", True)):
+        try:
+            from .asr_chunk_cleaner import clean_transcribed_chunks
+
+            chunk_hours = float(janitor_cfg.get("chunk_clean_older_than_hours", 2) or 2)
+            result["chunk_clean"] = clean_transcribed_chunks(older_than_hours=chunk_hours)
+        except Exception as exc:
+            state.add_event(
+                event_type="janitor",
+                message=f"Janitor failed running chunk cleaner: {exc}",
+                severity="warning",
+            )
+            result["success"] = False
 
     try:
         result["events_deleted"] = state.cleanup_old_events(days=events_days)
@@ -206,7 +242,6 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
             audio_dir = Path(audio_dir_cfg)
             if not audio_dir.is_absolute():
                 audio_dir = PROJECT_ROOT / audio_dir
-            # Audio orphan cleanup keeps the old janitor run-dir window as its age threshold.
             runs_days = int(janitor_cfg.get("keep_run_dirs_days", 7) or 7)
             result["audio_orphans_deleted"] = cleanup_audio_orphans(audio_dir, _to_seconds(runs_days))
     except Exception as exc:
@@ -214,15 +249,20 @@ def run_janitor(config: dict[str, Any], state: OrchestratorState) -> dict[str, A
         result["success"] = False
 
     state.set("janitor_last_run_at", str(int(time.time())))
+
+    compact_info = result.get("log_compact") or {}
+    chunk_info = result.get("chunk_clean") or {}
     state.add_event(
         event_type="janitor",
         message=(
             "Janitor completed: "
             f"events={result['events_deleted']}, "
             f"compressed_logs={result['log_files_deleted']}, "
+            f"compact_new={compact_info.get('compressed', 0)}, "
             f"run_dirs={result['run_dirs_deleted']}, "
             f"reports={result['report_files_deleted']}, "
-            f"audio_orphans={result['audio_orphans_deleted']}"
+            f"audio_orphans={result['audio_orphans_deleted']}, "
+            f"chunks_deleted={chunk_info.get('deleted', 0)}"
         ),
         severity="info" if result["success"] else "warning",
         payload=result,

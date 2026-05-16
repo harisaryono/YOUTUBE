@@ -268,11 +268,22 @@ def _report_candidates_for_stage(stage: str, run_dir: str | Path, row: dict[str,
     return unique
 
 
+def _compact_finished_run_log(run_dir: str) -> None:
+    try:
+        from .log_compact import compact_single_run_dir
+
+        compact_single_run_dir(run_dir, min_size_kb=0)
+    except Exception:
+        pass
+
+
 def _postprocess_finished_job(config: dict[str, Any], state: OrchestratorState, row: dict[str, Any], *, exit_code: int) -> None:
     stage = str(row.get("stage") or "").strip().lower()
     run_dir = str(row.get("run_dir") or "").strip()
     if not run_dir:
         return
+
+    _compact_finished_run_log(run_dir)
 
     if stage not in {"transcript", "asr"}:
         return

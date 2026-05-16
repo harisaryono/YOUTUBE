@@ -98,6 +98,7 @@ DEFAULT_NVIDIA_BASE_URL = "http://127.0.0.1:9000/v1/audio/transcriptions"
 DEFAULT_NVIDIA_RIVA_SERVER = "grpc.nvcf.nvidia.com:443"
 DEFAULT_NVIDIA_RIVA_FUNCTION_ID = "b702f636-f60c-4a3d-a6f4-f3568c13bd7d"
 DEFAULT_ASR_AUDIO_FORMAT_SELECTOR = "ba[abr<=96]/ba[abr<=128]/ba[abr<=160]/ba/b"
+DEFAULT_ASR_AUDIO_CONVERT = True
 NVIDIA_WHISPER_GRPC_MODELS = {"whisper-large-v3-multi-asr-offline"}
 
 
@@ -1485,6 +1486,7 @@ class ASRPipeline:
             or os.getenv("YT_ASR_AUDIO_FORMAT_SELECTOR")
             or DEFAULT_ASR_AUDIO_FORMAT_SELECTOR
         ).strip()
+        do_convert = _env_bool("ASR_AUDIO_CONVERT", DEFAULT_ASR_AUDIO_CONVERT)
         yt_dlp_cmd = yt_dlp_command()
         cmd = [
             *yt_dlp_cmd,
@@ -1507,7 +1509,7 @@ class ASRPipeline:
                 "--max-sleep-interval",
                 "15",
             ]
-        logger.info("Download audio %s via yt-dlp (format=%s)", video_id, format_selector)
+        logger.info("Download audio %s via yt-dlp (format=%s, convert=%s)", video_id, format_selector, do_convert)
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0:
             raise RuntimeError((proc.stderr or proc.stdout or "yt-dlp download failed").strip()[:1200])
@@ -1521,7 +1523,57 @@ class ASRPipeline:
         )
         if not candidates:
             raise RuntimeError("yt-dlp selesai tetapi file audio tidak ditemukan")
-        return candidates[0]
+        result = candidates[0]
+
+        if do_convert:
+            result = self._convert_audio_for_asr(result)
+
+        return result
+
+    @staticmethod
+    def _convert_audio_for_asr(source: Path) -> Path:
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            logger.warning("ffmpeg not found, skipping audio conversion")
+            return source
+        dest = source.with_suffix(".opus")
+        if dest.exists() and dest != source:
+            source.unlink(missing_ok=True)
+            return dest
+        if dest == source:
+            dest = source.with_name(source.stem + "_asr.opus")
+        try:
+            proc = subprocess.run(
+                [
+                    ffmpeg_bin,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-ar",
+                    "16000",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "libopus",
+                    "-b:a",
+                    "24k",
+                    str(dest),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0 or not dest.exists() or dest.stat().st_size == 0:
+                logger.warning("Audio conversion failed for %s: %s", source.name, (proc.stderr or "")[:200])
+                return source
+            if dest != source:
+                source.unlink(missing_ok=True)
+            return dest
+        except Exception:
+            return source
 
     def _cached_audio_path(self, video_id: str) -> Path | None:
         shared_video_dir = self.source_dir / _slug(video_id)

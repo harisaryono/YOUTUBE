@@ -211,6 +211,64 @@ def _compress_file(path: Path, *, method: str, level: int, delete_original: bool
     return ok, msg, path.with_suffix(path.suffix + ".gz")
 
 
+def compact_single_run_dir(
+    run_dir: str | Path,
+    *,
+    method: str = "auto",
+    level: int = 1,
+    min_size_kb: int = 0,
+) -> dict[str, Any]:
+    """Compress stdout_stderr.log in a single run directory immediately.
+
+    Designed to be called right after a batch job completes. No age check,
+    no archive marker required. Skips only if already compressed or file missing.
+    """
+    run_path = Path(run_dir)
+    result: dict[str, Any] = {
+        "success": True,
+        "run_dir": str(run_path),
+        "compressed": False,
+        "reason": "",
+        "bytes_before": 0,
+        "bytes_after": 0,
+        "method": "",
+    }
+    if not run_path.is_dir():
+        result["reason"] = "not_a_directory"
+        return result
+    for log_path in _candidate_log_paths(run_path):
+        if _has_compressed_sibling(log_path):
+            result["reason"] = "already_compressed"
+            return result
+        size = _size_bytes(log_path)
+        if size < max(0, int(min_size_kb or 0)) * 1024:
+            result["reason"] = "too_small"
+            return result
+        chosen_method = _choose_method(method)
+        ok, msg, dest = _compress_file(log_path, method=chosen_method, level=level, delete_original=True)
+        result["bytes_before"] = size
+        result["bytes_after"] = _size_bytes(dest)
+        result["method"] = chosen_method
+        if ok:
+            result["compressed"] = True
+            result["reason"] = "compressed"
+        else:
+            result["reason"] = msg
+        _write_marker(
+            run_path,
+            {
+                "compressed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "source": str(log_path),
+                "compressed": str(dest),
+                "method": chosen_method,
+                "bytes_before": size,
+                "bytes_after": result["bytes_after"],
+                "trigger": "post_job",
+            },
+        )
+    return result
+
+
 def compact_raw_logs(
     config: dict[str, Any],
     state: OrchestratorState,
