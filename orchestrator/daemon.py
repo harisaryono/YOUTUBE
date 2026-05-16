@@ -268,11 +268,18 @@ def _report_candidates_for_stage(stage: str, run_dir: str | Path, row: dict[str,
     return unique
 
 
-def _compact_finished_run_log(run_dir: str) -> None:
+def _compact_finished_run_log(run_dir: str, job_id: str = "", stage: str = "", exit_code: int = 0) -> None:
     try:
         from .log_compact import compact_single_run_dir
 
         compact_single_run_dir(run_dir, min_size_kb=0)
+    except Exception:
+        pass
+    try:
+        from .log_archive import quick_archive_run_dir
+
+        category = "success" if exit_code == 0 else "normal_failure"
+        quick_archive_run_dir(run_dir, job_id, stage, category)
     except Exception:
         pass
 
@@ -283,7 +290,7 @@ def _postprocess_finished_job(config: dict[str, Any], state: OrchestratorState, 
     if not run_dir:
         return
 
-    _compact_finished_run_log(run_dir)
+    _compact_finished_run_log(run_dir, str(row.get("job_id") or ""), stage, exit_code)
 
     if stage not in {"transcript", "asr"}:
         return

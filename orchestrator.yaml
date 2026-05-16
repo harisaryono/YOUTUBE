@@ -224,21 +224,21 @@ log_archive:
   copy_report_csv: true
 
   raw_log_retention:
-    success_days: 1
-    normal_failure_days: 7
-    incident_days: 14
+    success_days: 0
+    normal_failure_days: 0
+    incident_days: 1
 
   report_retention:
     csv_days: 90
 
   archive_retention:
-    markdown_days: 180
-    jsonl_days: 365
-    incidents_json_days: 365
+    markdown_days: 365
+    jsonl_days: 730
+    incidents_json_days: 730
 
   compression:
     enabled: true
-    compress_after_days: 1
+    compress_after_days: 0
     delete_original_after_compress: true
 
   tail_capture:

@@ -567,6 +567,33 @@ def write_daily_archive(config: dict[str, Any], state: OrchestratorState, target
     return {"success": True, "date": target, "archive_files": archive_files, "summary": payload.get("summary", {})}
 
 
+def quick_archive_run_dir(run_dir: str | Path, job_id: str, stage: str, category: str = "success") -> bool:
+    """Lightweight archive marker so prune can clean up immediately.
+
+    Unlike the full daily archive, this only writes .log_archive.json without
+    building summaries or copying reports. The daily archive (23:55) still
+    produces the full Markdown/JSON summary for long-term tracking.
+    """
+    run_path = Path(run_dir)
+    if not run_path.is_dir():
+        return False
+    marker = run_path / ".log_archive.json"
+    payload = {
+        "archived": True,
+        "archived_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "archive_date": _jakarta_today().isoformat(),
+        "category": category,
+        "job_id": str(job_id or ""),
+        "stage": str(stage or ""),
+        "archive_files": {},
+    }
+    try:
+        marker.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 def _load_marker(run_dir: Path) -> dict[str, Any]:
     marker = run_dir / ".log_archive.json"
     if not marker.exists():
@@ -606,11 +633,14 @@ def _compress_log(path: Path, *, delete_original: bool = True) -> bool:
 
 def _retention_days_for_category(config: dict[str, Any], category: str) -> int:
     retention = _archive_cfg(config).get("raw_log_retention", {}) or {}
+    raw = retention.get("incident_days", 30)
     if category == "incident":
-        return int(retention.get("incident_days", 30) or 30)
+        return int(raw) if raw is not None else 30
+    raw = retention.get("normal_failure_days", 14)
     if category == "normal_failure":
-        return int(retention.get("normal_failure_days", 14) or 14)
-    return int(retention.get("success_days", 3) or 3)
+        return int(raw) if raw is not None else 14
+    raw = retention.get("success_days", 3)
+    return int(raw) if raw is not None else 3
 
 
 def prune_archived_raw_logs(config: dict[str, Any], state: OrchestratorState, *, dry_run: bool = False) -> dict[str, Any]:
