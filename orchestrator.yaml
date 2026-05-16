@@ -85,6 +85,27 @@ system:
   # Minimum available memory for ASR jobs (MB)
   min_memory_mb_asr: 2500
 
+# Storage Budget & Lifecycle Guard.
+# Prinsip: pipeline tidak boleh diam-diam membengkak.
+lifecycle:
+  enabled: true
+  # Stop audio_download bila sudah terlalu banyak audio lokal yang menunggu ASR.
+  max_asr_downloaded_audio_backlog: 200
+  block_audio_download_on_asr_backlog: true
+
+  # Budget direktori/file operasional.
+  max_runs_dir_gb: 5
+  warn_runs_dir_gb: 4
+  max_logs_dir_gb: 2
+  warn_logs_dir_gb: 1.5
+  max_orchestrator_db_gb: 1
+  warn_orchestrator_db_gb: 0.8
+
+  # Blocker default: runs/ dan orchestrator DB wajib dikendalikan.
+  block_on_runs_over_limit: true
+  block_on_logs_over_limit: false
+  block_on_orchestrator_db_over_limit: true
+
 timeouts:
   # Default timeout for stages that do not define a custom limit.
   default_seconds: 7200
