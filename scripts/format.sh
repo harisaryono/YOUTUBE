@@ -114,7 +114,6 @@ import os
 import sqlite3
 from pathlib import Path
 
-from database_optimized import OptimizedDatabase
 from orchestrator.video_claims import active_video_claim_clause, claim_rows_by_query
 
 repo_root = Path(os.environ["REPO_ROOT"])
@@ -128,10 +127,17 @@ claim_owner = str(os.environ.get("JOB_ID") or "").strip()
 if not claim_owner:
     raise SystemExit("missing JOB_ID for format claim owner")
 
+# Important storage policy:
+# tasks.csv is only a small manifest. It must NOT embed transcript_text.
+# format_transcripts_pool.py can read the transcript from DB/blob/file by video_id/path.
 params = []
 if video_id_filter:
     select_sql = f"""
-        SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
+        SELECT v.id,
+               v.video_id,
+               c.channel_id AS channel_slug,
+               v.title,
+               COALESCE(v.transcript_file_path, '') AS transcript_file_path
         FROM videos v
         JOIN channels c ON c.id = v.channel_id
         WHERE v.video_id = ?
@@ -143,7 +149,11 @@ if video_id_filter:
     params.append(video_id_filter)
 elif channel_filter:
     select_sql = f"""
-        SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
+        SELECT v.id,
+               v.video_id,
+               c.channel_id AS channel_slug,
+               v.title,
+               COALESCE(v.transcript_file_path, '') AS transcript_file_path
         FROM videos v
         JOIN channels c ON c.id = v.channel_id
         WHERE v.transcript_downloaded = 1
@@ -155,7 +165,11 @@ elif channel_filter:
     params.extend([channel_filter, channel_filter.lstrip("@")])
 else:
     select_sql = f"""
-        SELECT v.id, v.video_id, c.channel_id AS channel_slug, v.title
+        SELECT v.id,
+               v.video_id,
+               c.channel_id AS channel_slug,
+               v.title,
+               COALESCE(v.transcript_file_path, '') AS transcript_file_path
         FROM videos v
         JOIN channels c ON c.id = v.channel_id
         WHERE v.transcript_downloaded = 1
@@ -181,31 +195,25 @@ try:
 finally:
     con.close()
 
-db = OptimizedDatabase(str(db_path))
-
 tasks_csv.parent.mkdir(parents=True, exist_ok=True)
 written = 0
 with tasks_csv.open("w", encoding="utf-8", newline="") as fp:
-    writer = csv.DictWriter(fp, fieldnames=["id", "video_id", "channel_slug", "title", "transcript_file_path", "transcript_text"])
+    writer = csv.DictWriter(
+        fp,
+        fieldnames=["id", "video_id", "channel_slug", "title", "transcript_file_path"],
+    )
     writer.writeheader()
     for row in rows:
-        transcript_text = str(db.read_transcript(str(row["video_id"])) or "").strip()
         writer.writerow(
             {
                 "id": row["id"],
                 "video_id": row["video_id"],
                 "channel_slug": row["channel_slug"],
                 "title": row["title"],
-                "transcript_file_path": "",
-                "transcript_text": transcript_text,
+                "transcript_file_path": row["transcript_file_path"],
             }
         )
         written += 1
-
-try:
-    db.close()
-except Exception:
-    pass
 
 if written == 0:
     raise SystemExit("no format tasks found")
