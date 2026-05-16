@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import DEFAULT_CONFIG_PATH, load_config
+from .lifecycle_guard import decision_for_stage as lifecycle_decision_for_stage
 from .policies import policy_blockers_for_job
 from .state import OrchestratorState
 
@@ -274,6 +275,25 @@ def safety_gate_for_job(
             recommendation="Clean up runs/uploads/logs/cache",
             reason_code="DEFER_DISK_LOW",
         )
+
+    try:
+        lifecycle_decision = lifecycle_decision_for_stage(stage, config)
+        if lifecycle_decision.verdict != "RUN":
+            return SafetyDecision.wait(
+                lifecycle_decision.reason,
+                cooldown_seconds=lifecycle_decision.cooldown_seconds or 900,
+                recommendation=lifecycle_decision.recommendation,
+                reason_code=lifecycle_decision.reason_code,
+            )
+    except Exception as exc:
+        lifecycle_cfg = config.get("lifecycle", {}) or {}
+        if bool(lifecycle_cfg.get("fail_closed_on_guard_error", False) is True):
+            return SafetyDecision.wait(
+                f"Lifecycle guard error: {str(exc)[:300]}",
+                cooldown_seconds=900,
+                recommendation="Fix lifecycle guard before launching more jobs or disable fail_closed_on_guard_error.",
+                reason_code="DEFER_LIFECYCLE_GUARD_ERROR",
+            )
 
     blockers = policy_blockers_for_job(state, stage=stage, scope=scope)
     pause_reason = next((str(x.get("reason") or "").strip() for x in blockers if x.get("type") in {"pause", "quarantine"} and str(x.get("reason") or "").strip()), "")
