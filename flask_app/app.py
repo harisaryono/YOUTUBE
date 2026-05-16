@@ -19,6 +19,8 @@ from datetime import datetime
 from flask import Flask, make_response, Response, render_template, render_template_string, request, jsonify, redirect, url_for, send_from_directory, g
 from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
+from dotenv import load_dotenv
+import hmac
 
 try:
     import markdown  # type: ignore
@@ -27,6 +29,8 @@ except ModuleNotFoundError:
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 from database_optimized import OptimizedDatabase
 from orchestrator.config import load_config
@@ -1651,8 +1655,10 @@ _bg_jobs: dict = {}
 
 
 def _admin_authenticated() -> bool:
-    raw = request.headers.get('Cookie') or ''
-    return f'admin_data_token={ADMIN_DATA_TOKEN}' in raw
+    token = request.cookies.get('admin_data_token', '')
+    if not token or not ADMIN_DATA_TOKEN:
+        return False
+    return hmac.compare_digest(str(token), str(ADMIN_DATA_TOKEN))
 
 
 def _job_command_text(cmd) -> str:
