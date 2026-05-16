@@ -40,7 +40,9 @@ VIDEO_WORKERS_VALUE="1"
 POSTPROCESS_FLAG=""
 REQUIRE_CACHED_AUDIO_FLAG="0"
 LOCAL_AUDIO_ONLY_FLAG="0"
-DELETE_AUDIO_AFTER_SUCCESS_FLAG="0"
+# Default aman: audio sumber ASR dihapus setelah transcript final sukses.
+# Bisa dinonaktifkan sementara dengan env ASR_DELETE_AUDIO_AFTER_SUCCESS=0.
+DELETE_AUDIO_AFTER_SUCCESS_FLAG="${ASR_DELETE_AUDIO_AFTER_SUCCESS:-1}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -108,6 +110,10 @@ while [[ $# -gt 0 ]]; do
             DELETE_AUDIO_AFTER_SUCCESS_FLAG="1"
             shift 1
             ;;
+        --keep-audio-after-success)
+            DELETE_AUDIO_AFTER_SUCCESS_FLAG="0"
+            shift 1
+            ;;
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -128,6 +134,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --require-cached-audio Fail fast if cached audio is missing"
             echo "  --local-audio-only    Use local audio files only"
             echo "  --delete-audio-after-success Delete local audio after success"
+            echo "  --keep-audio-after-success Keep local audio after success"
             echo "  --help                Show this help message"
             echo ""
             echo "Examples:"
@@ -263,6 +270,13 @@ set +e
 "$VENV_PYTHON" "${CMD_ARGS[@]}"
 EXIT_CODE=$?
 set -e
+
+if [ $EXIT_CODE -eq 0 ] && [ "$DELETE_AUDIO_AFTER_SUCCESS_FLAG" = "1" ]; then
+    echo "🧹 Trimming completed ASR audio files..."
+    if ! "$VENV_PYTHON" -m orchestrator.asr_audio_retention --audio-dir "$ASR_AUDIO_DIR"; then
+        echo "⚠️  ASR audio retention trim failed; transcript result remains valid" >&2
+    fi
+fi
 
 JOB_STATUS="completed"
 [ $EXIT_CODE -ne 0 ] && JOB_STATUS="failed"
